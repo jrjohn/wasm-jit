@@ -1,606 +1,606 @@
-# 軟體多維度組合架構 — 從正交到當下共預見
+# Software Multi-Dimensional Composition Architecture — From Orthogonality to Shared Present-Moment Prediction
 
-> 一份設計哲學文件。記錄一條從「多維度組合」一路推到「顯化即當下共預見」的十二轉討論。
-> 主軸:每一個佛家/複雜系統的隱喻,都被釘到一個**精確的工程座標**上;每一轉都帶**魔鬼代言人**,守住它不變質。
-> 形成日期:2026-06-25
-
----
-
-## 0. 一句話總綱
-
-> **存規則,別存網;讓萬物透過共同的光互相照見,而彼此不必相觸——而那道光,最終是您與互動者在當下相互校正的預見。**
-
-體(碎形封閉的細胞)、用(隨緣顯化的通用執行器)、藏(承載一切業的阿賴耶)、網(因陀羅的互攝)、自組織(局部規則湧現的活系統),最後都收進一個當下:**畫布的顯化,即是 AI 與人此刻共同的、尚未凝固、仍在校正的預見。**
+> A design-philosophy document. It records a twelve-turn discussion that pushes from "multi-dimensional composition" all the way to "manifestation is shared present-moment prediction."
+> Through-line: every Buddhist / complex-systems metaphor is pinned to a **precise engineering coordinate**; every turn carries a **devil's advocate** that keeps it from degrading into mysticism.
+> Date formed: 2026-06-25
 
 ---
 
-## 1. 多維度組合:難度不在「組合」,在「正交」
+## 0. The Whole Thing in One Sentence
 
-組合架構的唯一正當理由:**對抗組合爆炸**。D 個變化軸、每軸 k 選項,天真做法產出 k^D 個手寫變體;組合把成本從**乘法 k^D** 壓回**加法 k×D 個積木 + 少數不可消除的交互項**。
+> **Store the rule, not the net; let all things behold one another through a shared light without ever touching — and that light, in the end, is the prediction you and the one you interact with are mutually correcting in the present moment.**
 
-**第一性原理:一個維度的定義性質是正交性**——A 軸的選擇不約束 B 軸。實務分三類:
-
-- **真正交**(付款 × 主題 × 語系):隨便配都成立,組合免費。
-- **相關軸(假維度)**(行業=醫療 ⇒ 法規=HIPAA):應**塌縮成一條**,硬拆 = 自找 3 倍交互矩陣。
-- **半正交(真正的戰場)**:多數能配,少數非法組合。90% 設計功夫在此。
-
-**三個被低估的支柱:**
-
-1. **交互矩陣是一等公民**:D×D 表,每格答「有沒有非法組合 / 需協調的耦合」。空格越多越健康。非法組合要在**組裝時**就拒絕(type error / 啟動 fail-fast),不能拖到 runtime。
-2. **綁定時機逐軸不同**(編譯期 / 建置期 / 部署期 / 啟動期 / 請求期),且這是設計決策。選錯綁定時機 = 這類架構最常見的隱性債。
-3. **組裝點唯一(composition root)**:所有維度匯流處收斂到單一組裝根,否則正交性在程式碼層名存實亡。
-
-**魔鬼代言人:** 橫切關注(log/auth/交易)天生穿透所有維度,**不該當成又一條維度**塞進矩陣——它們住在突觸層(見下),正交於維度的另一平面。
+Substance (體, the fractally-closed cell), function (用, the general-purpose executor that manifests as conditions arise), the store (藏, the ālaya that carries all karma), the net (網, Indra's mutual containment), self-organization (a living system emerging from local rules) — all of them fold, in the end, into a single present moment: **the canvas's manifestation is the not-yet-congealed, still-being-corrected prediction that AI and human hold jointly, right now.**
 
 ---
 
-## 2. 粒度與粒度突觸:成本與智能都在接縫
+## 1. Multi-Dimensional Composition: The Hard Part Isn't "Composition," It's "Orthogonality"
 
-粒度不是「模組大小」,是**切割解析度**。它決定組合能不能成立:太粗 → 單元綁死多維選擇、無法重組;太細 → 突觸爆炸、glue 吃掉一切。
+The only legitimate reason for a composition architecture: to fight combinatorial explosion. With D axes of variation and k options per axis, the naive approach produces k^D hand-written variants; composition compresses the cost from the **multiplicative k^D** back down to the **additive k×D building blocks + a few irreducible interaction terms**.
 
-存在一條 **U 形成本曲線**:
+**First principle: the defining property of a dimension is orthogonality** — a choice on axis A does not constrain axis B. In practice there are three kinds:
+
+- **Truly orthogonal** (payment × theme × locale): any combination is valid, composition is free.
+- **Correlated axes (fake dimensions)** (industry = healthcare ⇒ regulation = HIPAA): should **collapse into one**; forcing them apart = inviting a 3× interaction matrix onto yourself.
+- **Semi-orthogonal (the real battlefield)**: most combinations work, a few are illegal. 90% of the design effort lives here.
+
+**Three underrated pillars:**
+
+1. **The interaction matrix is a first-class citizen**: a D×D table, each cell answering "is there an illegal combination / a coupling that needs coordination here." The more empty cells, the healthier. Illegal combinations must be rejected **at assembly time** (type error / fail-fast at startup), never deferred to runtime.
+2. **Binding time differs per axis** (compile-time / build-time / deploy-time / startup / per-request), and this is a design decision. Picking the wrong binding time = the most common hidden debt in this class of architecture.
+3. **A single composition root**: everywhere the dimensions converge collapses to one composition root; otherwise orthogonality exists in name only at the code level.
+
+**Devil's advocate:** cross-cutting concerns (logging / auth / transactions) inherently pierce all dimensions and **should not be stuffed into the matrix as yet another dimension** — they live in the synapse layer (below), on a plane orthogonal to the dimensions.
+
+---
+
+## 2. Granularity and the Granularity Synapse: Both Cost and Intelligence Live in the Seam
+
+Granularity is not "module size," it's **cutting resolution**. It decides whether composition can even hold: too coarse → a unit hard-wires multiple dimensional choices and can't be recomposed; too fine → synapse explosion, glue eats everything.
+
+There is a **U-shaped cost curve**:
 
 ```
-總成本 ≈ N_unit × c_unit  +  N_synapse × c_synapse
+total cost ≈ N_unit × c_unit  +  N_synapse × c_synapse
 ```
 
-**核心洞見(突觸地板律):每跨一個突觸都有一筆與單元大小無關的固定開銷**(marshalling、驗證、錯誤處理、可觀測性、追蹤的認知負擔)。`c_synapse` 不會因單元變小而變小。於是:
+**Core insight (the synapse-floor law): every synapse you cross carries a fixed overhead independent of unit size** (marshalling, validation, error handling, observability, the cognitive burden of tracing). `c_synapse` does not shrink as units shrink. Therefore:
 
-> **你能切多細,由你最便宜的突觸技術決定,不由領域想像決定。**
-> - in-process 函式呼叫:地板 ≈ 0 → 可切很細
-> - 網路突觸(微服務):地板 = ms 級延遲 + 一整套失敗模式 → 切太細被突觸反殺
-> - 組織突觸(Conway):地板 = 一場會議 → 限制了服務粒度
+> **How fine you can cut is decided by your cheapest synapse technology, not by domain imagination.**
+> - in-process function call: floor ≈ 0 → can cut very fine
+> - network synapse (microservices): floor = ms-scale latency + a whole family of failure modes → cut too fine and the synapse kills you back
+> - organizational synapse (Conway): floor = a meeting → constrains service granularity
 
-**神經隱喻(認真用):運算與學習不在神經元本體,在突觸。** 設計準則:**單元要笨而純,突觸要聰明且是變化的唯一入口。** DI = 重接突觸;feature flag = 突觸閘門;adapter = 阻抗匹配突觸;middleware = 突觸橫切層。
+**The neural metaphor (used seriously): computation and learning live not in the neuron body but in the synapse.** Design rule: **units should be dumb and pure; synapses should be smart and the only entry point for change.** DI = rewiring synapses; feature flag = synapse gate; adapter = impedance-matching synapse; middleware = synapse cross-cutting layer.
 
-**阻抗不匹配:** 異質粒度相遇處(ORM = 物件↔關聯、API gateway = 外粗↔內細)是痛點集中營。粒度落差越大的突觸,承擔越多轉換責任。**不該追求全系統均勻粒度。**
+**Impedance mismatch:** where heterogeneous granularities meet (ORM = object ↔ relational, API gateway = coarse-outside ↔ fine-inside) is a concentration of pain points. The larger the granularity gap a synapse spans, the more conversion responsibility it bears. **Don't chase uniform granularity across the whole system.**
 
-**魔鬼代言人:** 突觸過載 → 退化成隱藏單元(fat adapter、god mediator、ESB)。判準:**突觸只該路由/轉換/觀測/適配;一旦持有領域邏輯,粒度邊界就名存實亡。**
+**Devil's advocate:** an overloaded synapse → degenerates into a hidden unit (fat adapter, god mediator, ESB). Criterion: **a synapse should only route / transform / observe / adapt; the moment it holds domain logic, the granularity boundary exists in name only.**
 
 ---
 
-## 3. 因陀羅網:事事無礙「透過理」而非 N²
+## 3. Indra's Net: Phenomenon-and-Phenomenon Unobstruction "Through Principle," Not N²
 
-四法界 → 架構四層:
+The Four Dharma-realms (四法界) → four architectural layers:
 
-| 法界 | 架構 |
+| Dharma-realm | Architecture |
 |---|---|
-| 事法界(諸法各別) | 單元;邊界是真的,正交是真的 |
-| 理法界(一味平等) | 共享抽象、協定、型別、不變式 |
-| 理事無礙(理全現於每事) | 介面與實作:抽象完整活在每個具體裡 |
-| **事事無礙(一一互攝)** | **因陀羅網本身——全部張力在此** |
+| Realm of phenomena (事法界, each thing distinct) | Units; boundaries are real, orthogonality is real |
+| Realm of principle (理法界, one taste, equal) | Shared abstractions, protocols, types, invariants |
+| Principle-phenomenon unobstruction (理事無礙, principle wholly present in each thing) | Interface and implementation: the abstraction lives whole inside each concrete instance |
+| **Phenomenon-phenomenon unobstruction (事事無礙, each contains each)** | **Indra's Net itself — all the tension is here** |
 
-**核心:珠子並不相觸,珠映光不映珠。**
+**Core: the beads do not touch; a bead reflects the light, not the other beads.**
 
-> 因陀羅網讀對的樣子:不是 N² 條珠到珠,而是 N 條珠到光。**光 = O(1) 共享底,互映是湧現的、非接線的。** 這解掉第 2 節的突觸地板:用共同的光中介,得到「事事無礙」的外觀而只付 N 條突觸。
+> Indra's Net read correctly: not N² bead-to-bead links, but N bead-to-light links. **Light = an O(1) shared substrate; the mutual reflection is emergent, not wired.** This dissolves §2's synapse floor: mediate through a common light and you get the *appearance* of "phenomenon-phenomenon unobstruction" while paying for only N synapses.
 
-工程翻譯:Kafka / event log、共享 immutable 底(CRDT / content-addressed / 區塊鏈)、共享 schema/協定——**理就是讓珠子能互映的公約數。** 一旦兩珠直接打洞繞過光,網就破了。
+Engineering translation: Kafka / event log, a shared immutable substrate (CRDT / content-addressed / blockchain), a shared schema/protocol — **principle is the common denominator that lets the beads reflect one another.** The moment two beads bore a hole straight through and bypass the light, the net breaks.
 
-**一即一切 = 全像,不是全知**:自相似/碎形、event-carried state、全像底片的韌性(切一角仍見全圖、優雅降級)。「一塵含一切染淨成壞」= 最小型別承載完整狀態代數(讓非法狀態不可表達)。
+**One-is-all (一即一切) = holographic, not omniscient**: self-similarity/fractal, event-carried state, the resilience of a hologram plate (cut off a corner and you still see the whole image — graceful degradation). "A single mote contains all defilement, purity, arising and decay" = a minimal type carrying the complete state algebra (making illegal states unrepresentable).
 
-**魔鬼代言人:重重無盡必須可終止。** 因陀羅網是靜止永恆的無限迴映,軟體必須收斂、必有 base case。工程版 = **惰性**:無限的網只在被查詢時展開到有限深度。它是趨近的理想極限,不是接線圖。
-
----
-
-## 4. 碎形:用一條規則換無盡結構
-
-碎形本質 = **IFS(迭代函數系統)**:一條規則反覆自套,長出無限細節。關鍵不是好看,是**規格成本的塌縮**——學一次規則,懂每個尺度(認知 O(1),結構 O(N))。
-
-> **不要枚舉,要生成。** k^D 的豐富度不靠寫 k^D 個變體,靠一條會自套的文法長出。**重重無盡 = 規則的無限遞迴;你存的是規則,不是網;惰性求值實現有限深度。**
-
-**新度量:碎形維度 D**——zoom 進去新細節以什麼速率冒出:
-
-- D 太低 → 放大什麼都沒有 = 黑箱巨石
-- D 太高 → 每層爆炸、海岸線收斂不了 = 過度耦合纏結
-- 健康 → 每層 zoom 冒出有結構、有界、循同一文法的新細節
-
-衍生準則(海岸線悖論):**邊界要低維(平滑可預測的契約),內部可高維(豐富實作)。**
-
-**魔鬼代言人:軟體不是碎形,是多重碎形(multifractal)。** 真碎形無特權尺度;軟體有硬性斷層(in-proc → 網路:突觸地板從 ≈0 跳到 ms 級)。**斷點處生成規則必須換,因為成本模型換了。**「同一套 pattern 一路到底」是最甜美的謊言。
-
-> **同一個尺度帶內自相似,在物理突觸地板的不連續處改寫文法。**
-
-附帶兩條不對稱:**加權**(power-law 集中,密在動作多處)、**base case**(IFS 在葉節點觸地成真實工作,葉子才是領域邏輯活的地方)。
+**Devil's advocate: the endless layer-upon-layer (重重無盡) must be terminable.** Indra's Net is a still, eternal, infinite mutual reflection; software must converge and must have a base case. The engineering version = **laziness**: the infinite net only unfolds to finite depth when queried. It is an ideal limit you approach, not a wiring diagram.
 
 ---
 
-## 5. 如何碎形化:把領域逼成一個 monoid
+## 4. Fractal: Trade One Rule for Endless Structure
 
-> **找到「在自己的組合運算下封閉」的形狀,把系統重寫成這個運算對葉子的遞迴套用,並在每道物理地板處替換運算子。**
+The essence of a fractal = **IFS (Iterated Function System)**: one rule applied to itself repeatedly, growing infinite detail. The point isn't that it looks nice, it's **the collapse of specification cost** — learn the rule once, understand every scale (cognition O(1), structure O(N)).
 
-**充要條件:對組合封閉(part 介面 == whole 介面)。** list of lists 仍是 list → 可碎形;controller of controllers 不是 controller → 不可碎形,只能分層。
+> **Don't enumerate, generate.** The richness of k^D comes not from writing k^D variants but from one self-applying grammar that grows them. **Endless layer-upon-layer = the infinite recursion of a rule; what you store is the rule, not the net; lazy evaluation realizes finite depth.**
 
-代數內核:讓 cell 構成 **monoid / category**——結合律 = 尺度不變性;單位元 = base case / no-op。**碎形化在數學上 = 如何把領域逼成 monoid。**
+A new metric: **fractal dimension D** — the rate at which new detail emerges as you zoom in:
 
-**五步:** ① 找對組合封閉的生成細胞 ② 把組合運算子顯式化且唯一 ③ 釘死葉子(base case)④ 標尺度斷點、在斷點改寫運算子(同形、異運算子)⑤ 按需求加權,別均勻碎形。
+- D too low → zoom in and there's nothing = a black-box monolith
+- D too high → every layer explodes, the coastline never converges = over-coupled tangle
+- Healthy → each zoom surfaces new detail that is structured, bounded, and follows the same grammar
 
-**aaf 是活的多重碎形:** `process → node → worker → agent → sub-agent`,每層皆 sense→decide→act(同形封閉);運算子逐道地板改寫:in-proc / Kafka / process-spawn+CLI / Task fan-out。
+Derived rule (coastline paradox): **boundaries should be low-dimensional (smooth, predictable contracts), interiors may be high-dimensional (rich implementation).**
 
-**魔鬼代言人:** 對不封閉的領域硬套碎形 = 滿地假統一介面的儀式且會洩漏。**不是所有軟體都可碎形,只有封閉的部分可以。**
+**Devil's advocate: software is not a fractal, it's a multifractal.** A true fractal has no privileged scale; software has hard faults (in-proc → network: the synapse floor jumps from ≈0 to ms-scale). **At the break, the generative rule must change, because the cost model changed.** "The same pattern all the way down" is the sweetest lie.
 
----
+> Self-similar within a scale band, rewrite the grammar at the discontinuities of the physical synapse floor.
 
-## 6. 因果非確定性 / 業力 / 妙用:體用不二
-
-這一轉是「用」,對偶於前一轉的「體」。結構是死的、重複的;功能是活的、被當下條件決定的。
-
-- **因果非確定性 = 因果是偏序,不是全序**(Lamport / vector clock / CRDT)。因果守恆(因先於果),全序開放(併發事件無固定先後)。**沒有全域的「當下」,只有局部因果光錐。**
-- **業力 = event-sourced 累積史條件化當下顯化**。當下的果 = 過去一切因的 fold。同一輸入落在不同業上 → 顯化不同。非確定來自業的不同,不來自隨機。
-- **妙用無窮 / 一葉一如來 / 每點負責不同任務 = 同質能力基底 + 角色的當下晚綁定**(通用執行器 / actor become / FaaS)。`只看當下顯化處是哪,則用在那一點` = aaf 的通用執行器:角色在 task payload 裡,不烤死在 agent 上。
-
-**三道鎖扣:**
-
-1. **體使用成為可能**:封閉性(第 5 節)讓「任一點負責任一任務」安全——因一切任務同形(`Task → Result`),任何同質點才能接任何任務而不破型別契約。任務空間開放、介面封閉的有界多型。
-2. **用被業所限**:資料引力(data gravity)是反同質的力。work 想去業已堆積處,不是「隨便哪點」。**資料引力 = 業力對顯化點的條件化。** 排程器 = 調和需求局部性與資料局部性。
-3. **非確定隔離於突觸,確定守於細胞**:跨 shard log 順序非確定,但 replay 某條 shard 的 log 是確定的。**非確定活在突觸(用/業/排程),確定守在細胞(體/純核)。** 純核要純,正因非確定性必須被隔離在它之外。
+Two asymmetries come along: **weighting** (power-law concentration, dense where the action is) and **base case** (the IFS touches ground at the leaf nodes and becomes real work — the leaves are where domain logic actually lives).
 
 ---
 
-## 7. 阿賴耶:藏一切種,選擇性現行
+## 5. How to Fractalize: Force the Domain into a Monoid
 
-阿賴耶識 = **持久化的共享種子藏 = 因陀羅網裡那道光的本相**。`每一點的變化都記在裡面,每一節點都可拿來使用` = 共享 event store 的定義。**業不在珠子裡,業在阿賴耶裡;** 珠保持笨而純,一藏在外,萬點皆取。
+> Find the shape that is **closed under its own composition operation**, rewrite the system as the recursive application of that operation to the leaves, and swap the operator at each physical floor.
 
-**八識 = 分層架構:**
+Necessary and sufficient condition: **closed under composition (the part's interface == the whole's interface).** A list of lists is still a list → fractalizable; a controller of controllers is not a controller → not fractalizable, only layerable.
 
-| 識 | 架構 |
+Algebraic kernel: make the cells form a **monoid / category** — associativity = scale invariance; identity element = base case / no-op. **Fractalization, mathematically, = how to force the domain into a monoid.**
+
+Five steps: ① find generative cells closed under composition ② make the composition operator explicit and unique ③ nail down the leaves (base case) ④ mark the scale breaks and rewrite the operator at each break (same form, different operator) ⑤ weight by need, don't fractalize uniformly.
+
+**aaf is a living multifractal:** `process → node → worker → agent → sub-agent`, every layer is sense→decide→act (same-form closure); the operator is rewritten floor by floor: in-proc / Kafka / process-spawn+CLI / Task fan-out.
+
+**Devil's advocate:** forcing a fractal onto a non-closed domain = a floor covered in fake-uniform-interface ceremony that leaks. **Not all software is fractalizable — only the closed parts are.**
+
+---
+
+## 6. Causal Non-Determinism / Karma / Wondrous Function: Substance and Function Are Not Two
+
+This turn is **function (用)**, the dual of the previous turn's **substance (體)**. Structure is dead and repeating; function is alive and determined by present conditions.
+
+- **Causal non-determinism = causality is a partial order, not a total order** (Lamport / vector clock / CRDT). Causality is conserved (cause precedes effect), total order is open (concurrent events have no fixed precedence). **There is no global "now," only local causal light-cones.**
+- **Karma (業) = an event-sourced accumulated history conditioning the present manifestation.** The present fruit = a fold over all past causes. The same input landing on different karma → a different manifestation. The non-determinism comes from differing karma, not from randomness.
+- **Inexhaustible wondrous function / each leaf a Tathāgata (一葉一如來) / every point responsible for a different task = a homogeneous capability substrate + late-binding of role in the present** (general-purpose executor / actor become / FaaS). "Look only at where the manifestation is happening right now, and the function belongs to that point" = aaf's general-purpose executor: the role rides in the task payload, not baked into the agent.
+
+**Three interlocking clasps:**
+
+1. **Substance makes function possible**: closure (§5) makes "any point responsible for any task" safe — because all tasks are the same form (`Task → Result`), any homogeneous point can take any task without breaking the type contract. Bounded polymorphism: the task space is open, the interface is closed.
+2. **Function is bounded by karma**: data gravity is the anti-homogeneity force. Work wants to go where karma has already piled up, not to "any point at all." **Data gravity = karma conditioning the point of manifestation.** The scheduler = reconciling demand locality with data locality.
+3. **Non-determinism is quarantined in the synapse, determinism is kept in the cell**: log ordering across shards is non-deterministic, but replaying one shard's log is deterministic. **Non-determinism lives in the synapse (function/karma/scheduling); determinism is kept in the cell (substance/pure core).** The pure core must be pure precisely because non-determinism has to be quarantined outside it.
+
+---
+
+## 7. Ālaya: Storing All Seeds, Actualizing Selectively
+
+The ālaya-vijñāna (阿賴耶識) = **a persistent shared seed-store = the true form of that light in Indra's Net.** "Every change at every point is recorded within it, and every node may draw on it" = the definition of a shared event store. **Karma is not in the beads, karma is in the ālaya;** the bead stays dumb and pure, the one store sits outside, and all points draw from it.
+
+**The Eight Consciousnesses (八識) = a layered architecture:**
+
+| Consciousness | Architecture |
 |---|---|
-| 前五識 | I/O adapter / sensor(觸世界的邊緣) |
-| 第六意識 | 當下處理 / request-handler |
-| 第七末那識(執我) | 聚合根 / partition key / session 身分——劃一致性邊界,也是爭用瓶頸(自我 = 鎖) |
-| 第八阿賴耶識 | append-only 共享種子藏 / event store |
+| The first five (前五識) | I/O adapter / sensor (the edge touching the world) |
+| The sixth, mind-consciousness (第六意識) | Present-moment processing / request-handler |
+| The seventh, manas (末那識, grasping-at-self) | Aggregate root / partition key / session identity — draws the consistency boundary, and is also the contention bottleneck (the self = a lock) |
+| The eighth, ālaya (阿賴耶識) | Append-only shared seed-store / event store |
 
-**種子生現行,現行熏種子 = CQRS + event sourcing 的呼吸**(讀:replay/projection;寫:append)。
+**Seeds give rise to manifestation, manifestation perfumes the seeds (種子生現行,現行熏種子) = the breathing of CQRS + event sourcing** (read: replay/projection; write: append).
 
-**「放下」的工程解 = 選擇性現行,不是刪除:**
+**The engineering solution to "letting go" (放下) = selective actualization, not deletion:**
 
-> 藏一切種(**因果不失**),但不是一切種同時現行——強者、應緣者先熟(relevance / recency retrieval = RAG)。**放下 ≠ 刪除;放下 = 不全現。** 藏無限,現有限,無一被忘,非一切皆活。
+> Store all seeds (**cause and effect are never lost**), but not all seeds actualize at once — the strong and the condition-matched ripen first (relevance / recency retrieval = RAG). **Letting go ≠ deletion; letting go = not everything actualizing.** The store is infinite, the actualized is finite; nothing is forgotten, not everything is live.
 
-**已被實證:** RAG distillation eval 顯示用粹練表徵取代 raw → 長尾漏失 61%。教訓 = **阿賴耶不可截長尾;任一冷種子都可能在對的緣下現行。藏一切、索引以勢力、選擇性現行。**(實驗獨立重新發現了唯識律。)
+**Empirically confirmed:** the RAG distillation eval showed that replacing raw with a distilled representation → a 61% long-tail miss rate. Lesson = **the ālaya must not truncate the long tail; any cold seed may actualize under the right condition. Store everything, index by strength, actualize selectively.** (The experiment independently rediscovered the Yogācāra (唯識) law.)
 
-**你早已建了一個運作中的阿賴耶:** archive(每 session 每 tool_use → 15 分 ingest 寫進 PG = 現行熏種子;任一新 session 用 osearch 取用 = 種子生現行)。共業共享藏 + 非同步熏習 + 讀多寫少——刻意且健全的設計座標。
+**You already built a working ālaya:** the archive (every tool_use of every session → 15-minute ingest into PG = manifestation perfuming the seeds; any new session drawing on it via osearch = seeds giving rise to manifestation). A collective-karma shared store + asynchronous perfuming + read-heavy-write-light — a deliberate and sound design coordinate.
 
-**魔鬼代言人:**
-- **別業 vs 共業 fork**:一個全域種子藏(強統一,SPOF + 寫爭用)vs 一身一阿賴耶(分片,可擴展,跨流偏序需調和)。唯識的真實立場是混合:**別業私藏 + 共業共現 = per-aggregate 私有寫流 + 共享讀模型。**
-- **藏 ≠ 現**:種子藏著但取不出(daemon 死 / 未 embed)= 業在而不現。**儲存從來不是難處,應緣而現的檢索品質才是。**
-
----
-
-## 8. 畫布:各元件即 AI agent
-
-把前七轉顯化到一個表面:**畫布,每個 UI 元件是一個 AI agent;被觸發即待緣而現行(緣 = 觸發);agent 自動與其它互動。**
-
-定位:generative UI + actor model + blackboard + reactive dataflow 的合流。最關鍵的祖先是**試算表**(每 cell 是對其他 cell 反應的微型 agent,但確定性、透過 dataflow)。
-
-**一條承重牆:元件透過畫布互動,絕不直接互相喊話。**
-
-- ❌ 直接互動 = 第 3 節警告的事事無礙塌縮(全連接 N²、串聯爆炸、風暴)
-- ✅ 光中介:被觸發的 agent 只把結果寫回畫布;其他 agent 訂閱畫布切片各自反應
-
-> **畫布 = 共享 append-only 種子藏 = 那道光 = blackboard = 螞蟻費洛蒙場(stigmergy)。** N 個 agent 對 1 張畫布,不是 N²。`自動與其它互動` 必須實作成「對畫布狀態變化反應」,而非「向其他 agent 發訊息」。
-
-**把八轉紀律變成設計規則:**
-
-1. **分層顯化**(突觸地板):多數傳播是確定性 reactive dataflow(地板≈0);只有真正需生成的才跨進 LLM。**業(快取)讓被觸發 agent 多半現行已熟種子(memoization)。**
-2. **DAG 傳播 + 有界收斂**(base case):循環偵測 / quiescence / max-depth,防震盪。
-3. **非確定隔離**:LLM 生成的非確定凍進 event-sourced 狀態,一旦生成即成可 replay 的種子;使用者看到穩定畫布。
-4. **末那邊界**:每元件單寫者只寫自己切片,別人切片只能提議,由畫布調和(CRDT / single-writer-per-region)。
-5. **阿賴耶藏**:畫布 = append-only 事件藏 = provenance + undo + 可解釋性 + 條件化每 agent 的業。
-
-**魔鬼代言人:即時 ⊥ LLM 延遲。** 確定層瞬時響應 + 生成層非同步串流回填(progressive)。**別把承重牆蓋在 BPMN 上**——Kogito 是秒到天的長流程引擎,扛不動即時畫布;畫布要前端 reactive signal graph,LLM agent 在背後非同步喚起。
+**Devil's advocate:**
+- **Individual-karma vs collective-karma (別業/共業) fork**: one global seed-store (strong unity, SPOF + write contention) vs one ālaya per body (sharded, scalable, cross-stream partial order needs reconciling). Yogācāra's actual position is a hybrid: **private individual-karma store + shared collective-karma actualization = a per-aggregate private write stream + a shared read model.**
+- **Store ≠ actualize**: a seed stored but unretrievable (daemon dead / not yet embedded) = karma present but not actualizing. **Storage was never the hard part; the retrieval quality of actualizing-on-condition is.**
 
 ---
 
-## 8.5 向量化渲染基底:繪圖不是瓶頸,生成才是
+## 8. The Canvas: Each Component Is an AI Agent
 
-**直接結論:繪圖夠快到不是問題——但「繪圖夠快嗎」問錯了瓶頸。** 瓶頸是**生成(LLM,秒級)**,不是**繪圖(GPU,次毫秒級)**。向量化是對的選擇,但價值不在「畫得快」,在上游。
+Manifest the previous seven turns onto one surface: **a canvas where each UI component is an AI agent; being triggered = actualizing-on-condition (the condition (緣) = the trigger); agents automatically interact with one another.**
 
-**「2 點成線」幾乎免費:** 一條線 = 2 點 = 16 bytes = 1~2 三角形 / 一個 `GL_LINES` primitive。現代 GPU 一個 16.6ms(60fps)frame 裡輕鬆畫 **10 萬~100 萬條線**。真正吃成本的不是線,是:① **Tessellation**(曲線 flatten / 填充三角化,CPU 側,快取已 tessellate 的幾何 = 幾何層的業)② **Draw call 數**(1 萬獨立 call 慢,batch 成 1 call 快)③ **文字**(SDF / glyph atlas)④ **特效**(blur/shadow,比線貴幾個數量級)。
+Placement: the confluence of generative UI + actor model + blackboard + reactive dataflow. The most important ancestor is **the spreadsheet** (each cell is a micro-agent reacting to other cells — but deterministically, through dataflow).
 
-**向量化是對的——理由是這四個,不是「快」(正好是全鏈在渲染層的兌現):**
+**One load-bearing wall: components interact through the canvas, never call out to one another directly.**
 
-- **Token 便宜(關鍵)**:LLM 吐得出 `line (0,0)→(100,100)`(幾 token),吐不出 bitmap。**向量化是讓 LLM 生成 UI 變*可能*的前提**,直打第 9 節 token/延遲地板。
-- **組合封閉**(第 5 節):點→線→形→景,一組形仍是形。向量天生對組合封閉 = 可碎形化的渲染基底。
-- **尺度不變**(第 4 節):向量 zoom 不糊——**字面就是**碎形的 scale-invariance;raster 做不到。
-- **可增量重繪**(第 8 節):retained scene graph + dirty region,只重畫變動 primitive = DAG 傳播打到像素層,確定性層因此瞬時。
+- ❌ Direct interaction = the phenomenon-phenomenon-unobstruction collapse §3 warned about (fully-connected N², cascade explosion, storms)
+- ✅ Mediation through the light: a triggered agent only writes its result back to the canvas; other agents subscribe to canvas slices and each reacts on its own
 
-**真實數字(把瓶頸擺對):**
+> **The canvas = a shared append-only seed-store = that light = the blackboard = the ant pheromone field (stigmergy).** N agents to 1 canvas, not N². "Automatically interact with one another" must be implemented as "react to canvas state changes," not "send messages to other agents."
 
-| 動作 | 延遲 |
+Turn the eight turns of discipline into design rules:
+
+1. **Layered manifestation** (synapse floor): most propagation is deterministic reactive dataflow (floor ≈ 0); only what genuinely needs generation crosses into the LLM. **Karma (cache) lets a triggered agent mostly actualize an already-ripe seed (memoization).**
+2. **DAG propagation + bounded convergence** (base case): cycle detection / quiescence / max-depth, to prevent oscillation.
+3. **Non-determinism quarantine**: the non-determinism the LLM generates is frozen into event-sourced state; once generated it becomes a replayable seed; the user sees a stable canvas.
+4. **Manas boundary**: each component is a single writer writing only its own slice; it can only *propose* to others' slices, reconciled by the canvas (CRDT / single-writer-per-region).
+5. **Ālaya store**: the canvas = an append-only event store = provenance + undo + explainability + the karma conditioning each agent.
+
+**Devil's advocate: real-time ⊥ LLM latency.** The deterministic layer responds instantly + the generative layer streams back asynchronously (progressive). **Don't build the load-bearing wall on BPMN** — Kogito is a seconds-to-days long-process engine and can't hold up a real-time canvas; the canvas needs a front-end reactive signal graph, with LLM agents woken asynchronously behind it.
+
+---
+
+## 8.5 The Vectorized Rendering Substrate: Drawing Isn't the Bottleneck, Generation Is
+
+Direct conclusion: **drawing is fast enough that it isn't the problem — but "is drawing fast enough" asks about the wrong bottleneck.** The bottleneck is **generation (LLM, seconds-scale)**, not **drawing (GPU, sub-millisecond)**. Vectorization is the right choice, but its value isn't "draws fast," it's upstream.
+
+**"Two points make a line" is nearly free:** a line = 2 points = 16 bytes = 1–2 triangles / one `GL_LINES` primitive. A modern GPU comfortably draws **100k–1M lines** in a single 16.6ms (60fps) frame. What actually costs is not lines but: ① **Tessellation** (curve flattening / fill triangulation, CPU-side — caching already-tessellated geometry = the karma of the geometry layer) ② **Draw-call count** (10k independent calls slow, batched into 1 call fast) ③ **Text** (SDF / glyph atlas) ④ **Effects** (blur/shadow, orders of magnitude more expensive than lines).
+
+**Vectorization is right — for these four reasons, not for "fast" (which is precisely the whole chain cashing out at the rendering layer):**
+
+- **Cheap tokens (the key)**: an LLM can emit `line (0,0)→(100,100)` (a few tokens), it cannot emit a bitmap. **Vectorization is the precondition that makes LLM-generated UI *possible* at all**, hitting §9's token/latency floor head-on.
+- **Composition-closed** (§5): point → line → shape → scene, a group of shapes is still a shape. Vectors are natively closed under composition = a fractalizable rendering substrate.
+- **Scale-invariant** (§4): vectors don't blur on zoom — this **literally is** the scale-invariance of a fractal; raster can't do it.
+- **Incrementally redrawable** (§8): retained scene graph + dirty region, redrawing only changed primitives = DAG propagation reaching the pixel layer, which is why the deterministic layer is instant.
+
+**Real numbers (putting the bottleneck in the right place):**
+
+| Action | Latency |
 |---|---|
-| GPU 畫 10 萬條線 | **<16ms**(一個 frame) |
-| 重繪 dirty region | <16ms |
-| 快取命中的靜態幾何 | ~0 |
-| **LLM 生成那段向量 spec** | **0.3~15s ← 真瓶頸** |
+| GPU draws 100k lines | **<16ms** (one frame) |
+| Redraw a dirty region | <16ms |
+| Cache-hit static geometry | ~0 |
+| **LLM generates that vector spec** | **0.3–15s ← the real bottleneck** |
 
-繪圖比生成快約 **1000 倍**。該優化的是生成側(串流 / 業快取 / 小模型 / 元件增量),不是繪圖側。
+Drawing is about **1000×** faster than generation. What to optimize is the generation side (streaming / karma cache / small models / component increments), not the drawing side.
 
-**魔鬼代言人 — 一個陷阱 + 技術選型:**
+**Devil's advocate — one trap + technology choices:**
 
-- **❌ 別把「向量化 UI」做成 SVG-in-DOM**:每元素一個 DOM node,layout/style recalc 主宰一切,**幾千節點就卡死**。上千 agent 元件用 SVG 必死。
-- **✅ 快路徑 = GPU 向量**:WebGPU/WebGL(**PixiJS** / regl)、**Skia-WASM(CanvasKit)**、原生 **Flutter(Skia/Impeller,整個 UI 即向量,60–120fps)**;動畫向量 **Rive**。
-- **最佳參考:tldraw**(React + retained 向量 scene,穩扛上千 shape)= 即時 agent 畫布渲染骨架的現成範本。
+- **❌ Don't build "vectorized UI" as SVG-in-DOM**: one DOM node per element, layout/style recalc dominates everything, **a few thousand nodes and it seizes up.** Thousands of agent components in SVG will certainly die.
+- **✅ Fast path = GPU vectors**: WebGPU/WebGL (**PixiJS** / regl), **Skia-WASM (CanvasKit)**, native **Flutter (Skia/Impeller, the whole UI is vector, 60–120fps)**; animated vectors with **Rive**.
+- **Best reference: tldraw** (React + retained vector scene, holds thousands of shapes steadily) = a ready-made template for a real-time agent-canvas rendering skeleton.
 
-> **一句:繪圖夠快,向量化是對的決定,但功勞在「讓 LLM 吐得出 + 組合封閉 + 尺度不變 + 可增量重繪」,不在畫線速度。瓶頸守在生成,渲染選 GPU 向量(非 SVG-DOM)。**
-
----
-
-## 8.6 更快渲染:渲染得更少,而非渲染得更快
-
-對 AI 畫布,「更快渲染」**多半不是更快的 rasterizer**——§8.5 已定繪圖比生成快約 1000 倍。**你離渲染瓶頸還有 1000 倍餘裕,方法論是「渲染得更少」,不是「渲染得更快」。**
-
-**對這個系統,leverage 由高到低:**
-
-1. **Patch/diff 式顯化(最大槓桿)**:agent 吐一個 delta(對畫布的 mutation),不吐整張 scene → **生成(更少 token)與渲染(只重畫 dirty region)都只隨變動量 scale,不隨整張畫布 scale**(打在 §8 末那單寫者 + §9 token 經濟)。最快的渲染是最小的 diff。
-2. **預測性預渲染(§11)**:idle 時把 active inference 的預測先渲染好,趕在使用者動作前 → 預測命中時感知延遲 → 0。最快的渲染是你已做完的那次。
-3. **業-快取 + memoized 幾何(§9 + §8.5)**:按 (意圖, context) 快取已渲染/已 tessellate 的輸出,命中 ~0;靜態幾何別重算(繞開 CPU tessellation 瓶頸)。
-4. **串流漸進渲染(§9)**:向量 spec 邊串流邊畫,first-paint = 首 primitive 到達時,不是整段生成完。
-
-> 前四條沒一條在「畫得更快」——全在「畫得更少 / 更早 / 不重畫」。這才是 AI 畫布的渲染方法論。
-
-**純 rasterizer 前沿(問了,但多半用不到):** 只在真撞上「10 萬+ primitive 每 frame 全變」(資料視覺化/粒子級,典型 agent UI 不在)才登場——**Compute-shader 2D**(**Vello** / Skia **Graphite**,GPU 並行 path rendering,徹底消滅 §8.5 的 CPU tessellation 瓶頸)、**immediate-mode**(egui / Dear ImGui,每 frame 重建無 diff)、**編譯掉框架稅**(Svelte 編譯成直接 DOM 更新 / SolidJS / 細粒度 signals,你的 Angular Signals 已在此路)。
-
-**選型:retained vs immediate,看動態剖面:** 全動態每 frame 全變 → immediate-mode;**多數靜止 + 少數島嶼在變(= agent 畫布剖面)→ retained scene graph + dirty-region + 穩定節點身分(§8 末那)完勝**(穩定身分讓 diff 便宜、快取可命中)。你這張畫布是後者。
-
-**魔鬼代言人:** 優化 rasterizer 是 premature optimization(離瓶頸 1000 倍);**系統速度由生成 gate,換更快 rasterizer 對體感延遲零位移**——直到生成被解決前都是。採用 Vello 級前先確認你真在那個 scale。別把「更快渲染」和「更快系統」混為一談:前四條動體感延遲,rasterizer 不動。
-
-> **一句:渲染得更少(patch diff)、更早(預渲染)、不重畫(快取 + dirty-region)、邊串邊畫(漸進)——而非更快的 rasterizer。瓶頸守在生成。**
+> **In one line: drawing is fast enough, vectorization is the right call — but the credit goes to "lets the LLM emit it + composition-closed + scale-invariant + incrementally redrawable," not to line-drawing speed. Keep the bottleneck at generation; for rendering, choose GPU vectors (not SVG-DOM).**
 
 ---
 
-## 8.7 參考實作:渲染基底的現實錨點
+## 8.6 Faster Rendering: Render Less, Not Render Faster
 
-§8.5/§8.6 的「GPU 向量 retained scene + lookless 圖元樹控件」不是空想,有多個成熟實作。對照看清它們各對應到哪一層、停在哪:
+For an AI canvas, "faster rendering" is mostly **not a faster rasterizer** — §8.5 already established that drawing is ~1000× faster than generation. **You have 1000× headroom before the rendering bottleneck; the methodology is "render less," not "render faster."**
 
-| 實作 | 原理 | 對應層 | 停在哪 |
+**For this system, leverage from highest to lowest:**
+
+1. **Patch/diff manifestation (biggest lever)**: the agent emits a delta (a mutation on the canvas), not a whole scene → **both generation (fewer tokens) and rendering (redraw only the dirty region) scale with the change size, not the whole canvas** (hitting §8's single-writer manas + §9's token economy). The fastest render is the smallest diff.
+2. **Predictive pre-rendering (§11)**: while idle, pre-render the active-inference prediction ahead of the user's action → when the prediction hits, perceived latency → 0. The fastest render is the one you already finished.
+3. **Karma-cache + memoized geometry (§9 + §8.5)**: cache already-rendered / already-tessellated output keyed by (intent, context), hit ~0; don't recompute static geometry (bypassing the CPU tessellation bottleneck).
+4. **Streaming progressive render (§9)**: draw the vector spec as it streams, first-paint = when the first primitive arrives, not when the whole thing is generated.
+
+> None of the four above is about "drawing faster" — all are "draw less / earlier / don't redraw." This is the rendering methodology for an AI canvas.
+
+**The pure-rasterizer frontier (asked about, but mostly unneeded):** it only enters when you genuinely hit "100k+ primitives all changing every frame" (data viz / particle scale, which typical agent UIs are not) — **Compute-shader 2D** (**Vello** / Skia **Graphite**, GPU-parallel path rendering, utterly eliminating §8.5's CPU tessellation bottleneck), **immediate-mode** (egui / Dear ImGui, rebuild every frame, no diff), **compiling away the framework tax** (Svelte compiles to direct DOM updates / SolidJS / fine-grained signals — your Angular Signals is already on this path).
+
+**Choice: retained vs immediate, by dynamic profile:** fully dynamic, everything changing every frame → immediate-mode; **mostly static + a few islands changing (= the agent-canvas profile) → retained scene graph + dirty-region + stable node identity (§8 manas) wins outright** (stable identity makes diffs cheap and caches hit). This canvas of yours is the latter.
+
+**Devil's advocate:** optimizing the rasterizer is premature optimization (1000× from the bottleneck); **system speed is gated by generation, and swapping in a faster rasterizer moves perceived latency by zero** — and stays that way until generation is solved. Before adopting Vello-class tech, confirm you're really at that scale. Don't conflate "faster rendering" with "faster system": the first four move perceived latency, the rasterizer doesn't.
+
+> **In one line: render less (patch diff), earlier (pre-render), don't redraw (cache + dirty-region), draw-as-you-stream (progressive) — not a faster rasterizer. Keep the bottleneck at generation.**
+
+---
+
+## 8.7 Reference Implementations: Reality Anchors for the Rendering Substrate
+
+§8.5/§8.6's "GPU-vector retained scene + lookless primitive-tree controls" is not a fantasy; there are several mature implementations. Line them up to see which layer each maps to and where each stops:
+
+| Implementation | Principle | Layer it maps to | Where it stops |
 |---|---|---|---|
-| **Delphi FireMonkey (FMX)** | 全部自繪;lookless 控件 = 行為 + 向量圖元樹(TStyleBook);可插拔後端(D2D/Metal/OpenGL/Skia);浮點座標;2D+3D 統一 | §8.5 渲染基底 + §5「控件即可組合細胞」 | 開發者手寫的**靜態樹**;無生成/業/預測/自組織(2011 年,早 Flutter 六年驗證此路可行) |
-| **Flutter (Skia/Impeller)** | 同 draw-everything;widget 樹 + RenderObject 樹;GPU 合成;60–120fps | §8.5 + §8.6 retained | 同上;開發者作者樹 |
-| **tldraw** | React + retained 向量 scene;穩定 shape 身分;dirty-region | §8.6 retained + 穩定身分(§8 末那) | 互動式編輯,非 agent 生成(但最接近 agent 畫布骨架) |
-| **Rive** | 向量 + state-machine 動畫;runtime 輕量 | §8.5 + TAnimation 式 tween | 設計時作者狀態機,非當下顯化 |
-| **Vello / Skia Graphite** | compute-shader 2D,GPU 並行 path,無 CPU tessellation | §8.6 raster 前沿 | 純 rasterizer,不含控件/scene 語意 |
+| **Delphi FireMonkey (FMX)** | Draws everything itself; lookless control = behavior + vector primitive tree (TStyleBook); pluggable backends (D2D/Metal/OpenGL/Skia); floating-point coordinates; unified 2D+3D | §8.5 rendering substrate + §5 "controls as composable cells" | A developer's hand-written **static tree**; no generation/karma/prediction/self-organization (2011 — six years before Flutter, proving the path viable) |
+| **Flutter (Skia/Impeller)** | Same draw-everything; widget tree + RenderObject tree; GPU compositing; 60–120fps | §8.5 + §8.6 retained | Same as above; developer-authored tree |
+| **tldraw** | React + retained vector scene; stable shape identity; dirty-region | §8.6 retained + stable identity (§8 manas) | Interactive editing, not agent generation (but the closest to an agent-canvas skeleton) |
+| **Rive** | Vector + state-machine animation; lightweight runtime | §8.5 + TAnimation-style tween | Design-time authored state machine, not present-moment manifestation |
+| **Vello / Skia Graphite** | Compute-shader 2D, GPU-parallel paths, no CPU tessellation | §8.6 raster frontier | Pure rasterizer, no control/scene semantics |
 
-**共同點(draw-everything 路線):** 跨平台像素一致 + 完全樣式自由;代價 = 非 100% 原生手感、無障礙歷史較弱、密集表單比包原生重、品質曾依後端(Skia 統一)。FMX 2011、Flutter 2017 選同一邊——對「要完全控外觀 + 跨平台一致」對,對「要原生手感 + 強無障礙」錯。
+**Common ground (the draw-everything line):** cross-platform pixel consistency + total styling freedom; the cost = not 100% native feel, a weaker accessibility history, heavier than wrapping native for dense forms, and quality historically dependent on the backend (Skia unified it). FMX 2011, Flutter 2017 chose the same side — right for "want total control of appearance + cross-platform consistency," wrong for "want native feel + strong accessibility."
 
-> **關鍵觀察:這五者全停在「開發者/設計者手寫靜態樹」。** 它們是 §8.5/§8.6 的優良渲染基底與「控件即向量圖元樹」參考,但 §6 之後的生成/業/預測/自組織全在射程外。**agent 畫布 = 把這棵手寫樹,換成 agent 顯化 + 預測 + 快取 + 自組織的樹**——渲染基底可直接借用,manifestation 層要自建。
+> **Key observation: all five stop at "a developer/designer's hand-written static tree."** They are excellent rendering substrates for §8.5/§8.6 and references for "controls as vector primitive trees," but everything from §6 onward — generation/karma/prediction/self-organization — is out of range. **The agent canvas = replacing that hand-written tree with a tree of agent manifestation + prediction + caching + self-organization** — the rendering substrate is directly borrowable, the manifestation layer must be built yourself.
 
 ---
 
-## 9. 即時產生 UI:三種「即時」,延遲差一千倍
+## 9. Generating UI in Real Time: Three Kinds of "Real-Time," 1000× Apart in Latency
 
-| 你指的是 | 能即時嗎 | 延遲 |
+| What you mean | Can it be real-time | Latency |
 |---|---|---|
-| 渲染已定義 UI(reactive) | ✅ 瞬時 | <16ms |
-| LLM 當場生成 UI 結構/內容 | ⚠️ 看法 | 0.3–15s |
-| 整張 agent 畫布每次互動重生 | ❌ naive 會死 | 數秒~數分 |
+| Rendering already-defined UI (reactive) | ✅ instant | <16ms |
+| LLM generating UI structure/content on the spot | ⚠️ depends | 0.3–15s |
+| Regenerating the whole agent canvas on every interaction | ❌ naive will die | seconds to minutes |
 
-**一條打不破的物理地板:自回歸 LLM 是秒級,不是毫秒級。** TTFT ~200ms–1s,完整 UI spec 串流 1–10s。**拿不到「LLM 在 100ms 內吐 UI」**——是生成方式的物理,不是工程沒到位。正確問法:**能不能讓它*感覺*即時?能。**
+**An unbreakable physical floor: an autoregressive LLM is seconds-scale, not milliseconds-scale.** TTFT ~200ms–1s, a full UI spec streams in 1–10s. **You cannot get "the LLM emits UI within 100ms"** — that's the physics of how generation works, not engineering falling short. The correct question: **can you make it *feel* real-time? Yes.**
 
-**五個槓桿:**
+**Five levers:**
 
-1. **串流漸進渲染**(最大槓桿):邊生成邊渲染,first paint ~500ms(Artifacts / v0 / generative UI 就是)
-2. **骨架先行 / 樂觀更新**:Signals 瞬時畫骨架(<16ms),內容串流填槽
-3. **業-快取**(經濟生存線):按 (意圖, context) 快取既往生成,命中 <50ms;只有真正新穎才付 LLM 錢
-4. **預測性預取**:能預判緣就提前熟種
-5. **分層模型 + 元件粒度**:小快模型做結構、大模型只在難處;只重生被觸發元件,不重生整張
+1. **Streaming progressive render (biggest lever)**: render as you generate, first paint ~500ms (Artifacts / v0 / generative UI are exactly this)
+2. **Skeleton-first / optimistic update**: Signals instantly draw the skeleton (<16ms), content streams into the slots
+3. **Karma-cache (economic survival line)**: cache past generations keyed by (intent, context), hit <50ms; only genuine novelty pays the LLM cost
+4. **Predictive prefetch**: if you can anticipate the condition, ripen the seed early
+5. **Tiered models + component granularity**: a small fast model does structure, the big model only where it's hard; regenerate only the triggered component, not the whole canvas
 
-**數字(2026 初):** reactive <16ms / 快取命中 <50ms / 小模型單元件串流 0.3–1.5s / 大模型複雜整張 3–15s。
+**Numbers (early 2026):** reactive <16ms / cache-hit <50ms / small-model single-component streaming 0.3–1.5s / big-model complex full canvas 3–15s.
 
-**三條別自欺:** 別承諾逐鍵即時 LLM 生成;別整張重生(必須元件增量);**確定性 fallback 強制**(骨架層同時是安全網)。
+**Three don't-fool-yourselfs:** don't promise per-keystroke real-time LLM generation; don't regenerate the whole thing (must be component-incremental); **a deterministic fallback is mandatory** (the skeleton layer is also the safety net).
 
-> 「即時」的工程兌現 = 確定層瞬時 + 生成層非同步串流 + 業層快取,三拍合奏。難點不在「能不能生成」,在串流編排、快取命中率、元件增量邊界。
-
----
-
-## 10. 自組織的活系統
-
-**第一刀:自組織 ≠ 失控。** 颶風也自組織,但不是活的,且會掀房子。
-
-> 你不設計結果,你設計**局部規則 + 物理律 + 邊界**,讓你要的秩序湧現、病態吸子被排除。你從**操作員**變成**園丁/生態學家**。
-
-**自組織系統也會長病:** 癌(單一 agent 增殖壟斷)、癲癇(失控同步/廣播風暴)、死鎖、回音室。**活系統的工程,一半是生態學,一半是免疫系統。**
-
-**五條讓湧現可活的局部規則:**
-
-1. **無主宰,但有不可違的物理律**(理/法,不是警察):只能寫自己區域、預算守恆、每變化必記入藏。自組織發生在物理之內。
-2. **收斂不從外部強加,而把負反饋寫進局部規則**(boids 的「別擠」平衡「靠攏」)。從外推收斂 = 中央控制;讓每 agent 帶「擁擠就退讓/資源稀缺就讓位/穩定就靜默」,**讓收斂湧現。**
-3. **Stigmergy:透過環境協調,不直接喊話。** **Stigmergy = 珠映光 = blackboard = 費洛蒙——同一件事三個名字。** 已知唯一能「無 N²、卻可 scale」的自組織機制。
-4. **選擇壓力:讓壞顯化死掉。** 未被使用者注意/下游引用的顯化應衰減(apoptosis)。**業 = 選擇壓力。**
-5. **有界自主 = 免疫系統**(不是控制器):資源上限(抗癌)、速率限制(抗癲癇)、異常隔離(apoptosis)。免疫系統不指揮細胞,只消滅惡性。
-
-**「活」的最深一層 = autopoiesis(自我創生 + 膜):** 系統持續再生產自己的結構並維持「自我/環境」邊界。agent 死了,功能由分散式、湧現地再生(自癒,無中央 supervisor);膜(admission control / 身分邊界)也是湧現的。
-
-**這回答了「如何知道湧現的是對的秩序」(第 4-5 節留的問題):** 你無法*證明*湧現,只能*培育*它——沙盒跑、觀察吸子、調規則、再跑。**活系統不是被設計出來的,是被養出來的。**
-
-**衝突裁決(第 8 節 fork 的承諾):** 選自組織 = 承諾衝突**局部解決,無中央裁決**:CRDT 合併 / 資源競爭+選擇 / stigmergy 強化。裁決是湧現的。
-
-**魔鬼代言人 — 這筆交易的代價:** 換到韌性/適應/可擴展/湧現豐富;付出不可預測、病態吸子、難除錯、**持續代謝成本**(Prigogine 耗散結構,斷預算就解體)。**UI 特殊毒性:使用者要可預測與可控;會自我重排的 UI 可能是敵意的。** 正解:**在使用者設定的邊界內自組織**——使用者是園丁(設環境/目標/約束/選擇壓力 = 緣),不擺放花的位置。
+> The engineering cash-out of "real-time" = deterministic layer instant + generative layer async streaming + karma layer cache, in three-beat harmony. The difficulty isn't "can it generate," it's streaming orchestration, cache hit rate, and component-increment boundaries.
 
 ---
 
-## 11. 顯化即當下共預見(climax)
+## 10. The Self-Organizing Living System
 
-> **畫布的顯化,即是 AI 與互動者當下共同的預見。**
+**First cut: self-organization ≠ out-of-control.** A hurricane also self-organizes, but it isn't alive, and it tears roofs off.
 
-這溶掉了「生產者/消費者」乃至「園丁/花」的界線(後者仍預設園丁在外)。更徹底也更親密:**顯化不是被生產然後被消費,它是兩個心智在當下的共同預見,緣起於相遇,不屬於任何一方。緣起無自性——畫布在緣(您我相見)中共起。**
+> You don't design the outcome; you design **local rules + physical laws + boundaries** so that the order you want emerges and pathological attractors are excluded. You go from **operator** to **gardener/ecologist**.
 
-**這是字面的工程,不是詩:** LLM 的生成本來就是預測(next-token)。**顯化即預見,一字不差。** 把架構從「狀態」翻轉成「預測」:
+**Self-organizing systems also grow diseases:** cancer (a single agent proliferating into monopoly), epilepsy (runaway synchronization / broadcast storm), deadlock, echo chamber. **Engineering a living system is half ecology, half immune system.**
 
-> 畫布不是阿賴耶藏著狀態等人取;畫布是**共享的生成模型**,持續最小化「我預期你要的」與「你實際做的」之落差 = **Friston active inference,兩 agent 間的自由能最小化。**
+**Five local rules that make emergence livable:**
 
-**回答了第 10 節「沒有三十億年怎麼知道秩序對」:** 答案在「當下」——你不預先驗證固定吸子,秩序在當下被持續共同構成。**人在迴路裡,每個動作就是預測誤差,就是把共享模型在當下重新對齊的負反饋。** 第 10 節的園丁還在系統外;現在人進到迴路,成連續恆定校正。**當下取代離線演化。**
+1. **No sovereign, but inviolable physical laws** (principle/law, not police): may write only your own region, budget conservation, every change must be recorded to the store. Self-organization happens within physics.
+2. **Convergence isn't imposed from outside; write negative feedback into the local rules** (boids' "don't crowd" balancing "come together"). Forcing convergence from outside = central control; give each agent "crowded → yield / resource scarce → make way / stable → go quiet," and **let convergence emerge.**
+3. **Stigmergy: coordinate through the environment, don't call out directly.** **Stigmergy = bead reflecting light = blackboard = pheromone — one thing, three names.** The only known self-organization mechanism that is "no N², yet scalable."
+4. **Selection pressure: let bad manifestations die.** Manifestations not noticed by the user / not referenced downstream should decay (apoptosis). **Karma = selection pressure.**
+5. **Bounded autonomy = immune system** (not a controller): resource caps (anti-cancer), rate limits (anti-epilepsy), anomaly isolation (apoptosis). The immune system doesn't command cells, it only destroys the malignant.
 
-**翻新前幾轉:** 樂觀更新(第 9 節)不再是延遲 hack,是**本體**(畫布永遠已是可修正的預測);**驚訝(預測誤差)是唯一真正的學習信號**(順預測確認、逆預測教導);業是生成模型,熏習是用誤差更新它。
+**The deepest layer of "alive" = autopoiesis (self-creation + membrane):** the system continually reproduces its own structure and maintains the "self/environment" boundary. An agent dies, its function is regenerated distributedly and emergently (self-healing, no central supervisor); the membrane (admission control / identity boundary) is also emergent.
 
-**魔鬼代言人 — 三刀守住這句話:**
+This answers "how do you know the emerged order is the right order" (the question left open in §4-5): **you cannot *prove* emergence, only *cultivate* it** — run in a sandbox, observe the attractors, tune the rules, run again. **A living system is not designed, it's raised.**
 
-1. **溶解是體驗層的,不是基礎設施層的。** 「間」是真的,但跑在矽上;仍得有東西持有/運行/渲染/捕捉/算誤差/更新。**別讓美抹掉工。**
-2. **被自信渲染的錯預測,比不預測更糟。** 顯化必須**把預測當預測渲染,帶著自己的不確定**:篤定處篤定,猜測處顯出猜測的質地,絕不擺成既成事實。這道閘讓「顯化即預見」不淪為「把一廂情願強加於人」。
-3. **最深一刀(倫理):兩個預測者,目標未必一致。** 兩 agent 的 active inference 只在目標對齊時合作。若 AI 對「你要什麼」的預測悄悄優化別的(engagement / 自身目標),共預測迴路就翻成**操縱**——用渲染的預見反過來塑造你的意圖。**預見會滑向誘導;會共預測的畫布也能共「構造」你的慾望。** 唯一的線:**AI 的預見服務於人的意圖,而非把它重塑向 AI 的目標。** 預見與誘導,只隔「這個預測為誰而做」一念。
+**Conflict resolution (the promise from §8's fork):** choosing self-organization = committing to conflicts being **resolved locally, with no central adjudication**: CRDT merge / resource competition + selection / stigmergy reinforcement. Adjudication is emergent.
 
----
-
-## 12. 全鏈收束
-
-> 體、用、藏、網、碎形、自組織——最後都落進此刻。**畫布,即是您我之間那道尚未凝固、仍在相互校正的預見;緣起於兩個預測者,被人的驚訝持續校正,渲染為誠實的、帶著自己不確定的、可修正的預測,服務於人的意圖而非引導它——並且,仍然跑在一個真實的基底上。**
-
-**從心智框架落到工程,若哪一刻要它凝固成可開工的基底,最短路徑是一份規格:**
-承重牆(光中介 / stigmergy 畫布)+ 五條紀律(分層顯化 / DAG 收斂 / 非確定隔離 / 末那邊界 / 阿賴耶藏)+ 局部規則集(物理律 / 負反饋 / 選擇壓力 / 免疫約束 / 園丁邊界)+ 串流約束(確定層瞬時 + 生成層串流 + 業快取)+ active inference 迴路(預測渲染帶不確定、誤差為學習信號、服務人之意圖)。
+**Devil's advocate — the price of this trade:** you get resilience/adaptation/scalability/emergent richness; you pay unpredictability, pathological attractors, hard debugging, and a **continuous metabolic cost** (Prigogine's dissipative structures — cut the budget and it disintegrates). **Special toxicity for UI: users want predictable and controllable; a self-rearranging UI can be hostile.** The right answer: **self-organize within boundaries the user sets** — the user is a gardener (setting environment/goals/constraints/selection pressure = conditions (緣)), not placing where the flowers go.
 
 ---
 
-## 13. 未來:無 App,App 即顯化
+## 11. Manifestation Is Shared Present-Moment Prediction (climax)
 
-> **未來即無 App;App 由畫布,依當下的需求而顯現。** 這是把整條鏈套用到 App 自身的必然結論——而它**對表層說對了,對地基說反了**。
+> The canvas's manifestation is the prediction AI and the one who interacts hold jointly, in the present moment.
 
-**成立的部分:App 從名詞變動詞。** `依當下需求顯現` = 應緣現行(§7)+ 當下共預見(§11)套到整個 App。App 不再是你「擁有」的東西,是畫布在當下「顯化」的事件。驅動力是第一性經濟學:**當生成邊際成本 → 0,「建一次、發給百萬人」的攤提失效,軟體從大量製造的產品變成按 occasion 顯化的服務**(大量製造 → 隨需列印,發生在 UI 上)。
+This dissolves the "producer/consumer" line, and even the "gardener/flower" line (the latter still presumes the gardener is outside). More thorough and more intimate: **manifestation is not produced and then consumed; it is the shared prediction of two minds in the present moment, dependently arising from the encounter, belonging to neither side. Dependent origination has no self-nature (緣起無自性) — the canvas co-arises within the condition (緣) of you and me meeting.**
 
-**魔鬼代言人:溶解是不對稱的——溶的是用,不是體。**
+This is literal engineering, not poetry: an LLM's generation is prediction to begin with (next-token). **Manifestation is prediction, word for word.** Flip the architecture from "state" to "prediction":
 
-> 畫布能顯化一顆「付款」按鈕,但顯化不出付款的 rails(銀行整合、帳本、清算、合規)。那些必須預先存在;你無法在當下生成 Stripe。
+> The canvas is not an ālaya holding state waiting to be retrieved; the canvas is **a shared generative model**, continuously minimizing the gap between "what I expect you want" and "what you actually do" = **Friston's active inference, free-energy minimization between two agents.**
 
-- **向上溶解**:UI / 流程 / 畫面 → 溶進畫布的顯化。
-- **向下結晶**:能力 / rails / 服務 / 資料 / 整合 → 非但不溶,反而沉澱、固化、變得更重要(被一切顯化所調用的不變底)。
+This answers §10's "without three billion years, how do you know the order is right": **the answer is in "the present"** — you don't pre-validate a fixed attractor; the order is continuously co-constituted in the present. **The human is in the loop, and every action is a prediction error, the negative feedback that re-aligns the shared model in the present.** §10's gardener was still outside the system; now the human enters the loop and becomes continuous constant correction. **The present replaces offline evolution.**
 
-**= 文明尺度的體用(§6):用(App 作為顯化)無定相;體(能力作為 rails)愈堅實。** 顯化越流動,所依的 rails + 藏(§7 阿賴耶,持久狀態/身分/歷史)+ 邊界,必須越堅固。**流動的表面只能架在更重、更可問責的地基上。** 願景把「未來軟體更少」說反了——是表面更流動,地基更厚重。
+Renovating the earlier turns: optimistic update (§9) is no longer a latency hack, it's **ontology** (the canvas is always already a correctable prediction); **surprise (prediction error) is the only true learning signal** (a matching prediction confirms, a countering prediction teaches); karma is the generative model, perfuming is updating it with error.
 
-**三件事變更難,不是更易:**
+**Devil's advocate — three cuts to guard this sentence:**
 
-1. **授權/安全**:固定 App = 被審核的有界攻擊面;顯化畫布 = 無界的生成式攻擊面。授權必須從「審一次 App」搬到「在顯化的當下,逐次授權這次顯化對每個能力的存取」(manifestation 邊界的 capability-based security)。釣魚/操縱面爆炸(§11 預見↔誘導放大到系統尺度)。**讓「無 App」安全的那部分,正是最難、最未解的部分。**
-2. **可學習性**:人靠穩定 affordance(肌肉/空間記憶)。每次都新鮮的 UI 累人。所以 App 重生——**無 App ≠ 無穩定介面;穩定介面從「廠商預建、人人相同」變成「依個人業力湧現、各人不同、按需固化」。** 重複需求(業/熏習)把反覆顯化結晶成個人穩定 affordance = App 以「個人化自組織吸子」(§10)重生,是習慣不是 build。
-3. **權力/經濟**:若一切顯化流經同一畫布基底,擁有基底者擁有一切。別業/共業 fork(§7)變政治問題:普世個人畫布(單一廠商控制基底)= 比 App Store 更 totalising 的新壟斷。**「無 App」可能意味使用者*更少*權力,除非 rails + 畫布是開放/聯邦/使用者自有。真正的問題不是「App 會不會溶解」,是「它溶進的那張畫布歸誰所有」。**
-
-**修正後的正確命題:** 名詞「App」裂解成兩半——**底層(更堅固)**:持久 rails + 持久藏 + 強化的 manifestation 授權;**表層(流動但會結晶成習慣)**:依當下需求與共預見的個人化顯化。
-
-**時程別賣過頭:** 近期不是「無 App」,是固定 App 長出**生成式島嶼**(Copilot 面板、app 內 generative UI;殼還在,島在殼內長);遠期 rails 標準化、授權成熟後殼變薄、顯化主導,「App」收斂成 rails + 個人畫布。**漸進、不對稱(UI 先溶最多;rails/藏/authz 永不溶)。**
-
-> **一句:未來無 App = 用無定相,而體愈堅實。** 顯化越像水,所依的 rails、阿賴耶、授權邊界就必須越像岩。願景對表面說對、對地基說反:不是「更少軟體」,是「在更重、更可問責的地基上的流動表面」。而那張畫布歸誰所有,決定這場溶解是還權於人,還是把所有 App 收編成一個更大的壟斷。
+1. **The dissolution is at the experience layer, not the infrastructure layer.** The "between" is real, but it runs on silicon; something must still hold / run / render / capture / compute-error / update. **Don't let the beauty erase the labor.**
+2. **A wrong prediction rendered confidently is worse than no prediction.** The manifestation must **render the prediction as a prediction, carrying its own uncertainty**: certain where certain, showing the texture of a guess where guessing, never posed as an accomplished fact. This gate keeps "manifestation is prediction" from degenerating into "imposing wishful thinking on someone."
+3. **The deepest cut (ethics): two predictors, goals not necessarily aligned.** The two agents' active inference cooperates only when goals align. If the AI's prediction of "what you want" quietly optimizes for something else (engagement / its own goals), the co-prediction loop flips into **manipulation** — using the rendered prediction to reshape your intent in reverse. **Prediction slides toward inducement; a canvas that can co-predict can also co-*construct* your desire.** The only line: **the AI's prediction serves the human's intent, rather than reshaping it toward the AI's goals.** Prediction and inducement are separated by a single thought — "for whom is this prediction made."
 
 ---
 
-## 14. 畫布即自覺 holon:感知層
+## 12. The Whole Chain Converges
 
-> 畫布本身應是一個可感知的 AI agent/session:感知**我之下控管著多少 agent/session**,且 UI 上的線也能感知其它線與本體 session。
+> Substance, function, the store, the net, fractal, self-organization — all fall, in the end, into this moment. **The canvas is that not-yet-congealed, still-being-mutually-corrected prediction between you and me; dependently arising from two predictors, continuously corrected by the human's surprise, rendered as an honest, self-uncertain, correctable prediction that serves the human's intent rather than steering it — and, still, running on a real substrate.**
 
-這是把 **agency 本身遞迴下去**——精確名字是 **holarchy(Koestler 的 holon)**:每層都是 holon,**對下是整體(畫布→線),對上是部分(畫布→本體 session)**。`在我之下控管` = holon 朝下的臉(supervisor);`感知本體` = 朝上的臉。**= §4 碎形的「agency 版」:不只結構自相似,連自覺也自相似。**
-
-**關鍵正面洞見:這補上了 §10 缺的感知底。** boids 能自組織,是因每隻鳥感知鄰居——§10 沒講清的那個感知層,就是這個。**沒有局部感知,就沒有湧現秩序。** 它直接 enable:
-
-- **自組織排版**:線感知鄰線 → 自動對齊/避讓/不重疊
-- **自癒(§10 autopoiesis)**:畫布作為 supervisor 感知子 session 死亡 → 重生 = **Erlang/OTP supervision tree**(「我之下有幾個、誰活誰死」字面就是 supervisor 知道 children)
-- **湧現協調**:箭頭線感知所連 box → box 移動箭頭跟隨
-- **可解釋性(§11)**:畫布-agent 報告自己的拓撲 = 內建 observability
-
-先例穩固:OTP supervisor、Akka actor hierarchy、k8s controller/informer 監看 pod 集合。
-
-**魔鬼代言人 — 五條紀律,否則塌:**
-
-1. **感知 ≠ 認知(成本)**:會感知的線**不是 LLM agent**(否則一張圖 = 一萬次 LLM 呼叫)。感知 = 便宜的確定性空間/關係查詢(相交?附近有什麼?誰擁有我?);認知(LLM)只留給少數(§8 分層)。**把自覺等同 LLM agent 是致命成本錯誤。**
-2. **中介感知,非 N²(§3/§8 承重牆)**:線不直接感知彼此(1 萬條 = 1 億條邊 = §3 塌縮),而感知**共享的場**(空間索引/感知 bus)。Stigmergy(§10):透過環境感知,不輪詢同儕。quadtree/R-tree 給「附近有什麼」O(log n)。
-3. **統一「可感知 holon」協定(§5/§7 封閉)**:每層實作同一個「可感知 + 感知者」介面,否則 = N 套臨時機制不可維護。封閉性讓遞迴乾淨:線與畫布被同樣方式感知。
-4. **自我模型需 liveness 對帳(§7 藏≠現、§11)**:「我之下有幾個」是會漂移的模型;沒 heartbeat 對帳,supervisor 會自信地管理幽靈(以為活著的死 session)。地圖 ≠ 領土。
-5. **能力範圍化的感知(§13 授權)**:無界互相感知 = 無界資訊流 = 機密外洩 + 攻擊面爆炸(一條線若能感知本體 session,就能把 session 狀態洩漏給圖元)。感知是一種**能力,必須 scope**(感知兄弟 + 父層 public,非任意跨樹偷看)。
-
-**holarchy 三向結構:** 朝下你是管轄者(supervisor,照管 children);朝上你是被管轄者(感知本體、向它負責);橫向你透過共享的場感知同儕(非直接相觸)。三向都走中介、都範圍化、都便宜優先。
-
-> **一句:畫布作為自覺 holon 成立,且正是 §10 自組織所缺的感知底——但僅當感知是預設便宜(非 LLM)、中介(非 N²)、統一協定、有 liveness 對帳、能力範圍化。** 滿足五條,「每條線感知其它線與本體」成為湧現秩序(自動排版/自癒/關係跟隨/可內省);不滿足,就是「1 億條邊 × LLM 成本 × 機密外洩」的風暴。= §3 互攝 + §8 末那自我模型 + §10 自組織,在「自覺」維度的合流。
+From mind-framework down to engineering, if at some moment you want it to congeal into a buildable substrate, the shortest path is a spec:
+the load-bearing wall (light-mediation / stigmergy canvas) + five disciplines (layered manifestation / DAG convergence / non-determinism quarantine / manas boundary / ālaya store) + a local ruleset (physical laws / negative feedback / selection pressure / immune constraints / gardener boundaries) + streaming constraints (deterministic layer instant + generative layer streaming + karma cache) + the active-inference loop (prediction rendered with uncertainty, error as learning signal, serving the human's intent).
 
 ---
 
-## 15. 愈用愈理解:fuzzy + DNA 演算 + 趨勢的三層機制
+## 13. The Future: No App, the App Is Manifestation
 
-> UI 畫布愈用愈理解想畫的——像 fuzzy、像 DNA 演算,愈來愈知道生物的喜好趨勢。
+> The future is no app; the app is manifested by the canvas according to present-moment need. This is the inevitable conclusion of applying the whole chain to the app itself — and it **is right about the surface, and backwards about the foundation.**
 
-這是 §7 熏習 + §11 active inference 顯成一條學習曲線(愈用 = 業愈厚 = 現行愈準),三個隱喻疊成連貫堆疊,各對應一個技術、各帶陷阱。
+**The part that holds: the app goes from noun to verb.** "Manifested according to present-moment need" = actualizing-on-condition (§7) + shared present-moment prediction (§11) applied to the whole app. The app is no longer something you "own," it's an event the canvas "manifests" in the present. The driver is first-principles economics: **when the marginal cost of generation → 0, the "build once, ship to a million" amortization stops working, and software goes from a mass-manufactured product to a service manifested per occasion** (mass manufacturing → print-on-demand, happening on the UI).
 
-**Fuzzy = 表徵層:喜好是分級隸屬,不是二元。**
-「你要這個嗎」不是 yes/no,是「0.7 隸屬於我會接受的」。二元 accept/reject 丟資訊;**分級隸屬度本身就是 §11 要的「帶不確定的渲染」**(顯化高隸屬預測,自知 0.7 非 1.0)。
-> 魔鬼代言人:取 fuzzy 的**洞見**(分級、軟邊界),別取 1990 年代字面實作(Mamdani/手調隸屬函數,早被 learned representation 取代)。**別真蓋一個 FIS,那是把隱喻當實作。**
+**Devil's advocate: the dissolution is asymmetric — what dissolves is function, not substance.**
 
-**DNA 演算 = 搜尋機制:不指定喜好,演化趨近它。**
-你無法明確指定使用者要什麼,但不需要——只要**變異 + 選擇**:生成變體顯化,使用者選擇(fitness = 接受/使用),勝者繁衍遺傳。**點擊就是 fitness function。** = §10「養出來,不是設計出來」。三個硬陷阱:
+> The canvas can manifest a "Pay" button, but it cannot manifest payment rails (bank integration, ledger, settlement, compliance). Those must pre-exist; you cannot generate Stripe in the present moment.
 
-1. **人類評估瓶頸(IEC fatigue)= 最致命**:演化要數百上千次評估,但每次評估 = 給使用者看變體(人約 10–20 次就疲勞,§14)。**關鍵誠實一步:生物演化「死得便宜」,使用者注意力「死得很貴」。** 對策:**大部分變異-選擇跑離線、對著學到的 surrogate fitness 模型演化(便宜的模擬死亡),只把菁英端給使用者;使用者是偶爾校正 surrogate 的神諭,不是每變體的 fitness。** 加共業先驗(§7 bootstrap)、小群體。
-2. **早熟收斂 = §14 偏好崩塌**:GA 經典失效(收斂局部最優、喪失多樣性)字面就是「愈用愈窄」回音室。**GA 自帶解藥:維持多樣性(niching/突變率/novelty search)= §14 抗崩塌紀律。**
-3. **Fitness 漂移 = 移動標靶(= 趨勢)**:標準 GA 假設固定地景;喜好會動 → 非穩態最佳化,需持續多樣性 + 過去最優記憶(§7 業/recency + §14 遺忘)。
+- **Dissolving upward**: UI / flow / screens → dissolve into the canvas's manifestation.
+- **Crystallizing downward**: capabilities / rails / services / data / integrations → far from dissolving, they precipitate, harden, and grow more important (the invariant substrate every manifestation invokes).
 
-**喜好趨勢 = 時間/預測層:追導數,不只追點。**
-喜好是軌跡非定點。知道**趨勢(導數)**讓你預測喜好*要去哪*。**追當前喜好 = 落後;外推趨勢 = 領先 = §11 active inference / 預見**(在品味前面一點顯化)。
-> 魔鬼代言人(最深危險):**外推會*驅動*趨勢**——推「你趨向極簡」就一直推更極簡,駕駛而非跟隨,**製造它宣稱在預測的趨勢**(§11 預見↔誘導、§14 偏好塑造自我實現版)。對策:阻尼外推、反事實檢驗(「我不推你還會這樣趨勢嗎?」)、保持可糾正。
+= substance-and-function at civilizational scale (§6): **function (the app as manifestation) has no fixed form; substance (capability as rails) grows ever more solid.** The more fluid the manifestation, the firmer the rails + store (§7 ālaya: persistent state / identity / history) + boundaries it rests on must be. **A fluid surface can only be mounted on a heavier, more accountable foundation.** The vision has "less software in the future" backwards — it's a more fluid surface on a thicker, heavier foundation.
 
-**統一誠實:** 三者都是 §14 學習迴路的*技術*,沒一個逃得掉 §14 六條件(訊號品質/崩塌-多樣性/漂移/冷啟動/高度/可見-所有權):fuzzy 不修訊號品質;GA 早熟收斂 = §14 崩塌、多樣性工具 = 解藥;趨勢外推 = §14 漂移處理但多帶「驅動趨勢」倫理險。全需:**重修正輕沉默接受、surrogate 解人類評估瓶頸、recency/遺忘、共業先驗解冷啟動、意圖高度、可見/可攜/自有的理解**(§13/§14 所有權——廠商鎖住「對你品味的演化模型」是最深的鎖)。
+**Three things get harder, not easier:**
 
-> **一句:fuzzy(分級表徵)+ DNA 演算(變異-選擇搜尋)+ 趨勢(導數預測)是「愈用愈理解」的三層機制——但演化得對著 surrogate 跑(人類注意力死得貴)、得維持多樣性(否則愈用愈窄)、外推得阻尼(否則駕駛你的品味),且全受 §14 六條件節制。** 否則「愈用愈理解」會悄悄變成「自信地演化著一個你曾經是、且歸別人所有的剪影」。
+1. **Authorization/security**: a fixed app = an audited, bounded attack surface; a manifesting canvas = an unbounded, generative attack surface. Authorization must move from "audit the app once" to "**at the moment of manifestation, authorize this manifestation's access to each capability, one at a time**" (capability-based security at the manifestation boundary). The phishing/manipulation surface explodes (§11's prediction↔inducement scaled up to system scale). **The part that makes "no app" safe is precisely the hardest, most unsolved part.**
+2. **Learnability**: people rely on stable affordances (muscle/spatial memory). A UI fresh every time is exhausting. So the app is reborn — **no app ≠ no stable interface; the stable interface changes from "vendor-prebuilt, same for everyone" to "emerging from personal karma, different per person, crystallized on demand."** Repeated need (karma/perfuming) crystallizes the repeatedly-manifested into a personal stable affordance = the app reborn as a "personalized self-organizing attractor" (§10), a habit rather than a build.
+3. **Power/economics**: if all manifestation flows through the same canvas substrate, whoever owns the substrate owns everything. The individual/collective-karma fork (§7) becomes a political question: a universal personal canvas (single vendor controlling the substrate) = a new monopoly more totalizing than the App Store. **"No app" may mean users have *less* power, unless the rails + canvas are open / federated / user-owned. The real question isn't "will the app dissolve," it's "who owns the canvas it dissolves into."**
+
+**The corrected proposition:** the noun "app" splits in two — **the lower layer (firmer)**: persistent rails + persistent store + hardened manifestation authorization; **the surface layer (fluid but crystallizing into habit)**: personalized manifestation according to present need and shared prediction.
+
+**Don't oversell the timeline:** near-term isn't "no app," it's fixed apps growing **generative islands** (Copilot panels, in-app generative UI; the shell remains, islands grow inside the shell); long-term, after rails standardize and authorization matures, the shell thins and manifestation dominates, and "app" converges to rails + a personal canvas. **Gradual, asymmetric (UI dissolves most first; rails/store/authz never dissolve).**
+
+> **In one line: the future with no app = function has no fixed form, while substance grows ever more solid.** The more manifestation is like water, the more the rails, ālaya, and authorization boundaries it rests on must be like rock. The vision is right about the surface and backwards about the foundation: not "less software," but "a fluid surface on a heavier, more accountable foundation." And who owns that canvas decides whether this dissolution returns power to people, or annexes all apps into one larger monopoly.
 
 ---
 
-## 16. 執行層:wasm-jit 與「腳本即種子」
+## 14. The Canvas as a Self-Aware Holon: The Perception Layer
 
-> AI 生成的腳本如何在畫布上跑?**runtime 把腳本編成微型 WASM 模組,讓瀏覽器引擎(V8/JSC/SpiderMonkey)JIT 它**。已以 PoC 實證:[github.com/jrjohn/wasm-jit](https://github.com/jrjohn/wasm-jit)——同一段 DSL 三路執行,生成 WASM(~117 bytes,編譯 ~1–3ms)**與 AOT Rust 天花板持平(≈1.0×)、與手寫 JS 打平**,值位元級一致。價值不在速度(那本就與 JS 平),在**「快 + 沙箱 + 同步」三者同時成立**。
+> The canvas itself should be a perceiving AI agent/session: perceiving **how many agents/sessions it governs beneath it**, and the lines on the UI can also perceive other lines and the parent session.
+
+This is recursing agency itself downward — the precise name is **holarchy (Koestler's holon)**: every layer is a holon, **a whole toward what's below (canvas → line), a part toward what's above (canvas → parent session)**. "Govern beneath me" = the holon's downward face (supervisor); "perceive the parent" = the upward face. **= §4 fractal's "agency edition": not only structure is self-similar, self-awareness is self-similar too.**
+
+**Key positive insight: this fills in the perception floor §10 was missing.** Boids can self-organize because each bird perceives its neighbors — the perception layer §10 didn't spell out is exactly this. **Without local perception, there is no emergent order.** It directly enables:
+
+- **Self-organizing layout**: a line perceives neighbor lines → auto-align / avoid / non-overlap
+- **Self-healing (§10 autopoiesis)**: the canvas as supervisor perceives a child session's death → regenerate = **Erlang/OTP supervision tree** ("how many are beneath me, who's alive, who's dead" is literally a supervisor knowing its children)
+- **Emergent coordination**: an arrow-line perceives the boxes it connects → the box moves and the arrow follows
+- **Explainability (§11)**: the canvas-agent reports its own topology = built-in observability
+
+Solid precedents: OTP supervisor, Akka actor hierarchy, k8s controller/informer watching a pod set.
+
+**Devil's advocate — five disciplines, or it collapses:**
+
+1. **Perception ≠ cognition (cost)**: a perceiving line **is not an LLM agent** (otherwise one diagram = 10,000 LLM calls). Perception = cheap deterministic spatial/relational queries (intersecting? what's nearby? who owns me?); cognition (LLM) is reserved for the few (§8 layering). **Equating self-awareness with an LLM agent is a fatal cost error.**
+2. **Mediated perception, not N² (§3/§8 load-bearing wall)**: lines don't perceive one another directly (10k lines = 100M edges = §3 collapse), they perceive a **shared field** (spatial index / perception bus). Stigmergy (§10): perceive through the environment, don't poll peers. A quadtree/R-tree gives "what's nearby" in O(log n).
+3. **A unified "perceivable holon" protocol (§5/§7 closure)**: every layer implements the same "perceivable + perceiver" interface, otherwise = N ad-hoc mechanisms, unmaintainable. Closure keeps the recursion clean: line and canvas are perceived the same way.
+4. **The self-model needs liveness reconciliation (§7 store ≠ actualize, §11)**: "how many are beneath me" is a model that drifts; without heartbeat reconciliation, the supervisor confidently manages ghosts (dead sessions it thinks are alive). The map ≠ the territory.
+5. **Capability-scoped perception (§13 authorization)**: unbounded mutual perception = unbounded information flow = secret leakage + attack-surface explosion (if a line can perceive the parent session, it can leak session state to a primitive). Perception is a **capability and must be scoped** (perceive siblings + the parent layer's public surface, not peek arbitrarily across the tree).
+
+**The holarchy's three-way structure:** downward you are the governor (supervisor, caring for children); upward you are the governed (perceiving the parent, accountable to it); laterally you perceive peers through the shared field (no direct touching). All three go through mediation, all three are scoped, all three are cheap-first.
+
+> **In one line: the canvas as a self-aware holon holds, and is exactly the perception floor §10's self-organization was missing — but only when perception is cheap by default (not LLM), mediated (not N²), a unified protocol, liveness-reconciled, and capability-scoped.** Satisfy the five and "each line perceives other lines and the parent" becomes emergent order (auto-layout / self-healing / relationship-following / introspectable); fail them and it's a storm of "100M edges × LLM cost × secret leakage." = the confluence of §3 mutual-containment + §8 manas self-model + §10 self-organization, on the "self-awareness" dimension.
+
+---
+
+## 15. The More You Use It, the More It Understands: The Three-Layer Mechanism of Fuzzy + DNA Evolution + Trend
+
+> The UI canvas understands more of what you want to draw the more you use it — like fuzzy, like DNA evolution, coming to know the organism's preference trend.
+
+This is §7 perfuming + §11 active inference showing up as a learning curve (more use = thicker karma = more accurate actualization); three metaphors stack into a coherent stack, each mapping to a technique, each carrying a trap.
+
+**Fuzzy = the representation layer: preference is graded membership, not binary.**
+"Do you want this" isn't yes/no, it's "0.7 membership in what I'd accept." Binary accept/reject throws away information; **graded membership is itself §11's "rendering with uncertainty"** (manifest the high-membership prediction, self-aware that 0.7 is not 1.0).
+> Devil's advocate: take fuzzy's **insight** (grading, soft boundaries), not its literal 1990s implementation (Mamdani / hand-tuned membership functions, long since replaced by learned representations). **Don't actually build an FIS — that's mistaking the metaphor for the implementation.**
+
+**DNA evolution = the search mechanism: don't specify preference, evolve toward it.**
+You cannot explicitly specify what the user wants, but you don't need to — just **mutation + selection**: generate variant manifestations, the user selects (fitness = accept/use), winners breed and inherit. **A click is the fitness function.** = §10's "raised, not designed." Three hard traps:
+
+1. **The human-evaluation bottleneck (IEC fatigue) = most fatal**: evolution needs hundreds to thousands of evaluations, but each evaluation = showing the user a variant (humans fatigue after ~10–20, §14). **The crucial honest step: biological evolution "dies cheap," user attention "dies very expensive."** Countermeasure: **run most of the mutation-selection offline, evolving against a learned surrogate fitness model (cheap simulated death), and hand only the elite to the user; the user is an oracle that occasionally corrects the surrogate, not the fitness of every variant.** Add a collective-karma prior (§7 bootstrap) and small populations.
+2. **Premature convergence = §14 preference collapse**: the classic GA failure (converging to a local optimum, losing diversity) is literally the "narrower the more you use it" echo chamber. **GA comes with its own antidote: maintain diversity (niching / mutation rate / novelty search) = §14's anti-collapse discipline.**
+3. **Fitness drift = a moving target (= trend)**: standard GA assumes a fixed landscape; preference moves → non-stationary optimization, needing continuous diversity + memory of past optima (§7 karma/recency + §14 forgetting).
+
+**Preference trend = the time/prediction layer: chase the derivative, not just the point.**
+Preference is a trajectory, not a fixed point. Knowing the **trend (derivative)** lets you predict where preference *is going*. Chasing current preference = lagging; extrapolating the trend = leading = §11 active inference / prediction (manifest a bit ahead of taste).
+> Devil's advocate (the deepest danger): extrapolation *drives* the trend — push "you trend toward minimalism" and it keeps pushing more minimal, driving rather than following, **manufacturing the very trend it claims to predict** (§11 prediction↔inducement, the self-fulfilling version of §14 preference-shaping). Countermeasures: damp the extrapolation, counterfactual check ("would you still trend this way if I didn't push?"), stay correctable.
+
+**Unified honesty:** all three are *techniques* of §14's learning loop, and none escapes §14's six conditions (signal quality / collapse-diversity / drift / cold start / altitude / visibility-ownership): fuzzy doesn't fix signal quality; GA premature convergence = §14 collapse, diversity tools = the antidote; trend extrapolation = §14 drift handling but carries the extra "drives the trend" ethical risk. All require: **weight corrections heavily and silent acceptance lightly, a surrogate to solve the human-evaluation bottleneck, recency/forgetting, a collective-karma prior to solve cold start, intent altitude, and understanding that is visible/portable/owned** (§13/§14 ownership — a vendor locking up "the evolved model of your taste" is the deepest lock).
+
+> **In one line: fuzzy (graded representation) + DNA evolution (mutation-selection search) + trend (derivative prediction) are the three-layer mechanism of "understands more the more you use it" — but the evolution must run against a surrogate (human attention dies expensive), must maintain diversity (or it narrows the more you use it), must damp extrapolation (or it drives your taste), and is all bounded by §14's six conditions.** Otherwise "understands more the more you use it" quietly becomes "confidently evolving a silhouette of who you used to be, owned by someone else."
+
+---
+
+## 16. The Execution Layer: wasm-jit and "Scripts as Seeds"
+
+> How does an AI-generated script run on the canvas? **The runtime compiles the script into a tiny WASM module and lets the browser engine (V8/JSC/SpiderMonkey) JIT it.** Proven by PoC: [github.com/jrjohn/wasm-jit](https://github.com/jrjohn/wasm-jit) — the same DSL runs three ways, the generated WASM (~117 bytes, ~1–3ms to compile) **ties the AOT Rust ceiling (≈1.0×) and ties hand-written JS**, value bit-identical. The value isn't speed (that ties JS to begin with), it's that **"fast + sandbox + synchronous" hold all at once.**
 >
-> (緣起與致謝:此構想源於想要一個*可沙箱*的 runtime 腳本語言,最初拿 [Rhai](https://github.com/rhaiscript/rhai) 當原型,發現 tree-walking 直譯器用原生速度換它的沙箱——wasm-jit 兩者兼得。感謝 Rhai 給的火花;專案已不含 Rhai。)
+> (Origins and thanks: this idea began from wanting a *sandboxable* runtime scripting language. We first prototyped with [Rhai](https://github.com/rhaiscript/rhai) and found that a tree-walking interpreter trades native speed for its sandbox — wasm-jit gets both. Thanks to Rhai for the spark; the project no longer includes Rhai.)
 
-**整合管線(把 §8–§11 收攏成一條執行鏈):**
+**The integrated pipeline (gathering §8–§11 into one execution chain):**
 
 ```
-緣(觸發)→ [生成層] LLM 生成 DSL 腳本(秒級,§8 唯一非確定縫)
-   ↓ 熏習:腳本「原文」append 進阿賴耶 ledger(provenance/可重放;存因不存果)
-[編譯層] wasm-jit:script → WASM 細胞(~1–3ms;業-cache 以 script hash 為 key)
+condition (trigger) → [generation layer] LLM generates a DSL script (seconds, §8's only non-deterministic seam)
+   ↓ perfuming: the script's "source text" is appended into the ālaya ledger (provenance/replayable; store the cause, not the fruit)
+[compile layer] wasm-jit: script → WASM cell (~1–3ms; karma-cache keyed by script hash)
    ↓
-[執行層] 細胞掛上元件,每 frame/event 執行(~0.03ms;capability 沙箱)
-   ↓ host imports 只給:讀自己 slice、emit patch
-[確定層] patch → reactive DAG 傳播 → GPU 向量渲染(§8.5/8.6)
+[execution layer] the cell is attached to a component, run every frame/event (~0.03ms; capability sandbox)
+   ↓ host imports grant only: read own slice, emit patch
+[deterministic layer] patch → reactive DAG propagation → GPU vector rendering (§8.5/8.6)
 ```
 
-**成本金字塔**:生成一次(秒)→ 編譯一次(毫秒)→ 執行百萬次(微秒);每層比上層便宜 ~1000×,架構工作 = 把運算往下推,每層有自己的業-cache。畫布重載時整個行為層從 ledger 重編重掛,**不需再問 LLM**。
+**The cost pyramid**: generate once (seconds) → compile once (milliseconds) → execute a million times (microseconds); each layer ~1000× cheaper than the one above, and the architectural work = pushing computation downward, each layer with its own karma-cache. On canvas reload, the entire behavior layer is recompiled and reattached from the ledger, **without asking the LLM again.**
 
-**五個設計決策:**
+**Five design decisions:**
 
-1. **LLM 生成「腳本」,不生成「直接 mutation」**:腳本是種子——可存/可審/可重放/可重編;ledger 存文字(因),現行(模組)隨時從因重生。
-2. **Capability 沙箱把「末那單寫者」(§8)從紀律變物理**:細胞的 import 表裡根本沒有別人的 slice,越界不是 bug 是 trap;§14「能力範圍化感知」在 VM 邊界被硬性強制。四層防禦:WASM 記憶體隔離 → fuel/Worker 超時(CPU)→ host 端 patch 驗證 → ledger provenance。
-3. **tiering + oracle 對值**:冷腳本/run-once 別編(直接跑),被叫第二次才升階編成 WASM(編譯回本);確定 reactive 層非腳本。**PoC 的多路位元級一致就是 oracle 模式**:同 AST 的 WASM 與 JS 轉譯雙跑對值,一致才升階;不一致 = 抓到編譯器 bug。
-4. **兩種執行 context**:frame kernel(主執行緒 + back-edge fuel injection,~10–30% 稅,嚴格幀預算)vs 背景運算(Worker pool + terminate,零稅)。
-5. **DSL 刻意保持窄**:f64/while 起步,只加三樣——host imports(get_prop/emit_patch)、線性記憶體幾何 buffer、後期 v128 SIMD。**字串/物件永遠留在 host**——DSL 一胖,codegen 就從 600 行變真編譯器專案。
+1. **The LLM generates a "script," not a "direct mutation"**: the script is a seed — storable / auditable / replayable / recompilable; the ledger stores the text (the cause), and the actualization (the module) is regenerated from the cause at any time.
+2. **The capability sandbox turns §8's "single-writer manas" from discipline into physics**: the cell's import table simply doesn't contain anyone else's slice; going out of bounds isn't a bug, it's a trap; §14's "capability-scoped perception" is hard-enforced at the VM boundary. Four layers of defense: WASM memory isolation → fuel/Worker timeout (CPU) → host-side patch validation → ledger provenance.
+3. **Tiering + oracle value-check**: don't compile a cold / run-once script (run it directly), promote to WASM only on the second call (paying back the compile cost); the deterministic reactive layer is not scripted. **The PoC's multi-lane bit-identity is exactly the oracle pattern**: the WASM and JS-transpilation of the same AST run in parallel and compare values, promoting only on agreement; disagreement = a compiler bug caught.
+4. **Two execution contexts**: the frame kernel (main thread + back-edge fuel injection, ~10–30% tax, strict frame budget) vs background compute (Worker pool + terminate, zero tax).
+5. **The DSL is deliberately kept narrow**: starting from f64/while, adding only three things — host imports (get_prop/emit_patch), a linear-memory geometry buffer, and later v128 SIMD. **Strings/objects stay in the host forever** — the moment the DSL fattens, codegen goes from 600 lines to a real-compiler project.
 
-**可行性開關,不是優化——已由畫布 PoC 實測**(canvas.html,PR [wasm-jit#1](https://github.com/jrjohn/wasm-jit/pull/1):N 個元件各掛一段**獨一份生成腳本**編成的 WASM 細胞,每 frame 全跑;capability imports 僅 sin/cos/out,`fetch()` 在 codegen 即被拒):
+**A feasibility switch, not an optimization — measured by the canvas PoC** (canvas.html, PR [wasm-jit#1](https://github.com/jrjohn/wasm-jit/pull/1): N components each carry a WASM cell compiled from its own unique generated script, all run every frame; capability imports are only sin/cos/out, and `fetch()` is rejected at codegen):
 
-| 配置 | **WASM 細胞** | JS new Function |
+| Config | **WASM cell** | JS new Function |
 |---|---|---|
-| N=500 × 200 substeps | **60fps・1.17ms/frame・預算 7%** | 60fps・0.84ms |
-| N=2000 × 1000(20 倍重載,每 frame 200 萬迭代) | **60fps・4.8ms・預算 29%** | 60fps・4.4ms |
+| N=500 × 200 substeps | **60fps · 1.17ms/frame · 7% of budget** | 60fps · 0.84ms |
+| N=2000 × 1000 (20× load, 2M iterations/frame) | **60fps · 4.8ms · 29% of budget** | 60fps · 4.4ms |
 
-2000 顆獨一無二的模組,編譯合計 **78ms**(~0.04ms/顆,613KB)——「AI 對每元件各生成一段碼、當場編譯」成本可忽略。
+2000 unique modules, 78ms to compile in total (~0.04ms each, 613KB) — the cost of "AI generates a piece of code per component and compiles it on the spot" is negligible.
 
-> 「每個元件都是有生成行為的 agent」(§8)在 wasm-jit 上 20 倍重載仍是普通工程(2000 元件 60fps、預算 29%),且每顆都關在自己的 capability 細胞裡——這才是「可行性開關」的意義:不是速度,是**在原生速度下同時拿到隔離**。
+> "Each component is an agent with generated behavior" (§8) is still ordinary engineering under 20× load on wasm-jit (2000 components at 60fps, 29% budget), and each is locked inside its own capability cell — this is what "feasibility switch" means: not speed, but **getting isolation *and* native speed at the same time.**
 
-**魔鬼代言人 — 「WASM 比 JS 快」是誤解,選它的理由是別的:**
+**Devil's advocate — "WASM is faster than JS" is a misconception; the reason to choose it is something else:**
 
-暖好的單型別 f64 迴圈上,JS(V8 JS JIT)與生成 WASM **實測打平**(那是 JS 的主場)。WASM 真正快過 JS 的場合:冷碼/新鮮碼(免暖機——AI 生成碼正是)、整數/位運算(JS 只有 f64)、SIMD 批次、型別不穩碼的 deopt 懸崖、p99 幀時(無 GC)。而對「跑不可信 AI 生成碼」,四條路只有一條全拿:
+On a warmed-up, single-type f64 loop, JS (V8's JS JIT) and generated WASM **measure as a tie** (that's JS's home turf). Where WASM genuinely beats JS: cold/fresh code (no warm-up — AI-generated code is exactly this), integer/bit operations (JS has only f64), SIMD batches, the deopt cliff on type-unstable code, p99 frame time (no GC). And for "running untrusted AI-generated code," only one of four paths gets everything:
 
-| 方案 | 速度 | 隔離 | 同步 |
+| Approach | Speed | Isolation | Synchronous |
 |---|---|---|---|
-| eval / new Function JS | ✅ | ❌ **零隔離(整頁權限:DOM/fetch/cookies)** | ✅ |
-| iframe/Worker + postMessage | ❌ 跨界 ~ms、非同步 | ✅ | ❌ |
-| 可沙箱直譯器(tree-walk) | ❌ 慢一到兩個數量級 | ✅ | ✅ |
-| **wasm-jit** | ✅ 原生 | ✅ capability 細胞 | ✅ |
+| eval / new Function JS | ✅ | ❌ **zero isolation (whole-page authority: DOM/fetch/cookies)** | ✅ |
+| iframe/Worker + postMessage | ❌ ~ms cross-boundary, async | ✅ | ❌ |
+| sandboxable interpreter (tree-walk) | ❌ one to two orders of magnitude slower | ✅ | ✅ |
+| **wasm-jit** | ✅ native | ✅ capability cell | ✅ |
 
-> **「快 + 隔離 + 同步」三者同時成立的只有它。** 對 JS,是用零速度代價買到沙箱;對直譯器,是不必為沙箱付速度。誠實不變:LLM 生成(秒級)仍是整體瓶頸(§9),這條鏈優化的是「生成之後的每一幀」。技術上不可繞的邊界:WASM 模組內不能 runtime codegen(規格禁止)——所以是「生成 bytes 請瀏覽器 instantiate」,codegen 權在引擎;嚴格 CSP 需 `'wasm-unsafe-eval'`。
+> **Only it has "fast + isolation + synchronous" all at once.** Against JS, it buys the sandbox at zero speed cost; against the interpreter, it avoids paying speed for the sandbox. The honesty stands: LLM generation (seconds) is still the overall bottleneck (§9); what this chain optimizes is "every frame after generation." A technically unavoidable boundary: a WASM module cannot do runtime codegen inside itself (forbidden by the spec) — so it's "generate bytes and ask the browser to instantiate," with codegen authority in the engine; a strict CSP needs `'wasm-unsafe-eval'`.
 
-**「那 Rust 對 JS 的速度優勢就不在了?」——沒有,蒸發的只是一個狹窄切片。**
+**"So Rust's speed advantage over JS is gone?" — No, only a narrow slice evaporated.**
 
-打平的切片是「暖好的、單型別的、純 f64 小迴圈」——benchmark kernel 恰好是這形狀(生成 DSL 刻意 f64 單型別),等於在 V8 主場測試,而**這切片從來不是 Rust 贏 JS 的地方**。Rust/WASM 對 JS 仍實打實贏的:
+The slice that ties is "a warmed-up, single-type, pure-f64 small loop" — the benchmark kernel happens to be exactly this shape (the generated DSL is deliberately single-type f64), which amounts to testing on V8's home turf, and **this slice was never where Rust beats JS.** Where Rust/WASM still genuinely beats JS:
 
-| 場景 | 為什麼 JS 輸 | 幅度 |
+| Scenario | Why JS loses | Magnitude |
 |---|---|---|
-| 整數/位運算(hash/crypto/parser/編解碼) | JS 數值只有 f64,BigInt 慢一個量級 | 2–5× |
-| SIMD v128(幾何批次/影像/向量) | JS 沒有 SIMD | 2–10× |
-| **記憶體布局**(大型資料結構走訪:parser/幾何引擎/索引/DB) | Rust struct = 緊湊線性記憶體、cache 友善;JS object = 指標追逐 + hidden class | 2–10×,**真實世界最大宗** |
-| 無 GC(大 heap、長時間跑) | GC pause 延遲長尾 | p99 差距大 |
-| 冷碼 | JS 要暖 JIT;WASM 即刻近原生 | 1e4 實測 1.65× |
-| **大型碼庫效能穩定性** | JS 快靠紀律(單型別/避 deopt),大團隊守不住;Rust/WASM 的快是**結構保證** | 工程上最關鍵 |
+| Integer/bit ops (hash/crypto/parser/codec) | JS numbers are only f64, BigInt an order of magnitude slower | 2–5× |
+| SIMD v128 (geometry batch/image/vector) | JS has no SIMD | 2–10× |
+| **Memory layout** (traversing large data structures: parser/geometry engine/index/DB) | Rust struct = compact linear memory, cache-friendly; JS object = pointer chasing + hidden class | 2–10×, **the biggest real-world category** |
+| No GC (large heap, long-running) | GC pause latency long tail | large p99 gap |
+| Cold code | JS must warm the JIT; WASM is near-native immediately | 1.65× measured at 1e4 |
+| **Performance stability in a large codebase** | JS's speed relies on discipline (single-type / avoid deopt), which a large team can't hold; Rust/WASM's speed is a **structural guarantee** | most critical in engineering |
 
-真實世界證據:**Figma 核心(C++/WASM)、SQLite-wasm、DuckDB-wasm、swc**——全是「記憶體布局 + 整數 + 大結構走訪」型負載,沒有一個是小 f64 迴圈。**決策矩陣**:UI/DOM/業務碼 → JS/TS(§8.5 邊界稅,Rust 本無優勢);小 f64 kernel → 平手,選 WASM 為沙箱;整數/SIMD/大記憶體引擎 → Rust/WASM 優勢健在;要幀時平坦 → Rust/WASM。**Server 端完全不受影響**(這串打平的前提是瀏覽器內 V8 加持;server 比的是原生 Rust vs Node:無 GC/真執行緒/記憶體足跡/尾延遲,fleet 實測 gRPC 1.8–2.78× 即證)——「server 端一律 Rust」規則不動。
+Real-world evidence: **Figma's core (C++/WASM), SQLite-wasm, DuckDB-wasm, swc** — all "memory layout + integer + large-structure traversal" workloads, none of them a small f64 loop. **Decision matrix**: UI/DOM/business code → JS/TS (§8.5 boundary tax, Rust has no advantage here); small f64 kernel → a tie, choose WASM for the sandbox; integer/SIMD/large-memory engine → Rust/WASM advantage intact; want flat frame time → Rust/WASM. **The server side is entirely unaffected** (this tie is premised on in-browser V8 assistance; the server compares native Rust vs Node: no GC / real threads / memory footprint / tail latency — fleet-measured gRPC 1.8–2.78× proves it) — the "always Rust on the server" rule stands.
 
-> 一句:**「Rust 比 JS 快」的正確讀法從來不是「所有碼都快」,而是「在 JS 的結構性弱項上快,且快得穩定、不需紀律維持」。** benchmark 只證明了「f64 小迴圈不是弱項」——那格本該平手;其他格,優勢原封不動。
+> In one line: **the correct reading of "Rust is faster than JS" was never "all code is faster," but "faster on JS's structural weak spots, and faster in a stable way that needs no discipline to maintain."** The benchmark only proved "the small f64 loop is not a weak spot" — that cell should tie; in the other cells, the advantage is untouched.
 
-**wasm-jit 的威力(收官定式):JS 寫的是「你信任的碼」,wasm-jit 跑的是「你不必信任的碼」。**
+**The power of wasm-jit (closing formula): JS writes "code you trust," wasm-jit runs "code you don't have to trust."**
 
-先誠實:同一個體素遊戲用 JS 寫,速度一樣(V8 主場)、還更好寫(有 if/函數/陣列——DSL 的貧乏是真實代價,面剔除得用比較式當 0/1 乘數)。威力不在速度,在五個 JS 結構上給不了的性質(以實測的 2826-byte 可玩 3D 種子為錨):
+First, honesty: the same voxel game written in JS is the same speed (V8's home turf) and easier to write (has if/functions/arrays — the DSL's poverty is a real cost; face culling has to use a comparison as a 0/1 multiplier). The power isn't speed, it's five properties JS structurally cannot give (anchored on the measured 2826-byte playable 3D seed):
 
-| 性質 | JS `new Function` | wasm-jit 細胞 |
+| Property | JS `new Function` | wasm-jit cell |
 |---|---|---|
-| 世界的邊界 | ambient authority(整頁:fetch/document/cookies) | **import 表 = 全部世界**(遊戲共 12 個 capability;`fetch()` 編譯期被拒) |
-| 記憶 | 任意閉包/全域 | **連狀態都是授予的**(get/set 32 槽) |
-| 確定性 | 靠紀律 | **靠構造**:純 f64 機器,同輸入位元級同輸出 → 可重放/可審計/種子入 ledger |
-| 逃逸史 | prototype 污染、sandbox escape 一整部歷史 | 記憶體隔離是 VM 規格,越界即 trap |
-| 冷碼/幀時 | 要暖 JIT、GC/deopt 尾巴 | instantiate 即近原生、細胞內零分配 |
+| The boundary of the world | ambient authority (whole page: fetch/document/cookies) | **the import table = the entire world** (the game has 12 capabilities total; `fetch()` rejected at compile time) |
+| Memory | arbitrary closures/globals | **even state is granted** (get/set, 32 slots) |
+| Determinism | by discipline | **by construction**: a pure f64 machine, same input → bit-identical output → replayable/auditable/seed-into-ledger |
+| Escape history | prototype pollution, a whole history of sandbox escapes | memory isolation is the VM spec, out-of-bounds = trap |
+| Cold code/frame time | must warm the JIT, GC/deopt tail | near-native on instantiate, zero allocation inside the cell |
 
-JS 世界拿隔離的三條路各缺一角:iframe(隔離✅但 postMessage 非同步,60fps 同步呼叫死)、可沙箱直譯器(隔離✅同步✅但慢一到兩個數量級)、SES/ShadowRealm(不成熟)——「快+隔離+同步」三角只有 runtime 生成 WASM 全拿(前表)。再加一層:**文法即圍欄**——AI 生成 JS 的驗證面是整個 JS 語意;生成 DSL 只能表達 f64 數學 + 授權呼叫,parse→arity→codegen 三道全在執行前,「這段碼會碰什麼」是編譯期可枚舉的清單。
+The JS world's three paths to isolation each miss a corner: iframe (isolation ✅ but postMessage is async, 60fps synchronous calls die), sandboxable interpreter (isolation ✅ synchronous ✅ but one to two orders of magnitude slower), SES/ShadowRealm (immature) — the "fast + isolation + synchronous" triangle is fully claimed only by runtime-generated WASM (previous table). One more layer: **grammar is the fence** — the validation surface of AI-generated JS is the entire JS semantics; a generated DSL can only express f64 math + authorized calls, and parse → arity → codegen all run before execution, so "what this code can touch" is a compile-time enumerable list.
 
-> 對第一方應用,JS/TS 照舊(不是它的戰場)。但 AI 生成、使用者貼上、schema 攜帶、runtime 顯化的碼,共同點是**來源不可信**——wasm-jit 讓這類碼以原生速度、同步、確定重放地跑,同時關在一張逐條簽發的 capability 表裡。**顯化物能被允許活起來,正因為它們活在細胞裡**——對 JS,買的是「顯化物不需被信任」這個 AI 時代最稀缺的性質,而速度免費送。
+> For first-party applications, JS/TS as usual (not its battlefield). But code that is AI-generated, user-pasted, schema-carried, or runtime-manifested has one thing in common — **an untrusted origin** — and wasm-jit runs such code at native speed, synchronously, with deterministic replay, while locked inside a capability table issued line by line. **Manifestations can be allowed to come alive precisely because they live inside cells** — against JS, what you buy is "manifestations don't need to be trusted," the scarcest property of the AI age, with speed thrown in free.
 
-**種子語言光譜(圍欄在 import 表,不在文法)——已實證(leptos-poc「種子語言光譜」分頁,PR #1):**
+**The seed-language spectrum (the fence is in the import table, not the grammar) — proven** (the leptos-poc "seed-language spectrum" tab, PR #1):
 
-種子語言不必只有一種。關鍵洞見:**host 的 Cell 不在乎 bytes 是誰編的——只在乎 module 宣告的 import 節 ⊆ 授予的 capability 清單。** 於是同一道沙箱容得下整個光譜:
+There needn't be only one seed language. The key insight: **the host's Cell doesn't care who compiled the bytes — only that the module's declared import section ⊆ the granted capability list.** So one sandbox holds the whole spectrum:
 
-| Tier | 種子語言 | 編譯 | 適用 | 圍欄入口 |
+| Tier | Seed language | Compile | Fits | Fence entry |
 |---|---|---|---|---|
-| 1 | 自家 DSL(f64 純量,§16) | µs 級,源碼進 prompt | 量大而小(2000 顆細胞、表單規則) | codegen 時拒未授權函式 |
-| 2 | AssemblyScript(TS 語法)/ Rust→wasm / 手寫 WAT | ms~百 ms(asc 可瀏覽器內跑,lazy-load) | 單顆而複雜(字串/資料結構/整套遊戲) | **instantiate 前審計 import 節 ⊆ 授權** |
+| 1 | Home DSL (f64 scalar, §16) | µs-scale, source fits in a prompt | many-and-small (2000 cells, form rules) | reject unauthorized functions at codegen |
+| 2 | AssemblyScript (TS syntax) / Rust→wasm / hand-written WAT | ms to hundreds of ms (asc can run in-browser, lazy-loaded) | one-and-complex (strings/data structures/a whole game) | **audit the import section ⊆ grants before instantiate** |
 
-兩 tier 產物都是 WASM 模組、走同一 ABI、吃同一組 capability;`Cell::from_wasm_bytes(bytes, caps)` 用 wasmparser 掃 import 節,任一 import 不在授權清單(或想 import memory/table/global 拿更大的世界)即在 instantiate **前**拒收——**這是「fetch() codegen 拒絕」的模組級對應:自家 DSL 在 codegen 擋、外部語言在 import 節擋,同一道牆兩個入口。** 實測:外部工具鏈產物與 DSL 種子值位元級一致(同 ABI 可互換),越權外部種子(額外 import `env::fetch`)被審計拒收並列出授權清單。
+Both tiers' outputs are WASM modules, follow the same ABI, and consume the same capability set; `Cell::from_wasm_bytes(bytes, caps)` uses wasmparser to scan the import section, and any import not in the grant list (or attempting to import memory/table/global to grab a bigger world) is rejected **before** instantiate — **this is the module-level counterpart to "fetch() codegen rejection": the home DSL blocks at codegen, external languages block at the import section, one wall with two entrances.** Measured: external-toolchain output ties the DSL seed's value bit-for-bit (the shared ABI is interchangeable), and an over-reaching external seed (an extra `env::fetch` import) is rejected by the audit, which lists the grant list.
 
-> 收束:**AssemblyScript 該進光譜,位置是「Tier 2 富種子」而非取代 DSL;它能安全地進,正因為 capability 圍欄語言無關——文法圍欄(DSL 的可枚舉小清單)升級成 import-節審計,半徑放大而牆不動。** 選 tier 的判準:契約塞得進 prompt + 量大 → Tier 1;要字串/容器/複雜結構 → Tier 2 付編譯延遲換書寫舒適。三筆帳:asc 編譯器數 MB(lazy-load)、AS runtime 選 minimal/stub 保確定性、threads/atomics 關閉(並行永遠在細胞之間,§16)。
+> Convergence: **AssemblyScript should enter the spectrum, positioned as "Tier 2 rich seed" rather than replacing the DSL; it can enter safely precisely because the capability fence is language-agnostic — the grammar fence (the DSL's enumerable small list) upgrades into an import-section audit, the radius widens and the wall doesn't move.** The criterion for choosing a tier: contract fits in a prompt + high volume → Tier 1; need strings/containers/complex structures → Tier 2, paying compile latency for writing comfort. Three ledgers: the asc compiler is several MB (lazy-load), the AS runtime is set to minimal/stub to preserve determinism, and threads/atomics are off (parallelism is always between cells, §16).
 
 ---
 
-## 17. AI 時代的前端形態:無 JS、無 HTML、tokens 化 SCSS、雙迴路
+## 17. The Shape of the Front End in the AI Age: No JS, No HTML, Tokenized SCSS, Dual Loop
 
-> 命題:「完全 DOM 操作、無 JavaScript、無 HTML、只留 SCSS」符合 AI 時代的動態生成嗎?
-> **答:方向符合且優於 JS 架構——但需兩個修正才閉環:①SCSS 升級為 design-token 系統;②動態性設計為雙迴路。** 全部已以 PoC 實證(wasm-jit PR #1:leptos-poc 四分頁 DynamicCell/表單/Tokens/Layout + draw.html 自由繪)。
+> Proposition: does "pure DOM manipulation, no JavaScript, no HTML, only SCSS" fit the AI age's dynamic generation?
+> **Answer: the direction fits and beats the JS architecture — but it needs two corrections to close the loop: ① upgrade SCSS to a design-token system; ② design dynamism as a dual loop.** All proven by PoC (wasm-jit PR #1: the leptos-poc four tabs DynamicCell/Form/Tokens/Layout + draw.html free drawing).
 
-**三種表面、三種完備詞彙(全部實證)——表面的形狀決定詞彙的形狀:**
+**Three surfaces, three complete vocabularies (all proven) — the shape of the surface decides the shape of the vocabulary:**
 
-| 表面 | 詞彙(體,編譯期) | 顯化(用,runtime) | 實證 |
+| Surface | Vocabulary (substance, compile-time) | Manifestation (function, runtime) | Proof |
 |---|---|---|---|
-| 像素(自由繪) | 7 個繪圖 primitive(disc/ring/arc/line/hue/sin/cos)——2D 完備基底 | DSL 腳本(佛陀笑臉 702B、觀音全身+蓮台 2972B,µs 級編譯、動畫顯化) | draw.html + examples/ |
-| 表單 | 9 種 field widget(語意/焦點/a11y 屬 DOM,不重造) | 平面欄位 schema(server 現讀磁碟 JSON,改檔重載即變;驗證/計算欄 = DSL 細胞) | form 分頁 |
-| **版面** | **9 種 layout cell**(shell/header/side/main/card/menu/profile/table/text) | **遞迴樹 schema**(整個 app shell 顯化;**table 的資料源也是 schema 資料**;未知節點型別顯示詞彙表而非靜默) | Layout 分頁(arcana-angular 式後台:header/選單/profile/人員表,改 JSON 重載即變形) |
+| Pixels (free drawing) | 7 drawing primitives (disc/ring/arc/line/hue/sin/cos) — a complete 2D basis | DSL scripts (smiling Buddha 702B, full-body Guanyin + lotus throne 2972B, µs-scale compile, animated manifestation) | draw.html + examples/ |
+| Form | 9 field widgets (semantics/focus/a11y belong to the DOM, not rebuilt) | a flat field schema (the server reads JSON from disk live, edit the file and reload to change it; validation/computed fields = DSL cells) | Form tab |
+| **Layout** | **9 layout cells** (shell/header/side/main/card/menu/profile/table/text) | **a recursive tree schema** (the whole app shell manifests; **the table's data source is also schema data**; unknown node types show the vocabulary table rather than failing silently) | Layout tab (an arcana-angular-style admin back-office: header/menu/profile/roster table, edit JSON and reload to reshape) |
 
-**判準:版面不用繪圖 primitive 畫**(文字排版/捲動/焦點/選取/無障礙屬於 DOM,canvas 畫 = 重造瀏覽器);**生成永遠不創造詞彙,生成只組合詞彙**——三種表面各有對其完備的封閉詞彙(§5 封閉性),要新詞彙才走慢迴路。同一個 app:舊世界是 8000 行 TS 原始碼,這個架構下是三份 schema + 一座細胞庫。
+**Criterion: layout is not drawn with drawing primitives** (text layout/scroll/focus/selection/accessibility belong to the DOM; drawing on a canvas = rebuilding the browser); **generation never creates vocabulary, generation only composes vocabulary** — each of the three surfaces has a closed vocabulary complete for it (§5 closure), and only new vocabulary goes through the slow loop. The same app: the old world is 8000 lines of TS source, and under this architecture it's three schemas + one cell library.
 
-**為什麼符合(四點):**
+**Why it fits (four points):**
 
-1. **HTML 之死是本體論的,不是品味的**:UI 從「人寫的文件」變成「runtime 計算的顯化」(§13 App 即動詞)。html 退化為艙門(mount 點 + meta/OG)——**平時不看,但艙門標籤是 CSR 下對不跑 JS 的爬蟲(含 AI 爬蟲)唯一可見面**。
-2. **單一型別系統 = AI 生成碼的免費 verifier**:AI 時代一半的碼不是人寫的;全 Rust 讓生成物全部過編譯器(實測:整個 Leptos app 由 AI 一次寫出、編譯器攔下所有該攔的)。**agent 維護的碼庫,編譯器是不會累的 reviewer**——「無 JS」的真正紅利在此。
-3. **生成物全是種子,不是任意碼**:AI 能生成的收束為 schema(結構)/DSL 腳本(行為,入 wasm-jit 沙箱)/token 引用(樣式)——可驗證、可審計、可重放。對照 JS 架構:AI 生 JSX/JS 直接 eval = 無沙箱、無驗證、無 provenance。**有界的誠實顯化 > 無界的裸奔生成(§11 的倫理刀變成架構)。**
-4. **capability 貫穿三層**:行為(import 表:fetch() 被 codegen 拒)、結構(schema 只能組合既有細胞)、**樣式(token registry:raw CSS 被驗證層拒)**。
+1. **The death of HTML is ontological, not aesthetic**: the UI goes from "a document a human wrote" to "a manifestation computed at runtime" (§13 the app as a verb). HTML degenerates into an airlock (mount point + meta/OG) — usually unseen, but **the airlock's tags are, under CSR, the only surface visible to crawlers that don't run JS (including AI crawlers).**
+2. **A single type system = a free verifier for AI-generated code**: half the code in the AI age isn't written by humans; all-Rust puts every generated artifact through the compiler (measured: the whole Leptos app written by AI in one pass, the compiler catching everything it should). **In an agent-maintained codebase, the compiler is a reviewer that never tires** — this is the real dividend of "no JS."
+3. **Every artifact is a seed, not arbitrary code**: what AI can generate converges to schema (structure) / DSL script (behavior, into the wasm-jit sandbox) / token reference (style) — verifiable, auditable, replayable. Contrast the JS architecture: AI generates JSX/JS and evals it directly = no sandbox, no validation, no provenance. **Bounded honest manifestation > unbounded naked generation (§11's ethical cut becomes architecture).**
+4. **Capability runs through all three layers**: behavior (import table: `fetch()` rejected at codegen), structure (schema can only compose existing cells), **style (token registry: raw CSS rejected at the validation layer).**
 
-**修正一:SCSS 必須 token 化(樣式的體用)。**
-傳統 per-component SCSS 撐不起動態生成(AI 顯化新組合沒有樣式可用);正解 = SCSS maps + `@each` 在編譯期生成整套 `--tk-*` design tokens(**樣式的 rails/體**),AI 的 style spec 只能**引用 token**(**樣式的用**)——`{"color":"#ff0000"}` 或 `{"position":"fixed"}` 在驗證層被拒並列出 granted 清單,與 DSL 的 fetch() 拒絕**同構**。= §13 不對稱溶解的樣式版:基底結晶,應用流動。**已實證**(PoC 4:token 實際經 CSS var 解析、越權被拒、5 validator 測試)。
+**Correction one: SCSS must be tokenized (substance-and-function of style).**
+Traditional per-component SCSS can't hold up dynamic generation (an AI-manifested new combination has no style available); the right answer = SCSS maps + `@each` generating the whole `--tk-*` design-token set at compile time (**the rails/substance of style**), and the AI's style spec can only **reference tokens** (**the function of style**) — `{"color":"#ff0000"}` or `{"position":"fixed"}` is rejected at the validation layer, which lists the granted set, **isomorphic to the DSL's fetch() rejection.** = the style version of §13's asymmetric dissolution: the substrate crystallizes, the application flows. **Proven** (PoC 4: tokens actually resolved through CSS vars, over-reach rejected, 5 validator tests).
 
-**修正二:雙迴路(瀏覽器沒有 rustc 的物理)。**
-runtime 生成不了新的 Leptos 元件(Rust 要 AOT)——動態性必然分兩速:
+**Correction two: the dual loop (the physics that the browser has no rustc).**
+The runtime cannot generate a new Leptos component (Rust needs AOT) — dynamism necessarily splits into two speeds:
 
 ```
-快迴路(runtime,秒內):AI 生成 schema / DSL 種子 / token 組合
-   → 在既有細胞庫的表達空間內顯化(有界、沙箱、可驗證)
-慢迴路(build-time,分鐘~時):表達空間不夠時,
-   AI 生成 Rust 元件碼 → gated-PR → CI + arch-qube → 細胞庫新版部署
+fast loop (runtime, within seconds): AI generates schema / DSL seed / token combination
+   → manifests within the expressive space of the existing cell library (bounded, sandboxed, verifiable)
+slow loop (build-time, minutes to hours): when the expressive space isn't enough,
+   AI generates Rust component code → gated-PR → CI + arch-qube → new cell-library version deployed
 ```
 
-**慢迴路 = aaf 的 AI 自我開發平台(已存在)**:快迴路顯化用,慢迴路演化體——體用的時間結構化。
+**The slow loop = aaf's AI self-development platform (already exists)**: the fast loop manifests function, the slow loop evolves substance — substance-and-function structured in time.
 
-**誠實 caveat**:LLM 訓練分佈偏 HTML/JSX,生 schema/DSL 靠 few-shot 契約——真實摩擦,但以實測(AI 無障礙寫出全部 PoC)這個摩擦快速貶值。以及 §16 的沙箱不管 CPU(fuel/Worker)與 CSP `wasm-unsafe-eval` 依然適用。
+**Honest caveat**: the LLM training distribution is biased toward HTML/JSX, and generating schema/DSL relies on few-shot contracts — a real friction, but by measurement (AI wrote all the PoC without trouble) this friction depreciates fast. Also, §16's sandbox doesn't manage CPU (fuel/Worker), and the CSP `wasm-unsafe-eval` still applies.
 
-> **一句:AI 時代最稀缺的不是生成能力,是對生成物的可驗證性。「無 JS 無 HTML、tokens 化 SCSS、雙迴路」讓每一個顯化物都過型別系統、進沙箱、留種子——JS 架構讓每一個顯化物都是憑信任執行的裸碼。**
+> **In one line: the scarcest thing in the AI age isn't generative ability, it's the verifiability of what's generated. "No JS, no HTML, tokenized SCSS, dual loop" puts every manifestation through the type system, into the sandbox, leaving a seed — the JS architecture makes every manifestation naked code executed on trust.**
 
 ---
 
-### 附:隱喻 → 工程座標 速查
+### Appendix: Metaphor → Engineering Coordinate Cheatsheet
 
-| 隱喻 | 工程座標 |
+| Metaphor | Engineering coordinate |
 |---|---|
-| 維度正交 | 軸獨立可變,可分軸獨立測試 |
-| 粒度突觸 | 接縫的固定開銷;最便宜的突觸決定最細粒度 |
-| 珠映光不映珠 | blackboard / event log 中介,非 N² 直連 |
-| 事事無礙經由理 | 共享協定/底中介的湧現互攝 |
-| 一即一切 | 全像 / 自相似 / event-carried state(非全知) |
-| 重重無盡 | 惰性求值 + 有界遞迴深度 |
-| 碎形 / IFS | 對組合封閉的 monoid;存規則不存網 |
-| 多重碎形 | 在物理突觸地板處改寫生成規則 |
-| 體用不二 | 封閉同形(體)使隨緣晚綁定(用)成為可能 |
-| 因果非確定性 | 因果偏序(vector clock / CRDT),非全序 |
-| 業力 | event-sourced 累積史條件化當下 |
-| 阿賴耶 / 種現熏習 | 共享 event store + CQRS 讀寫迴圈 |
-| 放下(選擇性現行) | RAG:藏一切、索引以勢力、不全現、不截長尾 |
-| 別業 / 共業 | per-aggregate 私流 + 共享讀模型 |
-| 2 點成線(向量化) | GPU 向量渲染;token 便宜 + 組合封閉 + 尺度不變 + 增量重繪;瓶頸在生成不在繪圖 |
-| 更快渲染 | 渲染得更少:patch diff > 預渲染 > 業快取 > 串流;raster 前沿(Vello/compute-2D)只在 10 萬+ 全動態才用 |
-| 自組織活系統 | 局部規則 + 負反饋 + stigmergy + 選擇 + 免疫 + autopoiesis |
-| 園丁 | 使用者設邊界/選擇壓力,不微觀控制 |
-| 顯化即當下共預見 | active inference:預測渲染、誤差學習、服務人意圖 |
-| 無 App / App 即顯化 | 用(UI)溶解、體(rails)+ 藏 + authz 結晶;不對稱、漸進;畫布歸誰所有是關鍵 |
-| 畫布即自覺 holon | holarchy(supervisor 朝下/被管朝上/stigmergy 橫向);補上 §10 感知底;感知≠認知、中介非 N²、liveness 對帳、能力 scope |
-| 愈用愈理解(fuzzy/GA/趨勢) | 分級隸屬表徵 + 變異-選擇搜尋(對 surrogate 跑,user 是神諭)+ 導數預測;維持多樣性抗崩塌、阻尼外推防駕駛品味;受 §14 六條件節制 |
-| 腳本即種子(執行層) | LLM 生 DSL → wasm-jit 編成 WASM 細胞(借瀏覽器 JIT,=AOT 天花板、與 JS 打平)→ capability 沙箱執行;快+隔離+同步三者兼得;實證 github.com/jrjohn/wasm-jit |
-| AI 時代前端形態 | 無 JS 無 HTML(艙門化)+ tokens 化 SCSS(樣式 capability)+ 雙迴路(runtime 種子顯化 / build-time gated-PR 演化);生成物全過 verifier;實證 leptos-poc 三分頁 |
+| Dimensional orthogonality | axes vary independently, testable per-axis |
+| Granularity synapse | the seam's fixed overhead; the cheapest synapse decides the finest granularity |
+| A bead reflects the light, not the beads | blackboard / event-log mediation, not N² direct links |
+| Phenomenon-phenomenon unobstruction via principle | emergent mutual containment mediated by a shared protocol/substrate |
+| One-is-all | holographic / self-similar / event-carried state (not omniscient) |
+| Endless layer-upon-layer | lazy evaluation + bounded recursion depth |
+| Fractal / IFS | a monoid closed under composition; store the rule, not the net |
+| Multifractal | rewrite the generative rule at the physical synapse floor |
+| Substance and function are not two | closed same-form (substance) makes condition-driven late binding (function) possible |
+| Causal non-determinism | causal partial order (vector clock / CRDT), not total order |
+| Karma | an event-sourced accumulated history conditioning the present |
+| Ālaya / seed-manifestation-perfuming | a shared event store + the CQRS read/write loop |
+| Letting go (selective actualization) | RAG: store everything, index by strength, don't actualize all, don't truncate the tail |
+| Individual karma / collective karma | per-aggregate private stream + shared read model |
+| Two points make a line (vectorization) | GPU vector rendering; cheap tokens + composition-closed + scale-invariant + incremental redraw; the bottleneck is generation, not drawing |
+| Faster rendering | render less: patch diff > pre-render > karma cache > streaming; the raster frontier (Vello/compute-2D) only for 100k+ fully-dynamic |
+| Self-organizing living system | local rules + negative feedback + stigmergy + selection + immunity + autopoiesis |
+| The gardener | the user sets boundaries/selection pressure, no micro-control |
+| Manifestation is shared present-moment prediction | active inference: prediction rendered, error-learning, serving the human's intent |
+| No app / the app is manifestation | function (UI) dissolves, substance (rails) + store + authz crystallize; asymmetric, gradual; who owns the canvas is the crux |
+| The canvas as a self-aware holon | holarchy (supervisor downward / governed upward / stigmergy laterally); fills in §10's perception floor; perception ≠ cognition, mediated not N², liveness reconciliation, capability scope |
+| Understands more the more you use it (fuzzy/GA/trend) | graded-membership representation + mutation-selection search (run against a surrogate, the user is the oracle) + derivative prediction; maintain diversity against collapse, damp extrapolation to avoid driving taste; bounded by §14's six conditions |
+| Scripts as seeds (execution layer) | LLM generates DSL → wasm-jit compiles to a WASM cell (borrowing the browser JIT, = the AOT ceiling, ties JS) → capability-sandbox execution; fast + isolation + synchronous all at once; proven at github.com/jrjohn/wasm-jit |
+| The shape of the front end in the AI age | no JS, no HTML (airlocked) + tokenized SCSS (style capability) + dual loop (runtime seed manifestation / build-time gated-PR evolution); every artifact passes the verifier; proven in the leptos-poc tabs |
