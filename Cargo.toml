@@ -8,11 +8,18 @@ description = "PoC: runtime script→WASM codegen (let V8 JIT it) vs Rhai tree-w
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-rhai = "1"
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+rhai = { version = "1", optional = true }
 wasm-encoder = "0.252.0"
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
+
+[features]
+# 預設 = benchmark/canvas 頁的完整形態(wasm-pack 用)。
+# 下游只要純編譯器(parser+codegen)時 default-features = false —— 零 wasm-bindgen 匯出、零 Rhai。
+default = ["js-api", "rhai-bench"]
+js-api = ["dep:wasm-bindgen", "dep:js-sys"]
+rhai-bench = ["dep:rhai", "dep:getrandom", "js-api"]
 
 [profile.release]
 opt-level = 3

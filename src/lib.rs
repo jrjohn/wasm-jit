@@ -15,9 +15,12 @@
 pub mod codegen;
 pub mod parser;
 
+#[cfg(feature = "rhai-bench")]
 use std::cell::Cell;
+#[cfg(feature = "js-api")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_to_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
@@ -25,24 +28,28 @@ pub fn compile_to_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 }
 
 /// Canvas kernel: `run(t, i, hx, hy) -> hue`, imports env.{sin, cos, out}.
+#[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_kernel_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_kernel(&prog).map_err(|e| JsError::new(&e))
 }
 
+#[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn transpile_to_js(src: &str) -> Result<String, JsError> {
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     Ok(parser::to_js(&prog))
 }
 
+#[cfg(feature = "rhai-bench")]
 #[wasm_bindgen]
 pub struct RhaiProgram {
     engine: rhai::Engine,
     ast: rhai::AST,
 }
 
+#[cfg(feature = "rhai-bench")]
 #[wasm_bindgen]
 impl RhaiProgram {
     /// Compile the script once (default Rhai engine, no metering — its fastest config).
@@ -71,6 +78,7 @@ impl RhaiProgram {
 // host reads back after each run (WASM is single-threaded).
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "rhai-bench")]
 thread_local! {
     static OUT: Cell<(f64, f64)> = const { Cell::new((0.0, 0.0)) };
     static KERNEL_ENGINE: rhai::Engine = {
@@ -83,11 +91,13 @@ thread_local! {
     };
 }
 
+#[cfg(feature = "rhai-bench")]
 #[wasm_bindgen]
 pub struct RhaiKernel {
     ast: rhai::AST,
 }
 
+#[cfg(feature = "rhai-bench")]
 #[wasm_bindgen]
 impl RhaiKernel {
     #[wasm_bindgen(constructor)]
@@ -112,11 +122,13 @@ impl RhaiKernel {
     }
 }
 
+#[cfg(feature = "rhai-bench")]
 #[wasm_bindgen]
 pub fn kernel_out_x() -> f64 {
     OUT.with(|o| o.get().0)
 }
 
+#[cfg(feature = "rhai-bench")]
 #[wasm_bindgen]
 pub fn kernel_out_y() -> f64 {
     OUT.with(|o| o.get().1)
@@ -125,7 +137,7 @@ pub fn kernel_out_y() -> f64 {
 /// The default benchmark kernel, hand-written in Rust and AOT-compiled into
 /// this module — the performance ceiling reference. Only meaningful when the
 /// page's script is the unmodified default kernel.
-#[wasm_bindgen]
+#[cfg_attr(feature = "js-api", wasm_bindgen)]
 pub fn native_kernel(n: f64) -> f64 {
     let mut sum = 0.0f64;
     let mut i = 0.0f64;
@@ -138,13 +150,11 @@ pub fn native_kernel(n: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
-    use std::rc::Rc;
-
     const KERNEL: &str = "let sum = 0.0;\nlet i = 0.0;\nwhile i < n {\n sum = sum + i * i - sum / (i + 1.0);\n i = i + 1.0;\n}\nsum";
 
     /// The same source must produce the same value on Rhai as the native kernel
     /// (identical f64 operation order ⇒ bit-identical result).
+    #[cfg(feature = "rhai-bench")]
     #[test]
     fn rhai_matches_native() {
         let engine = rhai::Engine::new();
@@ -170,8 +180,12 @@ mod tests {
 
     /// Canvas-kernel semantics on a raw Rhai engine: out(x, y) writes the slot,
     /// the final expression is the hue.
+    #[cfg(feature = "rhai-bench")]
     #[test]
     fn rhai_canvas_kernel_out_and_hue() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
         let slot = Rc::new(Cell::new((0.0f64, 0.0f64)));
         let s2 = slot.clone();
         let mut engine = rhai::Engine::new();
