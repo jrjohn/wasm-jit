@@ -67,7 +67,8 @@ fn with_ctx(f: impl FnOnce(&web_sys::CanvasRenderingContext2d)) {
 
 const TAU: f64 = 6.283185307;
 
-fn build_draw_cell(src: &str) -> Result<Cell, String> {
+/// 全部繪圖 + 互動 capability 的授權組(Tier 1 DSL 與 Tier 2 AS 產物共用)。
+fn draw_builder() -> crate::cell::CellBuilder {
     Cell::builder(&["t", "w", "h"])
         .cap1("sin", f64::sin)
         .cap1("cos", f64::cos)
@@ -144,7 +145,16 @@ fn build_draw_cell(src: &str) -> Result<Cell, String> {
                 }
             })
         })
-        .compile(src)
+}
+
+/// Tier 1:自家 DSL 源碼 → codegen → cell。
+fn build_draw_cell(src: &str) -> Result<Cell, String> {
+    draw_builder().compile(src)
+}
+
+/// Tier 2:外部工具鏈(AssemblyScript)產物 → import 審計 → cell。同一組授權。
+fn build_draw_cell_from_bytes(bytes: &[u8]) -> Result<Cell, String> {
+    draw_builder().from_wasm_bytes(bytes)
 }
 
 fn frame(ts: f64) {
@@ -197,32 +207,53 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
     let status = RwSignal::new(String::from("載入範例…"));
     let ok = RwSignal::new(true);
     let sel = RwSignal::new(example.to_string());
+    // Tier 2:AS 產物的 bytes（None = Tier 1 DSL 模式,編 textarea 源碼）
+    let as_bytes: RwSignal<Option<Vec<u8>>, LocalStorage> = RwSignal::new_local(None);
 
-    let compile_now = move || match build_draw_cell(&script.get_untracked()) {
+    let install = move |cell: Result<Cell, String>, tier: &str| match cell {
         Ok(cell) => {
             let size = cell.size();
             STATE.with(|s| s.borrow_mut().fill(0.0)); // 新種子 = 新世界,清記憶
             DRAW_CELL.with(|c| *c.borrow_mut() = Some(cell));
-            status.set(format!("compiled {size} bytes — 顯化中"));
+            status.set(format!("{tier} → {size} bytes — 顯化中"));
             ok.set(true);
         }
         Err(e) => {
             DRAW_CELL.with(|c| *c.borrow_mut() = None);
-            status.set(format!("compile error: {e}"));
+            status.set(format!("error: {e}"));
             ok.set(false);
         }
     };
 
+    let compile_now = move || match as_bytes.get_untracked() {
+        Some(b) => install(build_draw_cell_from_bytes(&b), "AS 產物 → import 審計通過"),
+        None => install(build_draw_cell(&script.get_untracked()), "DSL → codegen"),
+    };
+
     let load = move |name: String| {
         spawn_local(async move {
-            match Request::get(&format!("/api/examples/{name}")).send().await {
-                Ok(r) => {
+            if let Some(as_name) = name.strip_prefix("as:") {
+                // Tier 2:抓 AS 源碼(顯示語法)+ 真 asc 產物(執行)
+                let src = Request::get(&format!("/api/as-src/{as_name}"))
+                    .send().await.ok();
+                if let Some(r) = src {
                     script.set(r.text().await.unwrap_or_default());
-                    compile_now();
                 }
-                Err(e) => {
-                    status.set(format!("範例載入失敗: {e}"));
-                    ok.set(false);
+                match Request::get(&format!("/api/as/{as_name}")).send().await {
+                    Ok(r) => match r.binary().await {
+                        Ok(bytes) => {
+                            as_bytes.set(Some(bytes));
+                            compile_now();
+                        }
+                        Err(e) => { status.set(format!("AS wasm 讀取失敗: {e}")); ok.set(false); }
+                    },
+                    Err(e) => { status.set(format!("AS 載入失敗: {e}")); ok.set(false); }
+                }
+            } else {
+                as_bytes.set(None);
+                match Request::get(&format!("/api/examples/{name}")).send().await {
+                    Ok(r) => { script.set(r.text().await.unwrap_or_default()); compile_now(); }
+                    Err(e) => { status.set(format!("範例載入失敗: {e}")); ok.set(false); }
                 }
             }
         })
@@ -252,6 +283,7 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
                 <option value="guanyin">"觀音菩薩(全身+蓮台)"</option>
                 <option value="minecraft">"3D 體素地形(等角視角)"</option>
                 <option value="mc3p">"3D 體素世界(第三人稱跟隨,可走可跳)"</option>
+                <option value="as:buddha">"佛陀 —— AssemblyScript(真 asc 編,Tier 2)"</option>
             </select>
             <button class="apply draw-run" on:click=move |_| compile_now()>"Compile & Run"</button>
             <button class="tok-violate draw-violate" on:click=move |_| {

@@ -103,6 +103,32 @@ async fn example(Path(name): Path<String>) -> impl IntoResponse {
     }
 }
 
+/// 真 AssemblyScript 編出的種子(asc 產物),application/wasm。
+async fn as_wasm(Path(name): Path<String>) -> impl IntoResponse {
+    if name != "buddha" {
+        return (StatusCode::NOT_FOUND, [(header::CONTENT_TYPE, "text/plain")], Vec::new());
+    }
+    match tokio::fs::read(format!("assemblyscript/build/{name}.wasm")).await {
+        Ok(b) => (StatusCode::OK, [(header::CONTENT_TYPE, "application/wasm")], b),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("{name}.wasm 未編譯(cd assemblyscript && npm run build):{e}").into_bytes(),
+        ),
+    }
+}
+
+/// AssemblyScript 源碼(給前端顯示語法用)。
+async fn as_src(Path(name): Path<String>) -> impl IntoResponse {
+    if name != "buddha" {
+        return (StatusCode::NOT_FOUND, [(header::CONTENT_TYPE, "text/plain")], String::new());
+    }
+    match tokio::fs::read_to_string(format!("assemblyscript/assembly/{name}.ts")).await {
+        Ok(s) => (StatusCode::OK, [(header::CONTENT_TYPE, "text/plain; charset=utf-8")], s),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [(header::CONTENT_TYPE, "text/plain")], e.to_string()),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let dist = std::env::args()
@@ -115,6 +141,8 @@ async fn main() {
         .route("/api/form-schema", get(form_schema))
         .route("/api/layout-schema", get(layout_schema))
         .route("/api/examples/{name}", get(example))
+        .route("/api/as/{name}", get(as_wasm))
+        .route("/api/as-src/{name}", get(as_src))
         .fallback_service(ServeDir::new(&dist).not_found_service(ServeFile::new(index)));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8645").await.unwrap();
