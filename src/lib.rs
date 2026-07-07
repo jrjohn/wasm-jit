@@ -12,6 +12,7 @@
 //!    capabilities (imports): env.sin, env.cos, env.out(x,y)
 //! - `RhaiKernel` + `kernel_out_x/y()`: same kernel interpreted by Rhai
 
+pub mod audit;
 pub mod codegen;
 pub mod parser;
 

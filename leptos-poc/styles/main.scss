@@ -286,3 +286,11 @@ textarea {
 .draw-status { font-size: var(--tk-font-2); }
 .draw-status.ok { color: var(--tk-color-success); }
 .draw-status.bad { color: var(--tk-color-danger); }
+
+// ---- Spectrum tab(種子語言光譜)----
+.sp-dsl { margin: var(--tk-space-2) 0; }
+.sp-line { display: flex; align-items: center; gap: 0.5rem; margin-top: var(--tk-space-2);
+           font-size: var(--tk-font-2); flex-wrap: wrap; }
+.sp-line b { font-size: 1.05rem; color: var(--tk-color-success); }
+.sp-naughty { display: flex; align-items: center; gap: 0.4rem; font-size: var(--tk-font-2);
+              margin-bottom: var(--tk-space-2); }

@@ -12,6 +12,7 @@ mod cell;
 mod draw_tab;
 mod form;
 mod layout;
+mod spectrum_tab;
 mod tokens;
 mod tokens_tab;
 
@@ -19,6 +20,7 @@ use cell::Cell;
 use draw_tab::DrawPoc;
 use form::FormPoc;
 use layout::LayoutPoc;
+use spectrum_tab::SpectrumPoc;
 use tokens_tab::TokensPoc;
 use leptos::prelude::*;
 use serde::Deserialize;
@@ -137,9 +139,14 @@ fn App() -> impl IntoView {
                 on:click=move |_| tab.set("draw")>"自由繪(佛陀)"</button>
             <button class="tab-mc" class:on=move || tab.get() == "mc"
                 on:click=move |_| tab.set("mc")>"3D 體素(Minecraft)"</button>
+            <button class="tab-spectrum" class:on=move || tab.get() == "spectrum"
+                on:click=move |_| tab.set("spectrum")>"種子語言光譜"</button>
         </div>
         <Show when=move || tab.get() == "mc">
             <DrawPoc example="mc3p" />
+        </Show>
+        <Show when=move || tab.get() == "spectrum">
+            <SpectrumPoc />
         </Show>
         <Show when=move || tab.get() == "layout">
             <LayoutPoc />

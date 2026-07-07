@@ -146,13 +146,29 @@ impl CellBuilder {
     /// instantiate (sync — generated modules are tiny, far under Chrome's 4KB
     /// main-thread limit).
     pub fn compile(self, src: &str) -> Result<Cell, String> {
-        let host: Vec<HostFn> = self.caps.iter().map(|(n, c)| c.host_fn(n)).collect();
         let prog = parser::parse(src)?;
         let params: Vec<&str> = self.params.iter().map(|s| s.as_str()).collect();
+        let host: Vec<HostFn> = self.caps.iter().map(|(n, c)| c.host_fn(n)).collect();
         let bytes = codegen::compile_with(&prog, &params, &host)?;
+        self.instantiate_bytes(&bytes)
+    }
 
+    /// 種子語言光譜的地基:接受**任何來源**的 WASM bytes(AssemblyScript /
+    /// Rust→wasm / 手寫 WAT),先審計 import 節 ⊆ 授予的 capability,通過才
+    /// instantiate。這是 compile() 的語言無關版——圍欄在 import 表,不在文法。
+    pub fn from_wasm_bytes(self, bytes: &[u8]) -> Result<Cell, String> {
+        let grants: Vec<wasm_jit::audit::Grant> = self
+            .caps
+            .iter()
+            .map(|(n, _)| wasm_jit::audit::Grant { module: "env", name: n })
+            .collect();
+        wasm_jit::audit::audit(bytes, &grants)?; // 越權 import → 這裡就被拒
+        self.instantiate_bytes(bytes)
+    }
+
+    fn instantiate_bytes(self, bytes: &[u8]) -> Result<Cell, String> {
         let module =
-            WebAssembly::Module::new(&Uint8Array::from(&bytes[..]).into()).map_err(fmt_js)?;
+            WebAssembly::Module::new(&Uint8Array::from(bytes).into()).map_err(fmt_js)?;
         let env = Object::new();
         for (name, cap) in &self.caps {
             Reflect::set(&env, &(*name).into(), cap.js()).map_err(fmt_js)?;

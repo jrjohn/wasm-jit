@@ -9,6 +9,7 @@ leptos = { version = "0.8", features = ["csr"] }
 # default-features = false:只要純編譯器(parser+codegen)——
 # 不帶 Rhai 直譯器、不帶 wasm-jit 自己的 wasm-bindgen 匯出(否則整顆 Rhai 被烤進本 app 的 bundle)
 wasm-jit = { path = "..", default-features = false }
+wasm-encoder = "0.252.0"
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }

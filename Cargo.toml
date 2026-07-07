@@ -12,6 +12,7 @@ wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 rhai = { version = "1", optional = true }
 wasm-encoder = "0.252.0"
+wasmparser = "0.252.0"
 getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
 
 [features]
@@ -24,8 +25,6 @@ rhai-bench = ["dep:rhai", "dep:getrandom", "js-api"]
 [profile.release]
 opt-level = 3
 
-[dev-dependencies]
-wasmparser = "0.252.0"
 
 [workspace]
 members = [".", "leptos-poc", "api-server"]
