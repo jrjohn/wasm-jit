@@ -4,10 +4,32 @@
 //! 其餘路徑 → 靜態服務 leptos-poc/dist(同源,免 CORS)。
 //! 各 API 加 120ms 人工延遲,讓前端 loading 狀態可見。
 
+use axum::http::{header, StatusCode};
+use axum::response::IntoResponse;
 use axum::{extract::Path, routing::get, Json, Router};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tower_http::services::{ServeDir, ServeFile};
+
+/// 表單 schema:每次請求「現讀」磁碟檔案 —— 改 JSON、前端重載即生效,零重編。
+/// 這就是「form 不在 Rust source 裡」的證明點。
+async fn form_schema() -> impl IntoResponse {
+    let path = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "api-server/form-schema.json".to_string());
+    match tokio::fs::read_to_string(&path).await {
+        Ok(s) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            s,
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("schema file '{path}' unreadable: {e}"),
+        ),
+    }
+}
 
 async fn departments() -> Json<Value> {
     tokio::time::sleep(Duration::from_millis(120)).await;
@@ -55,6 +77,7 @@ async fn main() {
     let app = Router::new()
         .route("/api/departments", get(departments))
         .route("/api/members/{dept}", get(members))
+        .route("/api/form-schema", get(form_schema))
         .fallback_service(ServeDir::new(&dist).not_found_service(ServeFile::new(index)));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8645").await.unwrap();

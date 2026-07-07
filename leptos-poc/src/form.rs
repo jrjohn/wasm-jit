@@ -13,23 +13,6 @@ use leptos::task::spawn_local;
 use serde::Deserialize;
 use std::rc::Rc;
 
-const FORM_SCHEMA: &str = r#"[
-  {"name":"name","label":"姓名","widget":"text"},
-  {"name":"age","label":"年齡","widget":"number",
-   "rule":"let ok = (v >= 18.0) * (v <= 65.0); out(ok, 0.0); ok","err":"18–65"},
-  {"name":"dept","label":"部門","widget":"dept-select"},
-  {"name":"grade","label":"職級","widget":"radio","options":["初級","中級","資深"]},
-  {"name":"active","label":"在職","widget":"checkbox"},
-  {"name":"joined","label":"到職日","widget":"date"},
-  {"name":"salary","label":"月薪","widget":"number",
-   "rule":"let ok = (v >= 28590.0) * (v <= 500000.0); out(ok, 0.0); ok","err":"28590–500000"},
-  {"name":"ratio","label":"獎金比例 %","widget":"range"},
-  {"name":"bonus","label":"獎金(計算欄,細胞驅動)","widget":"computed",
-   "script":"out(salary * ratio * 0.01, ratio * 0.01);\nsalary * ratio * 0.01",
-   "params":["salary","ratio"]},
-  {"name":"note","label":"備註","widget":"textarea"}
-]"#;
-
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct FieldSpec {
     name: String,
@@ -136,15 +119,45 @@ fn wire_rules(fields: &Rc<Vec<FieldRt>>) {
     }
 }
 
+/// 表單 schema 完全不在 Rust source 裡:runtime 由 GET /api/form-schema 載入
+/// (server 每次請求現讀 api-server/form-schema.json)。改檔 → 重載 → 表單即變,零重編。
 #[component]
 pub fn FormPoc() -> impl IntoView {
-    let fields: Rc<Vec<FieldRt>> = Rc::new(
-        serde_json::from_str::<Vec<FieldSpec>>(FORM_SCHEMA)
-            .expect("schema")
-            .into_iter()
-            .map(FieldRt::new)
-            .collect(),
-    );
+    let specs: RwSignal<Option<Vec<FieldSpec>>> = RwSignal::new(None);
+    let schema_err = RwSignal::new(String::new());
+    let load = move || {
+        spawn_local(async move {
+            match Request::get("/api/form-schema").send().await {
+                Ok(r) => match r.json::<Vec<FieldSpec>>().await {
+                    Ok(s) => {
+                        specs.set(Some(s));
+                        schema_err.set(String::new());
+                    }
+                    Err(e) => schema_err.set(format!("schema 解析失敗:{e}")),
+                },
+                Err(e) => schema_err.set(format!("schema API error: {e}")),
+            }
+        })
+    };
+    load();
+
+    view! {
+        <p class="sub">
+            "此表單的 schema 不在 Rust 原始碼裡 —— runtime 由 GET /api/form-schema 載入,"
+            "server 每次請求現讀 api-server/form-schema.json。改那個檔案、按重載,表單即變,零重編。"
+        </p>
+        <button class="apply reload-schema" on:click=move |_| load()>"重新載入 schema"</button>
+        <Show when=move || !schema_err.get().is_empty()>
+            <div class="cell-err">{move || schema_err.get()}</div>
+        </Show>
+        {move || specs.get().map(|s| view! { <FormBody specs=s /> })}
+    }
+}
+
+#[component]
+fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
+    let fields: Rc<Vec<FieldRt>> =
+        Rc::new(specs.into_iter().map(FieldRt::new).collect());
     wire_rules(&fields);
 
     // 部門 / 人員(Rust API)

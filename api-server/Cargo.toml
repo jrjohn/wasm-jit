@@ -6,6 +6,6 @@ description = "Rust API (Axum) for the form PoC: departments + members, plus sta
 
 [dependencies]
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "fs"] }
 tower-http = { version = "0.6", features = ["fs"] }
 serde_json = "1"
