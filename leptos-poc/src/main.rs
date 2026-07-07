@@ -139,7 +139,7 @@ fn App() -> impl IntoView {
                 on:click=move |_| tab.set("mc")>"3D 體素(Minecraft)"</button>
         </div>
         <Show when=move || tab.get() == "mc">
-            <DrawPoc example="minecraft" />
+            <DrawPoc example="mc3p" />
         </Show>
         <Show when=move || tab.get() == "layout">
             <LayoutPoc />

@@ -250,7 +250,8 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
                 }>
                 <option value="buddha">"佛陀的笑臉"</option>
                 <option value="guanyin">"觀音菩薩(全身+蓮台)"</option>
-                <option value="minecraft">"3D 體素地形(Minecraft 風)"</option>
+                <option value="minecraft">"3D 體素地形(等角視角)"</option>
+                <option value="mc3p">"3D 體素世界(第三人稱跟隨,可走可跳)"</option>
             </select>
             <button class="apply draw-run" on:click=move |_| compile_now()>"Compile & Run"</button>
             <button class="tok-violate draw-violate" on:click=move |_| {
