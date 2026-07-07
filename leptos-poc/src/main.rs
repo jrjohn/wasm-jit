@@ -8,51 +8,12 @@
 //! 3. 沙箱:細胞的 capability 只有 sin/cos/out,無 DOM 權限;腳本裡寫
 //!    fetch() 在 codegen 即被拒(顯示 granted capabilities 清單)。
 
-use js_sys::{Function, Object, Reflect, Uint8Array, WebAssembly};
+mod cell;
+
+use cell::Cell;
 use leptos::prelude::*;
 use serde::Deserialize;
 use std::rc::Rc;
-use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use wasm_jit::{codegen, parser};
-
-/// UI-cell ABI: run(a, b) -> f64,capabilities = env.{sin, cos, out}。
-const UI_PARAMS: [&str; 2] = ["a", "b"];
-
-/// A live generated cell: exported `run` + the import closures that must
-/// outlive the instance.
-struct CellRt {
-    run: Function,
-    _sin: Closure<dyn Fn(f64) -> f64>,
-    _cos: Closure<dyn Fn(f64) -> f64>,
-    _out: Closure<dyn Fn(f64, f64)>,
-}
-
-fn compile_cell(src: &str) -> Result<Vec<u8>, String> {
-    let prog = parser::parse(src)?;
-    codegen::compile_with(&prog, &UI_PARAMS, &codegen::KERNEL_IMPORTS)
-}
-
-fn instantiate_cell(bytes: &[u8], out_sig: RwSignal<(f64, f64)>) -> Result<CellRt, String> {
-    let jerr = |e: JsValue| format!("{e:?}");
-    let module =
-        WebAssembly::Module::new(&Uint8Array::from(bytes).into()).map_err(jerr)?;
-    let sin: Closure<dyn Fn(f64) -> f64> = Closure::new(|x: f64| x.sin());
-    let cos: Closure<dyn Fn(f64) -> f64> = Closure::new(|x: f64| x.cos());
-    let out: Closure<dyn Fn(f64, f64)> =
-        Closure::new(move |x: f64, y: f64| out_sig.set((x, y)));
-    let env = Object::new();
-    Reflect::set(&env, &"sin".into(), sin.as_ref()).map_err(jerr)?;
-    Reflect::set(&env, &"cos".into(), cos.as_ref()).map_err(jerr)?;
-    Reflect::set(&env, &"out".into(), out.as_ref()).map_err(jerr)?;
-    let imports = Object::new();
-    Reflect::set(&imports, &"env".into(), &env).map_err(jerr)?;
-    let instance = WebAssembly::Instance::new(&module, &imports).map_err(jerr)?;
-    let run = Reflect::get(&instance.exports(), &"run".into())
-        .map_err(jerr)?
-        .dyn_into::<Function>()
-        .map_err(|_| "export 'run' is not a function".to_string())?;
-    Ok(CellRt { run, _sin: sin, _cos: cos, _out: out })
-}
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct CellSpec {
@@ -66,14 +27,20 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
     let err = RwSignal::new(String::new());
     let out = RwSignal::new((0.0f64, 0.0f64));
     let ret = RwSignal::new(0.0f64);
-    let cell: RwSignal<Option<Rc<CellRt>>, LocalStorage> = RwSignal::new_local(None);
+    let cell: RwSignal<Option<Rc<Cell>>, LocalStorage> = RwSignal::new_local(None);
 
-    // 種子→細胞:script 變即重編(µs 級,live)
+    // 種子→細胞:script 變即重編(µs 級,live)。grant 清單在此一目瞭然,
+    // 同時就是 codegen 的 import 表——兩者不可能漂移。
     Effect::new(move |_| {
         let src = script.get();
-        match compile_cell(&src).and_then(|bytes| instantiate_cell(&bytes, out)) {
-            Ok(rt) => {
-                cell.set(Some(Rc::new(rt)));
+        let built = Cell::builder(&["a", "b"])
+            .cap1("sin", f64::sin)
+            .cap1("cos", f64::cos)
+            .cap2_void("out", move |x, y| out.set((x, y)))
+            .compile(&src);
+        match built {
+            Ok(c) => {
+                cell.set(Some(Rc::new(c)));
                 err.set(String::new());
             }
             Err(e) => {
@@ -85,9 +52,9 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
     // 緣→現行:輸入(或細胞)變 → 跑細胞 → out()/回傳寫 signal → DOM 反應式更新
     Effect::new(move |_| {
         let (av, bv) = (a.get(), b.get());
-        if let Some(rt) = cell.get() {
-            if let Ok(v) = rt.run.call2(&JsValue::NULL, &av.into(), &bv.into()) {
-                ret.set(v.as_f64().unwrap_or(f64::NAN));
+        if let Some(c) = cell.get() {
+            if let Ok(v) = c.call(&[av, bv]) {
+                ret.set(v);
             }
         }
     });
