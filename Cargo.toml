@@ -2,20 +2,27 @@
 name = "wasm-jit"
 version = "0.1.0"
 edition = "2021"
-description = "PoC: runtime script→WASM codegen (let V8 JIT it) vs Rhai tree-walking interpretation"
+description = "Runtime script→WASM codegen: the browser engine JITs it, a capability sandbox contains it"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-rhai = "1"
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
 wasm-encoder = "0.252.0"
-getrandom = { version = "0.3", features = ["wasm_js"] }
+wasmparser = "0.252.0"
+
+[features]
+# Default = includes the wasm-bindgen JS exports (for the benchmark/canvas pages, used by wasm-pack).
+# When a downstream only wants the pure compiler (parser+codegen+audit), default-features = false → zero wasm-bindgen exports.
+default = ["js-api"]
+js-api = ["dep:wasm-bindgen", "dep:js-sys"]
 
 [profile.release]
 opt-level = 3
 
-[dev-dependencies]
-wasmparser = "0.252.0"
+
+[workspace]
+members = [".", "leptos-poc", "api-server"]
+resolver = "2"

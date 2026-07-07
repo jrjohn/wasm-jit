@@ -1,0 +1,11 @@
+{
+  "name": "wasm-jit-as-seeds",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "asc assembly/buddha.ts --outFile build/buddha.wasm --optimize --runtime stub --use abort= --exportRuntime false --noAssert"
+  },
+  "dependencies": {
+    "assemblyscript": "^0.28.19"
+  }
+}

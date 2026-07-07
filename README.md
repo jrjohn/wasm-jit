@@ -1,61 +1,127 @@
-# wasm-jit — Runtime WASM codegen(借 V8 JIT)vs Rhai tree-walk 直譯
+# wasm-jit — scripts as seeds: runtime-generated WASM cells (borrow the browser's JIT) to run *code you don't have to trust*
 
-最小 PoC,一頁 demo。驗證主張:**腳本在 runtime 編成 WASM bytes → `WebAssembly.instantiate()` → V8 幫你 JIT → 近原生執行**,對比 Rhai(tree-walking 直譯器)。
+**Core claim**: compile a script to WASM bytes at runtime → `WebAssembly.instantiate()` → the browser engine JITs it → **near-native speed + a capability sandbox + synchronous calls**, the only path where all three hold at once. Measured on par with the AOT ceiling and tied with hand-written JS on speed — but it buys a property JS can't give: **the manifested code need not be trusted** (the import table *is* its entire world).
+
+> **Origin & acknowledgment**: this idea began from wanting a *sandboxed* runtime scripting language. We first prototyped against [Rhai](https://github.com/rhaiscript/rhai) and found that a tree-walking interpreter trades native speed for its sandbox — wasm-jit wants both. **Thank you to Rhai for the spark**; it shaped the whole direction. The project no longer contains Rhai (the comparison framing is gone too), returning to its own thesis: native speed *inside* a sandbox.
+
+Theory: `docs/multidimensional-composition-architecture.md` (§16 execution layer, §17 the AI-era frontend).
+
+## PoC overview
+
+**Standalone pages:**
+1. **`index.html` — benchmark**: one script run three ways (generated WASM / JS / AOT Rust); shows generated WASM = AOT ceiling and tied with JS.
+2. **`canvas.html` — canvas**: 2000 components, each with its own independently generated WASM kernel cell, all run every frame at 60fps.
+3. **`draw.html` — freeform draw**: 7 drawing primitives; a smiling Buddha / a full-body Guanyin on a lotus throne, manifested from DSL seeds (`examples/*.dsl`).
+
+**`leptos-poc/` — pure-Rust CSR (Leptos 0.8), seven tabs** (zero hand-written JS, paired with `api-server`):
+| Tab | What it proves |
+|---|---|
+| DynamicCell | behavior is dynamic: live-edit a script → cell drives a signal → reactive DOM update |
+| Form | 9 widget kinds driven by a schema (server reads the JSON from disk per request — edit + reload to change it); validation/computed fields = DSL cells; departments/members via a real Axum API |
+| Tokens | style as capability: SCSS emits `--tk-*` rails; a style spec may only reference tokens, raw CSS is rejected |
+| Layout | layout as schema: the whole app shell (header / menu / profile / table) is manifested from a recursive JSON tree — the table's data source is data too |
+| Freeform draw | pixel surface: Buddha/Guanyin read from DSL seeds; **+ "Buddha — AssemblyScript" = a real 637-byte asc-compiled seed running through the same import audit** |
+| **3D voxel** | **a playable Minecraft-style world**: ←→ turn, ↑↓ walk, Space jump; true perspective + chase camera + infinite terrain + distance fog, **the renderer and physics all live in a ~2.4KB seed**; interaction via `key`/`get`/`set` (state itself is a granted capability) |
+| Seed-language spectrum | **the fence is language-agnostic**: Tier 1 (DSL codegen) vs Tier 2 (external WASM via `Cell::from_wasm_bytes`'s import audit) — same ABI, bit-identical value; an over-reaching external seed (extra `env::fetch` import) is rejected |
+
+**Three surfaces, three complete vocabularies**: pixels (7 primitives), forms (9 widgets), layout (9 layout cells) — generation never creates vocabulary, it only composes it.
+
+**Seed-language spectrum** (§16): the fence is in the import table, not the grammar — so one sandbox holds many seed languages:
+| Tier | Language | Fence entry | Proof |
+|---|---|---|---|
+| 1 | home DSL (f64-scalar: let/while/**if-else**/arithmetic+%/comparison + built-in min/max/abs/sqrt/floor) | codegen rejects ungranted functions | every DSL seed |
+| 2 | **AssemblyScript** (TS syntax) / Rust→wasm / hand-written WAT | `Cell::from_wasm_bytes` audits import section ⊆ grants before instantiate | `assembly/buddha.ts` compiled by asc, drawn in the freeform-draw tab |
+
+## The power of wasm-jit (vs JS, honest version)
+
+Speed: on a pure f64 kernel it ties JS (V8's home turf). Ergonomics: JS still wins slightly (the DSL added if/%/built-in math but still has no functions/arrays/strings). The power is in five properties JS structurally cannot give:
+
+| Property | JS `new Function` | wasm-jit cell |
+|---|---|---|
+| boundary of its world | ambient authority (whole page: fetch/document/cookies) | **the import table = the whole world** (the 3D game grants 12 capabilities; `fetch()` rejected at compile time) |
+| memory | any closure / global | even state is granted (get/set, 32 slots) |
+| determinism | by discipline | by construction: same input → bit-identical output → replayable/auditable |
+| escape | prototype pollution + a history of sandbox escapes | memory isolation is a VM guarantee |
+| cold code / frame time | must warm the JIT; GC/deopt tail | instantiate → near-native; zero allocation inside the cell |
+
+The three ways to get isolation in JS each miss a corner: iframe (async), a sandboxable interpreter (one-to-two orders of magnitude slower), SES (immature). **"fast + isolated + synchronous" — only runtime-generated WASM gets all three.** One more layer: **grammar as fence** — the DSL can only express f64 math + granted calls, so "what this code can touch" is a compile-time-enumerable list. **JS runs code you trust; wasm-jit runs code you don't have to trust** — AI-generated / user-pasted / schema-carried manifestations can be *allowed* to come alive precisely because they live inside cells.
 
 ```
-src(textarea,DSL = Rhai 嚴格子集)
-  → parser(Rust,遞迴下降)→ AST
-      ├→ wasm-encoder → 117-byte .wasm 模組 → WebAssembly.instantiate()(V8 JIT)
-      ├→ Rhai engine.compile → eval_ast_with_scope(tree-walk 直譯)
-      ├→ 同 AST 轉譯 JS → new Function(V8 JS-JIT 參照)
-      └→ 同 kernel 手寫 Rust,AOT 編進主模組(天花板參照)
+src (textarea, a small f64 seed language)
+  → parser (Rust, recursive descent) → AST
+      ├→ wasm-encoder → ~hundred-byte .wasm module → WebAssembly.instantiate() (engine JIT)
+      ├→ same AST transpiled to JS → new Function (engine JS-JIT reference)
+      └→ same kernel hand-written in Rust, AOT-compiled into the main module (ceiling reference)
 ```
 
-同一段原始碼、四條執行路徑、值位元級一致(相同 f64 運算順序)。
+Same source, three execution lanes, bit-identical values (identical f64 op order).
 
-## 實測(2026-07-07,Apple Silicon Mac,Chrome headless=new)
+## Measured (2026-07-07, Apple Silicon Mac, Chrome headless=new)
 
-預設 kernel:`sum = sum + i*i - sum/(i+1)` 迴圈 N 次。exec 為自適應內圈 + 多輪中位。
+Default kernel: `sum = sum + i*i - sum/(i+1)`, looped N times. exec = adaptive inner loop + median of samples.
 
-| N | Rhai 直譯 | **生成 WASM(V8 JIT)** | JS `new Function` | AOT Rust | WASM vs Rhai |
-|---|---|---|---|---|---|
-| 1e4 | 4.9 ms | **0.033 ms** | 0.055 ms | 0.033 ms | **147×** |
-| 1e6 | 434 ms | **3.27 ms** | 3.33 ms | 3.27 ms | **133×** |
-| 1e7 | 4335 ms | **32.6 ms** | 32.3 ms | 31.2 ms | **133×** |
+| N | **generated WASM (engine JIT)** | JS `new Function` | AOT Rust (ceiling) | WASM vs AOT |
+|---|---|---|---|---|
+| 1e4 | **0.033 ms** | 0.055 ms | 0.033 ms | **1.0×** |
+| 1e6 | **3.27 ms** | 3.33 ms | 3.27 ms | **1.0×** |
+| 1e7 | **32.6 ms** | 32.3 ms | 31.2 ms | **1.04×** |
 
-compile 成本(一次性):codegen 0.4–2.2 ms + instantiate ~0.6 ms;生成模組 **117 bytes**。
+Compile cost (one-off): codegen 0.4–2.2 ms + instantiate ~0.6 ms; generated module **~117 bytes**.
 
-**結論:**
-1. **生成 WASM = AOT 天花板**(1.0×)——V8 對這種數值 kernel 給出滿速 JIT,「借 V8 的 JIT」完全成立。
-2. **比 Rhai 快 ~133–147×**——落在 tree-walker 預期劣勢帶(50–200×)。
-3. **誠實註記:JS(V8 JS JIT)在純數值 kernel 上與 WASM 打平**——這條路的價值不是「贏 JS」,而是:①贏過*可沙箱的直譯器* 130×;②WASM 的 capability 沙箱(生成模組只能碰 import 給它的東西 + 自己的記憶體);③無 GC、幀時可預測。
-4. 編譯成本 ~1–3 ms,一次攤提;熱路徑(重複呼叫)才值得編,run-once 用直譯器即可 → 正統 tiering:冷走直譯、熱編 WASM。
+**Conclusions:**
+1. **Generated WASM = AOT ceiling (≈1.0×)** — the engine gives this numeric kernel a full-speed JIT; "borrowing the engine's JIT" has zero overhead.
+2. **Tied with hand-written JS** (a pure f64 kernel is V8's JS-JIT home turf) — so the value of this path **is not speed**, it's: ① the capability sandbox (a generated module can only touch its imports + its own memory; `fetch()` rejected at compile time); ② deterministic replay (bit-identical values); ③ no GC, predictable frame time.
+3. Compile cost ~1–3 ms, amortized once; only hot paths (called repeatedly) are worth compiling, run-once code can use other means → tiering: don't compile cold code, compile hot code to WASM.
 
-## 跑法
+## Canvas PoC — measured (canvas.html, 2026-07-07, same machine, headless Chrome)
+
+Each component gets its **own unique script source** (4 templates × constants baked from the index, simulating "AI generates a behavior per component"), each compiled to its own WASM cell (**capability imports only `sin`/`cos`/`out` — the import table is the capability list**); kernel weight = number of while substeps. Both modes eat the same batch of scripts.
+
+| Config | **generated WASM cells** | JS new Function |
+|---|---|---|
+| N=500 × 200 substeps (100k iters/frame) | **60fps · 1.17 ms · 7% of frame budget** | 60fps · 0.84 ms · 5% |
+| N=2000 × 1000 (20× load, 2M iters/frame) | **60fps · 4.8 ms · 29%** (2000 cells / 78ms compile / 613KB) | 60fps · 4.4 ms · 27% |
+
+**Canvas conclusions:**
+1. **"every component is an agent with generated behavior" is routine engineering on WASM cells** (2000 components at 20× load still 60fps, 29% budget) — the live proof of the §16 "feasibility switch"; 2000 unique modules compile in 78ms total (~0.04ms each), so "AI generates code per component and compiles it on the spot" costs next to nothing.
+2. JS ties on speed as always — the reason to choose WASM is the capability sandbox (each cell can only sin/cos/out, can't even call fetch — codegen rejects ungranted capabilities), not speed.
+
+## Running it
 
 ```bash
-wasm-pack build --target web --release   # 需 rustup target wasm32-unknown-unknown + wasm-pack
-python3 -m http.server 8642              # 任何靜態 server 皆可
-open http://localhost:8642/
+# needs: rustup target add wasm32-unknown-unknown + wasm-pack + trunk
+
+# A) standalone pages (benchmark / canvas / draw)
+wasm-pack build --target web --release
+python3 -m http.server 8642              # open http://localhost:8642/{index,canvas,draw}.html
+
+# B) leptos-poc seven tabs + Rust API (Form/Layout/Draw/3D/Spectrum need it)
+cd assemblyscript && npm install && npm run build && cd ..   # Tier 2: asc compiles the Buddha seed (optional)
+cd leptos-poc && trunk build --release && cd ..
+cargo run --release -p api-server -- leptos-poc/dist
+# → http://127.0.0.1:8645 (same-origin: serves dist + /api/*; edit a schema/seed file on disk and reload — zero rebuild)
+
+cargo test                          # native tests
+cargo run --example audit_as --no-default-features   # dogfood: audit a real asc output with our own tool
 ```
 
-頁面載入即自動跑一輪 smoke(N=1e4),結果 JSON 寫入 `#results-json`(headless 驗證用);選 N 按 Run 重跑。1e7 時 Rhai 這條會凍住頁面數秒。
+**Files you can play with (edit + reload, no Rust)**: `api-server/form-schema.json` (form), `api-server/layout-schema.json` (layout), `examples/*.dsl` (Buddha / Guanyin / isometric voxel / third-person voxel), `assemblyscript/assembly/buddha.ts` (Tier 2 AS seed, active after `npm run build`).
 
-```bash
-cargo test    # native 測試:parser、codegen(wasmparser 驗證)、Rhai vs native 同值
-```
+## Known limits (deliberately not done in a PoC)
 
-## 已知限制(PoC 刻意不做)
+- **No fuel metering**: an infinite loop in a generated module hangs the thread. Production needs a Worker + `terminate()`, or codegen inserting a "decrement-a-counter, trap-at-zero" at loop back-edges (~10–30% cost).
+- The DSL is an f64-scalar language: let / assign / while / **if-else** / arithmetic+**%** / comparison / built-in **min/max/abs/sqrt/floor**; still no functions/arrays/strings — strings and data structures stay in the host, only numeric hot kernels go down (wanting containers = granting a memory capability, a security decision, not a grammar one).
+- Strict CSP needs `'wasm-unsafe-eval'` (instantiating bytes at runtime is treated as eval-class).
+- Single flat scope (a duplicate `let` of the same name errors).
 
-- **無 fuel metering**:生成模組無窮迴圈會掛住執行緒。production 要 Worker + `terminate()`,或 codegen 在迴圈 back-edge 插「計數器遞減+trap」(代價 ~10–30%)。
-- DSL 僅 f64 / let / assign / while / 四則 / 比較——夠證明管線;字串/物件會把 codegen 帶進 boxing 地獄,正確用法是留在 host,只把數值熱核下沉。
-- 嚴格 CSP 環境需 `'wasm-unsafe-eval'`(runtime instantiate bytes 被視同 eval 類)。
-- 單一平坦 scope(重複 `let` 同名報錯)。
+## Files
 
-## 檔案
-
-- `src/parser.rs` — lexer + 遞迴下降 parser + AST→JS 轉譯
-- `src/codegen.rs` — AST→WASM(wasm-encoder;block/loop+br_if、f64 比較→i32)
-- `src/lib.rs` — wasm-bindgen 匯出(compile_to_wasm / transpile_to_js / RhaiProgram / native_kernel)
-- `index.html` — 一頁 demo(自適應計時、四路對比表、auto-smoke)
-- `.cargo/config.toml` — getrandom 0.3 wasm_js backend(rhai→ahash 依賴鏈的必要 workaround)
+- `src/parser.rs` — lexer + recursive-descent parser (let/while/if-else/%/calls/comparison + built-in min/max/abs/sqrt/floor) + AST→JS transpile
+- `src/codegen.rs` — AST→WASM (wasm-encoder; `compile_with(params, imports)` — the import table is the capability list)
+- `src/audit.rs` — the foundation of the seed-language spectrum: `imports_of()` / `audit(bytes, grants)` scan a module's import section, rejecting any import not in the grant list (or any memory/table/global import) — the module-level twin of codegen's "fetch() rejection", language-agnostic
+- `assemblyscript/` — Tier 2 seed (`assembly/buddha.ts` → asc → 637B .wasm); produced by `npm run build`, served by api-server
+- `src/lib.rs` — wasm-bindgen exports (`compile_to_wasm`/`compile_kernel_wasm`/`compile_draw_wasm`/`transpile_to_js`/`native_kernel`); feature `js-api` — downstream with `default-features = false` gets the pure compiler + audit, zero wasm-bindgen exports
+- `leptos-poc/` — the seven-tab app; `src/cell.rs` = the only module that touches js-sys (CellBuilder: the grant list generates both the codegen import table and the JS env, so they can't drift; closure lifetimes encoded in the type)
+- `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
+- `examples/*.dsl` — buddha / guanyin / minecraft (isometric) / mc3p (playable third-person)
+- `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§17, in Chinese)

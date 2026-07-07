@@ -1,0 +1,21 @@
+[package]
+name = "leptos-poc"
+version = "0.1.0"
+edition = "2021"
+description = "DynamicCell PoC: runtime-edited scripts compiled to WASM cells driving Leptos signals — dynamic behavior in a pure-Rust CSR app"
+
+[dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+# default-features = false: only the pure compiler (parser+codegen+audit) —
+# without wasm-jit's own wasm-bindgen exports (those exports belong to the standalone benchmark/canvas pages, which this app doesn't use)
+wasm-jit = { path = "..", default-features = false }
+wasm-encoder = "0.252.0"
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+console_error_panic_hook = "0.1"
+gloo-net = { version = "0.6", features = ["http"] }
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlCanvasElement", "CanvasRenderingContext2d",
+] }

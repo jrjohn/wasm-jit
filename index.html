@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Runtime WASM codegen vs Rhai — PoC</title>
+<title>Runtime WASM codegen — PoC</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 900px;
@@ -27,10 +27,10 @@
 </style>
 </head>
 <body>
-<h1>Runtime WASM codegen(V8 JIT)vs Rhai tree-walk 直譯 — 最小 PoC</h1>
-<p style="font-size:.9rem">同一段腳本、四條執行路徑。DSL 是 Rhai 的嚴格子集(同一份原始碼直接餵兩個引擎);
-JS 版由同一 AST 轉譯;native 為 AOT Rust 天花板。管線:
-<code>src → parser → AST → wasm-encoder → bytes → WebAssembly.instantiate()</code>(V8 在最後一步 JIT)。</p>
+<h1>Runtime WASM codegen (borrow the browser's JIT) — PoC <span style="float:right;font-weight:400;font-size:.8rem"><a href="./canvas.html">canvas PoC</a> · <a href="./draw.html">freeform draw →</a></span></h1>
+<p style="font-size:.9rem">One script, three execution lanes: runtime-generated WASM (let the engine JIT it), the same AST transpiled to JS (engine JS-JIT reference), AOT Rust (compile-time ceiling).
+Pipeline: <code>src → parser → AST → wasm-encoder → bytes → WebAssembly.instantiate()</code> (the engine JITs at the last step).
+Claim: generated WASM = the AOT ceiling, tied with hand-written JS — "borrowing the engine's JIT" adds zero overhead.</p>
 
 <textarea id="src" rows="9" spellcheck="false">let sum = 0.0;
 let i = 0.0;
@@ -46,7 +46,7 @@ sum</textarea>
     <option value="10000">1e4</option>
     <option value="100000" selected>1e5</option>
     <option value="1000000">1e6</option>
-    <option value="10000000">1e7(Rhai 可能凍住頁面數十秒)</option>
+    <option value="10000000">1e7</option>
   </select>
   <button id="run">Run benchmark</button>
   <span id="status">loading wasm…</span>
@@ -54,23 +54,22 @@ sum</textarea>
 
 <table id="results">
   <thead>
-    <tr><th>路徑</th><th>compile (ms)</th><th>exec (ms, 中位)</th><th>值</th><th>vs native exec</th></tr>
+    <tr><th>lane</th><th>compile (ms)</th><th>exec (ms, median)</th><th>value</th><th>vs native exec</th></tr>
   </thead>
   <tbody></tbody>
 </table>
 
 <p class="note">
-方法論:exec 以自適應內圈重複次數(單樣本 ≥5ms)量測、多輪取中位;compile 只量一次。
-Rhai 為預設引擎設定(無 metering,其最快配置),且計時的是 <b>precompiled AST</b> 的 eval(compile 分開列)。
-「生成 WASM」的 compile = codegen + <code>WebAssembly.instantiate</code>(V8 基線 JIT 含在內)。
-native 行只對未修改的預設 kernel 有意義。PoC 未做 fuel metering(production 需 Worker+terminate 或 back-edge 計數);
-嚴格 CSP 環境需 <code>'wasm-unsafe-eval'</code>。
+Method: exec is measured with an adaptive inner loop (one sample ≥5ms), median of several rounds; compile is measured once.
+"generated WASM" compile = codegen + <code>WebAssembly.instantiate</code> (the engine's baseline JIT is included).
+The native row is only meaningful for the unmodified default kernel. This PoC does no fuel metering (production needs Worker+terminate or back-edge counting);
+strict CSP needs <code>'wasm-unsafe-eval'</code>.
 </p>
 
 <pre id="results-json" style="display:none"></pre>
 
 <script type="module">
-import init, { compile_to_wasm, transpile_to_js, RhaiProgram, native_kernel }
+import init, { compile_to_wasm, transpile_to_js, native_kernel }
   from './pkg/wasm_jit.js';
 
 const DEFAULT_SRC = document.getElementById('src').value;
@@ -102,35 +101,29 @@ function timed(f) {
 async function bench(src, n) {
   const out = { n, isDefaultKernel: src.trim() === DEFAULT_SRC.trim(), paths: {} };
 
-  // 1) Rhai tree-walk interpretation (precompiled AST)
+  // 1) Runtime-generated WASM, JIT'd by the browser engine
   let t0 = performance.now();
-  const rp = new RhaiProgram(src);
-  const rhaiCompile = performance.now() - t0;
-  out.paths.rhai = { label: 'Rhai 直譯(precompiled AST)', compile: rhaiCompile, ...timed(() => rp.run(n)) };
-
-  // 2) Runtime-generated WASM, JIT'd by V8
-  t0 = performance.now();
   const bytes = compile_to_wasm(src);
   const codegenMs = performance.now() - t0;
   t0 = performance.now();
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const instMs = performance.now() - t0;
   const run = instance.exports.run;
-  out.paths.wasm = { label: '生成 WASM(V8 JIT)', compile: codegenMs + instMs,
+  out.paths.wasm = { label: 'generated WASM (engine JIT)', compile: codegenMs + instMs,
                      codegen: codegenMs, instantiate: instMs, bytes: bytes.length,
                      ...timed(() => run(n)) };
 
-  // 3) Same AST transpiled to JS (V8 JS-JIT reference)
+  // 2) Same AST transpiled to JS (engine JS-JIT reference)
   t0 = performance.now();
   const jsFn = new Function('n', transpile_to_js(src));
   const jsCompile = performance.now() - t0;
-  out.paths.js = { label: 'JS new Function(V8 JS JIT)', compile: jsCompile, ...timed(() => jsFn(n)) };
+  out.paths.js = { label: 'JS new Function (engine JS-JIT)', compile: jsCompile, ...timed(() => jsFn(n)) };
 
-  // 4) AOT Rust ceiling (default kernel only)
-  out.paths.native = { label: 'AOT Rust(編譯期 WASM,天花板)', compile: 0, ...timed(() => native_kernel(n)) };
+  // 3) AOT Rust ceiling (default kernel only)
+  out.paths.native = { label: 'AOT Rust (compile-time WASM, ceiling)', compile: 0, ...timed(() => native_kernel(n)) };
 
-  // value consistency (rhai/wasm/js run the same edited source; native only for default kernel)
-  const vals = [out.paths.rhai.value, out.paths.wasm.value, out.paths.js.value];
+  // value consistency (wasm/js run the same edited source; native only for default kernel)
+  const vals = [out.paths.wasm.value, out.paths.js.value];
   if (out.isDefaultKernel) vals.push(out.paths.native.value);
   const base = Math.max(...vals.map(Math.abs), 1e-300);
   out.maxRelDiff = (Math.max(...vals) - Math.min(...vals)) / base;
@@ -148,31 +141,31 @@ function render(out) {
   const tbody = $('results').querySelector('tbody');
   tbody.innerHTML = '';
   const nat = out.paths.native.exec;
-  for (const key of ['rhai', 'wasm', 'js', 'native']) {
+  for (const key of ['wasm', 'js', 'native']) {
     const p = out.paths[key];
     const ratio = p.exec / nat;
     const tr = document.createElement('tr');
     if (key === 'wasm') tr.className = 'hero';
     const ratioCls = ratio < 3 ? 'ratio-good' : ratio > 20 ? 'ratio-bad' : '';
     const valStr = (key === 'native' && !out.isDefaultKernel)
-      ? '(僅預設 kernel 有效)' : p.value.toPrecision(10);
+      ? '(default kernel only)' : p.value.toPrecision(10);
     tr.innerHTML = `<td>${p.label}</td><td>${fmt(p.compile)}</td>` +
       `<td>${fmt(p.exec)}</td><td>${valStr}</td>` +
       `<td class="${ratioCls}">${ratio.toFixed(1)}×</td>`;
     tbody.appendChild(tr);
   }
-  const speedup = out.paths.rhai.exec / out.paths.wasm.exec;
-  status(`done. N=${out.n.toExponential(0)} · 生成WASM 比 Rhai 快 ${speedup.toFixed(0)}× · ` +
-         `模組 ${out.paths.wasm.bytes} bytes · 值一致=${out.consistent}`, out.consistent ? 'ok' : 'err');
-  out.speedupOverRhai = speedup;
+  const vsNative = out.paths.wasm.exec / nat;
+  status(`done. N=${out.n.toExponential(0)} · generated WASM = ${vsNative.toFixed(2)}× native (≈ ceiling) · ` +
+         `module ${out.paths.wasm.bytes} bytes · consistent=${out.consistent}`, out.consistent ? 'ok' : 'err');
+  out.wasmVsNative = vsNative;
   $('results-json').textContent = JSON.stringify(out);
-  document.title = `PoC ${out.consistent ? 'OK' : 'INCONSISTENT'} wasm=${fmt(out.paths.wasm.exec)}ms rhai=${fmt(out.paths.rhai.exec)}ms ${speedup.toFixed(0)}x`;
+  document.title = `PoC ${out.consistent ? 'OK' : 'INCONSISTENT'} wasm=${fmt(out.paths.wasm.exec)}ms native=${fmt(nat)}ms ${vsNative.toFixed(2)}x`;
 }
 
 async function go() {
   const n = Number($('n').value);
   $('run').disabled = true;
-  status('running…(大 N 時 Rhai 這條會很久)');
+  status('running…');
   await new Promise(r => setTimeout(r, 30)); // let the UI paint
   try {
     render(await bench($('src').value, n));

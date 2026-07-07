@@ -1,3 +1,0 @@
-# getrandom 0.3 (pulled by rhai→ahash) needs an explicit backend on wasm32-unknown-unknown
-[target.wasm32-unknown-unknown]
-rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

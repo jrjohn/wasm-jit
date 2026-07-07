@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Freeform draw — primitives, no widgets</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 960px;
+         margin: 1.2rem auto; padding: 0 1rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  h1 { font-size: 1.02rem; }
+  .nav { float: right; font-weight: 400; font-size: .8rem; }
+  a { color: #58a6ff; }
+  .sub { font-size: .82rem; opacity: .72; }
+  canvas { display: block; width: 100%; border: 1px solid #30363d; border-radius: 8px; background: #010409; }
+  textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: .78rem; padding: .5rem;
+             border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; margin-top: .7rem; }
+  .bar { display: flex; gap: .7rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+  button { font: inherit; padding: .3rem .9rem; border-radius: 6px; border: none;
+           background: #1f6feb; color: #fff; cursor: pointer; }
+  .violate { background: transparent; border: 1px solid #f8514966; color: #f85149; }
+  #status { font-size: .82rem; }
+  .ok { color: #3fb950; } .err { color: #f85149; }
+</style>
+</head>
+<body>
+<h1>"Draw a smiling Buddha" — no widgets, just primitives
+  <span class="nav"><a href="./index.html">benchmark</a> · <a href="./canvas.html">canvas</a></span></h1>
+<p class="sub">A script (simulating AI generation) → wasm-jit compiles a cell → run(t, w, h) called every frame.
+Granted capabilities: <code>sin cos hue disc ring arc line</code> — a complete 2D basis; any figure is a composition of these.
+The cell has no DOM, no network; <code>fetch()</code> is rejected at codegen.</p>
+
+<canvas id="cv" width="1440" height="900"></canvas>
+
+<div class="bar">
+  example <select id="example">
+    <option value="buddha" selected>Smiling Buddha</option>
+    <option value="guanyin">Guanyin (full body + lotus throne)</option>
+  </select>
+  <button id="run">Compile & Run</button>
+  <button id="violate" class="violate">try to escalate: fetch()</button>
+  <span id="status">loading…</span>
+</div>
+
+<textarea id="src" rows="22" spellcheck="false">// Smiling Buddha — manifested by 7 primitive capabilities
+let cx = w * 0.5;
+let cy = h * 0.56;
+let r = h * 0.27;
+
+// halo (breathing)
+hue(0.13);
+ring(cx, cy - r * 0.18, r * 1.55 + sin(t) * 6.0);
+
+// ushnisha (topknot)
+hue(0.09);
+disc(cx, cy - r * 1.04, r * 0.2);
+
+// face
+hue(0.1);
+disc(cx, cy, r);
+
+// long ears
+line(cx - r * 1.06, cy - r * 0.15, cx - r * 1.06, cy + r * 0.5);
+line(cx + r * 1.06, cy - r * 0.15, cx + r * 1.06, cy + r * 0.5);
+
+// urna (forehead dot)
+hue(0.99);
+disc(cx, cy - r * 0.28, r * 0.045);
+
+// closed eyes (upward-curving lids)
+hue(0.02);
+arc(cx - r * 0.36, cy - r * 0.02, r * 0.17, 3.35, 6.05);
+arc(cx + r * 0.36, cy - r * 0.02, r * 0.17, 3.35, 6.05);
+
+// smile (with the breath)
+arc(cx, cy + r * 0.22, r * 0.46 + sin(t * 2.0) * 3.0, 0.45, 2.69);
+
+0.0</textarea>
+
+<script type="module">
+import init, { compile_draw_wasm } from './pkg/wasm_jit.js';
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const $ = id => document.getElementById(id);
+const status = (m, c = '') => { $('status').textContent = m; $('status').className = c; };
+
+let run = null;
+const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
+const env = {
+  sin: Math.sin, cos: Math.cos,
+  hue: v => { const c = hueColor(v); ctx.strokeStyle = c; ctx.fillStyle = c; },
+  disc: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.fill(); },
+  ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
+  arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
+  line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+};
+
+function compile() {
+  try {
+    const t0 = performance.now();
+    const bytes = compile_draw_wasm($('src').value);
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+    run = inst.exports.run;
+    status(`compiled ${bytes.length} bytes in ${(performance.now() - t0).toFixed(1)}ms — manifesting`, 'ok');
+    document.title = `draw OK ${bytes.length}B`;
+  } catch (e) {
+    run = null;
+    status('compile error: ' + (e?.message ?? e), 'err');
+    document.title = 'draw ERR';
+  }
+}
+
+function frame(now) {
+  if (run) {
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    try { run(now / 1000, W, H); } catch (e) { run = null; status('runtime: ' + e, 'err'); }
+  }
+  requestAnimationFrame(frame);
+}
+
+$('run').addEventListener('click', compile);
+$('violate').addEventListener('click', () => {
+  $('src').value = 'fetch(t);\n0.0';
+  compile();
+});
+$('example').addEventListener('change', async () => {
+  try {
+    const r = await fetch(`examples/${$('example').value}.dsl`);
+    $('src').value = await r.text();
+    compile();
+  } catch (e) { status('failed to load example: ' + e, 'err'); }
+});
+
+await init();
+compile();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
