@@ -1,4 +1,4 @@
-//! wasm-jit-poc — runtime script→WASM codegen (V8 JITs it) vs Rhai tree-walk interpretation.
+//! wasm-jit — runtime script→WASM codegen (V8 JITs it) vs Rhai tree-walk interpretation.
 //!
 //! Exposed to JS:
 //! - `compile_to_wasm(src)`  : DSL source → complete .wasm module bytes (export `run(f64)->f64`)

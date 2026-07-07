@@ -1,5 +1,5 @@
 [package]
-name = "wasm-jit-poc"
+name = "wasm-jit"
 version = "0.1.0"
 edition = "2021"
 description = "PoC: runtime script→WASM codegen (let V8 JIT it) vs Rhai tree-walking interpretation"

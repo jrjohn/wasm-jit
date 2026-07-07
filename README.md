@@ -1,4 +1,4 @@
-# wasm-jit-poc — Runtime WASM codegen(借 V8 JIT)vs Rhai tree-walk 直譯
+# wasm-jit — Runtime WASM codegen(借 V8 JIT)vs Rhai tree-walk 直譯
 
 最小 PoC,一頁 demo。驗證主張:**腳本在 runtime 編成 WASM bytes → `WebAssembly.instantiate()` → V8 幫你 JIT → 近原生執行**,對比 Rhai(tree-walking 直譯器)。
 
