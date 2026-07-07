@@ -7,6 +7,7 @@
 //!   選定部門 → /api/members/{id} 載入人員列表
 
 use crate::cell::Cell;
+use crate::tokens::style_of;
 use gloo_net::http::Request;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -28,6 +29,9 @@ struct FieldSpec {
     script: Option<String>,
     #[serde(default)]
     params: Vec<String>,
+    /// 樣式:只准引用 design token(tokens.rs 驗證);raw CSS 會被拒。
+    #[serde(default)]
+    style: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// 每欄一組泛用 signal(text/num/flag 依 widget 取用)+ 驗證狀態。
@@ -260,13 +264,24 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
                         _ => view! { <span>"(unknown widget)"</span> }.into_any(),
                     };
                     let err = spec.err.clone().unwrap_or_default();
+                    // schema 的 style 只能引用 token;raw CSS / 未授權屬性在此被拒
+                    let (style_attr, style_err) = match &spec.style {
+                        Some(m) => match style_of(m) {
+                            Ok(s) => (s, String::new()),
+                            Err(e) => (String::new(), e),
+                        },
+                        None => (String::new(), String::new()),
+                    };
                     view! {
-                        <div class="field" class:invalid=move || !f.valid.get()>
+                        <div class="field" style=style_attr class:invalid=move || !f.valid.get()>
                             <label class="f-label">{spec.label.clone()}</label>
                             {inner}
                             <Show when=move || !f.valid.get()>
                                 <span class="f-err">{err.clone()}</span>
                             </Show>
+                            {(!style_err.is_empty()).then(|| view! {
+                                <span class="f-err">"style: "{style_err.clone()}</span>
+                            })}
                         </div>
                     }
                 })

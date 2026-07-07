@@ -11,6 +11,7 @@
   {"name":"ratio","label":"獎金比例 %","widget":"range"},
   {"name":"bonus","label":"獎金(計算欄,細胞驅動)","widget":"computed",
    "script":"out(salary * ratio * 0.01, ratio * 0.01);\nsalary * ratio * 0.01",
-   "params":["salary","ratio"]},
+   "params":["salary","ratio"],
+   "style":{"background":"surface-3","padding":"3","radius":"2"}},
   {"name":"note","label":"備註","widget":"textarea"}
 ]
