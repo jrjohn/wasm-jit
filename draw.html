@@ -33,6 +33,10 @@ granted capabilities:<code>sin cos hue disc ring arc line</code> —— 2D 完�
 <canvas id="cv" width="1440" height="900"></canvas>
 
 <div class="bar">
+  範例 <select id="example">
+    <option value="buddha" selected>佛陀的笑臉</option>
+    <option value="guanyin">觀音菩薩(全身+蓮台)</option>
+  </select>
   <button id="run">Compile & Run</button>
   <button id="violate" class="violate">試圖越權 fetch()</button>
   <span id="status">loading…</span>
@@ -121,6 +125,13 @@ $('run').addEventListener('click', compile);
 $('violate').addEventListener('click', () => {
   $('src').value = 'fetch(t);\n0.0';
   compile();
+});
+$('example').addEventListener('change', async () => {
+  try {
+    const r = await fetch(`examples/${$('example').value}.dsl`);
+    $('src').value = await r.text();
+    compile();
+  } catch (e) { status('載入範例失敗: ' + e, 'err'); }
 });
 
 await init();
