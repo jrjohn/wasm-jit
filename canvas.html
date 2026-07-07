@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>畫布 PoC — N 個元件 × 生成 kernel × 60fps</title>
+<title>Canvas PoC — N components × generated kernels × 60fps</title>
 <style>
   :root { color-scheme: dark; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 960px;
@@ -23,7 +23,7 @@
 </style>
 </head>
 <body>
-<h1>畫布 PoC — 每個元件一顆「獨立生成、獨立編譯」的 kernel 細胞,每 frame 全跑
+<h1>Canvas PoC — one independently generated, independently compiled kernel cell per component, all run every frame
   <span style="float:right;font-weight:400;font-size:.8rem"><a href="./index.html">← benchmark</a></span></h1>
 
 <div class="bar">
@@ -31,11 +31,11 @@
       <option>50</option><option>200</option><option selected>500</option>
       <option>1000</option><option>2000</option>
     </select>
-  kernel 重量(substeps)<select id="steps-sel">
+  kernel weight (substeps) <select id="steps-sel">
       <option>1</option><option>50</option><option selected>200</option><option>1000</option>
     </select>
-  執行 <select id="mode-sel">
-      <option value="wasm" selected>生成 WASM 細胞(瀏覽器 JIT)</option>
+  mode <select id="mode-sel">
+      <option value="wasm" selected>generated WASM cells (browser JIT)</option>
       <option value="js">JS new Function(V8 JS JIT)</option>
     </select>
   <button id="regen">Regenerate</button>
@@ -46,19 +46,19 @@
 
 <div class="stats">
   <span>fps <b id="s-fps">–</b></span>
-  <span>kernel(全體/frame)<b id="s-kern">–</b> ms(p95 <span id="s-kern95">–</span>)</span>
+  <span>kernel (all/frame) <b id="s-kern">–</b> ms (p95 <span id="s-kern95">–</span>)</span>
   <span>draw <b id="s-draw">–</b> ms</span>
-  <span>幀預算 16.6ms 佔用 <b id="s-budget">–</b></span>
-  <span>編譯 <b id="s-compile">–</b></span>
+  <span>16.6ms frame budget used <b id="s-budget">–</b></span>
+  <span>compile <b id="s-compile">–</b></span>
   <span id="s-sandbox" class="badge">–</span>
 </div>
 
 <p class="note">
-每個元件的腳本是<b>獨一份的原始碼</b>(模板 × 依 index 烘焙的常數 = 模擬「AI 對每個元件各生成一段行為」),
-各自編成一顆 WASM 模組(僅能呼叫被授予的 capability:<code>sin</code>、<code>cos</code>、<code>out</code>——import 表即能力清單)。
-kernel 重量 = while 迴圈 substep 數(模擬物理/幾何迭代)。兩種執行模式吃同一批腳本原文。
-選 WASM 的理由是 capability 沙箱(每顆細胞只能 sin/cos/out,連 fetch 都叫不到);JS 速度打平但零隔離。
-PoC 未做 fuel metering(production 需 Worker+terminate 或 back-edge 計數)。
+Each component's script is <b>its own unique source</b> (a template × constants baked from the index = simulating "AI generates a behavior per component"),
+each compiled to its own WASM module (may only call granted capabilities: <code>sin</code>, <code>cos</code>, <code>out</code> — the import table is the capability list).
+kernel weight = number of while substeps (simulating physics/geometry iteration). Both modes eat the same batch of script sources.
+The reason to pick WASM is the capability sandbox (each cell can only sin/cos/out, can't even call fetch); JS ties on speed but has zero isolation.
+This PoC does no fuel metering (production needs Worker+terminate or back-edge counting).
 </p>
 
 <pre id="metrics-json" style="display:none"></pre>
@@ -140,8 +140,8 @@ function build() {
   $('s-compile').textContent = `${N} cells / ${compileInfo.ms.toFixed(0)}ms` +
     (mode === 'wasm' ? ` / ${(compileInfo.bytes / 1024).toFixed(1)}KB` : '');
   $('s-sandbox').textContent = mode === 'wasm'
-    ? '沙箱 ✅ capability cell(imports: sin, cos, out)'
-    : '沙箱 ❌ new Function 持整頁權限';
+    ? 'sandbox ✅ capability cell (imports: sin, cos, out)'
+    : 'sandbox ❌ new Function holds whole-page authority';
   $('s-sandbox').className = 'badge ' + (mode === 'js' ? 'bad' : 'ok');
 }
 
@@ -195,7 +195,7 @@ function frame(now) {
       drawMsAvg: +avg(ring.draw).toFixed(3), budgetPct: +budget.toFixed(1),
       compileMs: +compileInfo.ms.toFixed(1), totalBytes: compileInfo.bytes,
     });
-    document.title = `畫布 ${mode} N=${elements.length} ${fps.toFixed(0)}fps kern=${kern.toFixed(1)}ms`;
+    document.title = `canvas ${mode} N=${elements.length} ${fps.toFixed(0)}fps kern=${kern.toFixed(1)}ms`;
   }
   requestAnimationFrame(frame);
 }

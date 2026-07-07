@@ -204,7 +204,7 @@ fn ensure_loop() {
 #[component]
 pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoView {
     let script = RwSignal::new(String::new());
-    let status = RwSignal::new(String::from("載入範例…"));
+    let status = RwSignal::new(String::from("loading example…"));
     let ok = RwSignal::new(true);
     let sel = RwSignal::new(example.to_string());
     // Tier 2:AS 產物的 bytes（None = Tier 1 DSL 模式,編 textarea 源碼）
@@ -215,7 +215,7 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
             let size = cell.size();
             STATE.with(|s| s.borrow_mut().fill(0.0)); // 新種子 = 新世界,清記憶
             DRAW_CELL.with(|c| *c.borrow_mut() = Some(cell));
-            status.set(format!("{tier} → {size} bytes — 顯化中"));
+            status.set(format!("{tier} → {size} bytes — manifesting"));
             ok.set(true);
         }
         Err(e) => {
@@ -226,7 +226,7 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
     };
 
     let compile_now = move || match as_bytes.get_untracked() {
-        Some(b) => install(build_draw_cell_from_bytes(&b), "AS 產物 → import 審計通過"),
+        Some(b) => install(build_draw_cell_from_bytes(&b), "AS output → import audit passed"),
         None => install(build_draw_cell(&script.get_untracked()), "DSL → codegen"),
     };
 
@@ -245,15 +245,15 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
                             as_bytes.set(Some(bytes));
                             compile_now();
                         }
-                        Err(e) => { status.set(format!("AS wasm 讀取失敗: {e}")); ok.set(false); }
+                        Err(e) => { status.set(format!("AS wasm read failed: {e}")); ok.set(false); }
                     },
-                    Err(e) => { status.set(format!("AS 載入失敗: {e}")); ok.set(false); }
+                    Err(e) => { status.set(format!("AS load failed: {e}")); ok.set(false); }
                 }
             } else {
                 as_bytes.set(None);
                 match Request::get(&format!("/api/examples/{name}")).send().await {
                     Ok(r) => { script.set(r.text().await.unwrap_or_default()); compile_now(); }
-                    Err(e) => { status.set(format!("範例載入失敗: {e}")); ok.set(false); }
+                    Err(e) => { status.set(format!("example load failed: {e}")); ok.set(false); }
                 }
             }
         })
@@ -265,13 +265,13 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
 
     view! {
         <p class="sub">
-            "像素表面:DSL 種子由 /api/examples 載入 → 細胞 → 繪圖 primitives + "
-            "key/get/set 互動 capabilities,每 frame 顯化。無 widget、無 DOM 權限。"
-            "3D 範例:← → ↑ ↓ / WASD 移動、Space 跳(物理與投影全在種子裡算)。"
+            "Pixel surface: a DSL seed loaded from /api/examples → cell → drawing primitives + "
+            "key/get/set interaction capabilities, manifested every frame. No widgets, no DOM authority. "
+            "3D example: ← → ↑ ↓ / WASD to move, Space to jump (physics and projection all computed inside the seed)."
         </p>
         <canvas id="draw-cv" class="draw-cv" width="1440" height="900"></canvas>
         <div class="tok-row">
-            "範例 "
+            "example "
             <select class="draw-example"
                 prop:value=move || sel.get()
                 on:change=move |ev| {
@@ -279,17 +279,17 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
                     sel.set(v.clone());
                     load(v);
                 }>
-                <option value="buddha">"佛陀的笑臉"</option>
-                <option value="guanyin">"觀音菩薩(全身+蓮台)"</option>
-                <option value="minecraft">"3D 體素地形(等角視角)"</option>
-                <option value="mc3p">"3D 體素世界(第三人稱跟隨,可走可跳)"</option>
-                <option value="as:buddha">"佛陀 —— AssemblyScript(真 asc 編,Tier 2)"</option>
+                <option value="buddha">"Smiling Buddha"</option>
+                <option value="guanyin">"Guanyin (full body + lotus throne)"</option>
+                <option value="minecraft">"3D voxel terrain (isometric)"</option>
+                <option value="mc3p">"3D voxel world (third-person chase, walk + jump)"</option>
+                <option value="as:buddha">"Buddha — AssemblyScript (real asc build, Tier 2)"</option>
             </select>
             <button class="apply draw-run" on:click=move |_| compile_now()>"Compile & Run"</button>
             <button class="tok-violate draw-violate" on:click=move |_| {
                 script.set("fetch(t);\n0.0".to_string());
                 compile_now();
-            }>"試圖越權 fetch()"</button>
+            }>"try to escalate: fetch()"</button>
             <span class="draw-status" class:ok=move || ok.get() class:bad=move || !ok.get()>
                 {move || status.get()}
             </span>

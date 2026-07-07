@@ -115,7 +115,7 @@ fn render(node: Node) -> AnyView {
         "text" => view! { <p class="ly-text" style=style.clone()>{node.text.unwrap_or_default()}</p> }
             .into_any(),
         other => view! {
-            <div class="cell-err">{format!("未知 layout 節點 '{other}' — 詞彙: shell/header/side/main/card/menu/profile/table/text")}</div>
+            <div class="cell-err">{format!("unknown layout node '{other}' — vocabulary: shell/header/side/main/card/menu/profile/table/text")}</div>
         }
         .into_any(),
     };
@@ -197,7 +197,7 @@ pub fn LayoutPoc() -> impl IntoView {
                         root.set(Some(n));
                         err.set(String::new());
                     }
-                    Err(e) => err.set(format!("layout schema 解析失敗:{e}")),
+                    Err(e) => err.set(format!("layout schema parse failed: {e}")),
                 },
                 Err(e) => err.set(format!("layout schema API error: {e}")),
             }
@@ -207,10 +207,10 @@ pub fn LayoutPoc() -> impl IntoView {
 
     view! {
         <p class="sub">
-            "整個 app 版面(header/選單/profile/表格)由 api-server/layout-schema.json 的遞迴樹顯化;"
-            "table 的資料再由 schema 指定的 API source 載入。改檔 → 重載 → 版面即變,零重編。"
+            "The whole app layout (header/menu/profile/table) is manifested from the recursive tree in api-server/layout-schema.json; "
+            "the table's rows are then loaded from the API source named in the schema. Edit file → reload → the layout changes, zero rebuild."
         </p>
-        <button class="apply reload-layout" on:click=move |_| load()>"重新載入 layout"</button>
+        <button class="apply reload-layout" on:click=move |_| load()>"Reload layout"</button>
         <Show when=move || !err.get().is_empty()>
             <div class="cell-err">{move || err.get()}</div>
         </Show>

@@ -80,7 +80,7 @@ pub fn audit(bytes: &[u8], grants: &[Grant]) -> Result<(), String> {
         // 只允許函式 import;memory/table/global import = 想要 host 給它更大的世界,拒。
         if imp.kind != "func" {
             return Err(format!(
-                "未授權的 {} import '{}::{}' —— 只允許 host 授予的函式 capability",
+                "unauthorized {} import '{}::{}' — only host-granted function capabilities are allowed",
                 imp.kind, imp.module, imp.name
             ));
         }
@@ -94,7 +94,7 @@ pub fn audit(bytes: &[u8], grants: &[Grant]) -> Result<(), String> {
                 .collect::<Vec<_>>()
                 .join(", ");
             return Err(format!(
-                "未授權的 import '{}::{}' —— granted capabilities: [{list}]",
+                "unauthorized import '{}::{}' — granted capabilities: [{list}]",
                 imp.module, imp.name
             ));
         }

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -27,10 +27,10 @@
 </style>
 </head>
 <body>
-<h1>Runtime WASM codegen(借瀏覽器 JIT)— 最小 PoC <span style="float:right;font-weight:400;font-size:.8rem"><a href="./canvas.html">畫布 PoC</a> · <a href="./draw.html">自由繪 →</a></span></h1>
-<p style="font-size:.9rem">同一段腳本、三條執行路徑:runtime 生成 WASM(讓引擎 JIT)、同 AST 轉譯的 JS(V8 JS-JIT 參照)、AOT Rust(編譯期天花板)。
-管線:<code>src → parser → AST → wasm-encoder → bytes → WebAssembly.instantiate()</code>(引擎在最後一步 JIT)。
-主張:生成 WASM = AOT 天花板、與手寫 JS 打平——「借引擎的 JIT」零額外開銷。</p>
+<h1>Runtime WASM codegen (borrow the browser's JIT) — PoC <span style="float:right;font-weight:400;font-size:.8rem"><a href="./canvas.html">canvas PoC</a> · <a href="./draw.html">freeform draw →</a></span></h1>
+<p style="font-size:.9rem">One script, three execution lanes: runtime-generated WASM (let the engine JIT it), the same AST transpiled to JS (engine JS-JIT reference), AOT Rust (compile-time ceiling).
+Pipeline: <code>src → parser → AST → wasm-encoder → bytes → WebAssembly.instantiate()</code> (the engine JITs at the last step).
+Claim: generated WASM = the AOT ceiling, tied with hand-written JS — "borrowing the engine's JIT" adds zero overhead.</p>
 
 <textarea id="src" rows="9" spellcheck="false">let sum = 0.0;
 let i = 0.0;
@@ -54,16 +54,16 @@ sum</textarea>
 
 <table id="results">
   <thead>
-    <tr><th>路徑</th><th>compile (ms)</th><th>exec (ms, 中位)</th><th>值</th><th>vs native exec</th></tr>
+    <tr><th>lane</th><th>compile (ms)</th><th>exec (ms, median)</th><th>value</th><th>vs native exec</th></tr>
   </thead>
   <tbody></tbody>
 </table>
 
 <p class="note">
-方法論:exec 以自適應內圈重複次數(單樣本 ≥5ms)量測、多輪取中位;compile 只量一次。
-「生成 WASM」的 compile = codegen + <code>WebAssembly.instantiate</code>(引擎基線 JIT 含在內)。
-native 行只對未修改的預設 kernel 有意義。PoC 未做 fuel metering(production 需 Worker+terminate 或 back-edge 計數);
-嚴格 CSP 環境需 <code>'wasm-unsafe-eval'</code>。
+Method: exec is measured with an adaptive inner loop (one sample ≥5ms), median of several rounds; compile is measured once.
+"generated WASM" compile = codegen + <code>WebAssembly.instantiate</code> (the engine's baseline JIT is included).
+The native row is only meaningful for the unmodified default kernel. This PoC does no fuel metering (production needs Worker+terminate or back-edge counting);
+strict CSP needs <code>'wasm-unsafe-eval'</code>.
 </p>
 
 <pre id="results-json" style="display:none"></pre>
@@ -109,7 +109,7 @@ async function bench(src, n) {
   const { instance } = await WebAssembly.instantiate(bytes, {});
   const instMs = performance.now() - t0;
   const run = instance.exports.run;
-  out.paths.wasm = { label: '生成 WASM(引擎 JIT)', compile: codegenMs + instMs,
+  out.paths.wasm = { label: 'generated WASM (engine JIT)', compile: codegenMs + instMs,
                      codegen: codegenMs, instantiate: instMs, bytes: bytes.length,
                      ...timed(() => run(n)) };
 
@@ -117,10 +117,10 @@ async function bench(src, n) {
   t0 = performance.now();
   const jsFn = new Function('n', transpile_to_js(src));
   const jsCompile = performance.now() - t0;
-  out.paths.js = { label: 'JS new Function(引擎 JS JIT)', compile: jsCompile, ...timed(() => jsFn(n)) };
+  out.paths.js = { label: 'JS new Function (engine JS-JIT)', compile: jsCompile, ...timed(() => jsFn(n)) };
 
   // 3) AOT Rust ceiling (default kernel only)
-  out.paths.native = { label: 'AOT Rust(編譯期 WASM,天花板)', compile: 0, ...timed(() => native_kernel(n)) };
+  out.paths.native = { label: 'AOT Rust (compile-time WASM, ceiling)', compile: 0, ...timed(() => native_kernel(n)) };
 
   // value consistency (wasm/js run the same edited source; native only for default kernel)
   const vals = [out.paths.wasm.value, out.paths.js.value];
@@ -148,15 +148,15 @@ function render(out) {
     if (key === 'wasm') tr.className = 'hero';
     const ratioCls = ratio < 3 ? 'ratio-good' : ratio > 20 ? 'ratio-bad' : '';
     const valStr = (key === 'native' && !out.isDefaultKernel)
-      ? '(僅預設 kernel 有效)' : p.value.toPrecision(10);
+      ? '(default kernel only)' : p.value.toPrecision(10);
     tr.innerHTML = `<td>${p.label}</td><td>${fmt(p.compile)}</td>` +
       `<td>${fmt(p.exec)}</td><td>${valStr}</td>` +
       `<td class="${ratioCls}">${ratio.toFixed(1)}×</td>`;
     tbody.appendChild(tr);
   }
   const vsNative = out.paths.wasm.exec / nat;
-  status(`done. N=${out.n.toExponential(0)} · 生成 WASM = ${vsNative.toFixed(2)}× native(≈天花板)· ` +
-         `模組 ${out.paths.wasm.bytes} bytes · 值一致=${out.consistent}`, out.consistent ? 'ok' : 'err');
+  status(`done. N=${out.n.toExponential(0)} · generated WASM = ${vsNative.toFixed(2)}× native (≈ ceiling) · ` +
+         `module ${out.paths.wasm.bytes} bytes · consistent=${out.consistent}`, out.consistent ? 'ok' : 'err');
   out.wasmVsNative = vsNative;
   $('results-json').textContent = JSON.stringify(out);
   document.title = `PoC ${out.consistent ? 'OK' : 'INCONSISTENT'} wasm=${fmt(out.paths.wasm.exec)}ms native=${fmt(nat)}ms ${vsNative.toFixed(2)}x`;

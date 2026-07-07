@@ -1,10 +1,10 @@
-//! Dogfood:用 wasm-jit 自己的 import 審計驗一顆「真 AssemblyScript 編出來的」種子。
+//! Dogfood: audit a real AssemblyScript-compiled seed with wasm-jit's own import audit.
 fn main() {
     let bytes = std::fs::read("assemblyscript/build/buddha.wasm")
-        .expect("先 `cd assemblyscript && npm run build` 產出 buddha.wasm");
+        .expect("run `cd assemblyscript && npm run build` first to produce buddha.wasm");
     println!("AS buddha.wasm = {} bytes", bytes.len());
     let imps = wasm_jit::audit::imports_of(&bytes).unwrap();
-    println!("import 節({} 個):", imps.len());
+    println!("import section ({} entries):", imps.len());
     for i in &imps {
         println!("  {}::{}  ({})", i.module, i.name, i.kind);
     }
@@ -14,16 +14,16 @@ fn main() {
         .map(|n| wasm_jit::audit::Grant { module: "env", name: n })
         .collect();
     match wasm_jit::audit::audit(&bytes, &grants) {
-        Ok(()) => println!("audit(draw grants): ✅ 通過 —— AS 產物走同一道沙箱"),
+        Ok(()) => println!("audit(draw grants): ✅ passed — the AS output goes through the same sandbox"),
         Err(e) => println!("audit: ❌ {e}"),
     }
-    // 反例:若只授權 sin/cos(不給繪圖能力),同一顆 AS 種子就會被拒
+    // counter-case: granting only sin/cos (no drawing capabilities) rejects the same AS seed
     let tiny: Vec<_> = ["sin", "cos"]
         .iter()
         .map(|n| wasm_jit::audit::Grant { module: "env", name: n })
         .collect();
     match wasm_jit::audit::audit(&bytes, &tiny) {
-        Ok(()) => println!("audit(僅 sin/cos): 意外通過"),
-        Err(e) => println!("audit(僅 sin/cos): ❌（如預期）{e}"),
+        Ok(()) => println!("audit(sin/cos only): unexpectedly passed"),
+        Err(e) => println!("audit(sin/cos only): ❌ (as expected) {e}"),
     }
 }

@@ -1,14 +1,14 @@
-// 3D 體素世界 —— 第三人稱跟隨鏡頭(像在裡面玩,看得到身體)
-// ← → 轉向、↑ ↓ 前進/後退、Space 跳。
-// 真透視投影 + 可旋轉鏡頭 + 由遠到近取樣(畫家演算法)+ 距離霧,全在種子裡。
-// v2:DSL 升級後改寫 —— if/else、%、min/max/abs/sqrt/floor 內建;
-//     舊版的「比較式當 0/1 乘數」技法已走入歷史。
+// 3D voxel world — third-person chase camera (like you're inside, but you see your body)
+// ← → turn, ↑ ↓ forward/back, Space jump.
+// true perspective projection + a rotatable camera + far-to-near sampling (painter's algorithm) + distance fog, all inside the seed.
+// v2: rewritten after the DSL upgrade — if/else, %, built-in min/max/abs/sqrt/floor;
+//     the old "comparison-as-0/1-multiplier" trick is now history.
 
 let F = h * 1.05;
 let cx = w * 0.5;
 let cy = h * 0.42;
 
-// —— 狀態 ——
+// —— state ——
 let px = get(0.0);
 let pz = get(1.0);
 let py = get(2.0);
@@ -27,7 +27,7 @@ if dtr < 0.1 {
 }
 set(4.0, t);
 
-// —— 轉向與移動 ——
+// —— turn and move ——
 yaw = yaw + (key(1.0) - key(0.0)) * 2.0 * dt;
 let fx = sin(yaw);
 let fz = cos(yaw);
@@ -35,7 +35,7 @@ let mv = (key(2.0) - key(3.0)) * 3.5 * dt;
 px = px + fx * mv;
 pz = pz + fz * mv;
 
-// —— 腳下地形、跳躍與重力 ——
+// —— terrain underfoot, jump and gravity ——
 let gp = 2.4 + sin(px * 0.55) + cos(pz * 0.65) + sin((px + pz) * 0.35) * 0.6;
 if py <= gp + 0.05 {
     if key(4.0) > 0.5 {
@@ -54,14 +54,14 @@ set(2.0, py);
 set(3.0, vy);
 set(6.0, yaw);
 
-// —— 鏡頭:玩家身後上方 ——
+// —— camera: above and behind the player ——
 let ex = px - fx * 3.2;
 let ez = pz - fz * 3.2;
 let eh = py + 2.4;
 let rx = fz;
 let rz = 0.0 - fx;
 
-// —— 地形:鏡頭空間由遠到近取樣 ——
+// —— terrain: sampled far-to-near in camera space ——
 let d = 15.0;
 while d > 0.7 {
     let l = 0.0 - 8.0;
@@ -74,7 +74,7 @@ while d > 0.7 {
         let chh = 0.12 * lo + 0.33 * (1.0 - lo) * (1.0 - hi) + 0.55 * hi;
         let cll = (0.58 * lo + 0.42 * (1.0 - lo) * (1.0 - hi) + 0.85 * hi) * (1.0 - d * 0.042);
 
-        // 四個側面:只畫朝鏡頭的(if,不再是 0/1 乘數)
+        // four side faces: draw only the ones facing the camera (an if now, no longer a 0/1 multiplier)
         let k = 0.0;
         while k < 4.0 {
             let nx = cos(k * 1.5708);
@@ -107,7 +107,7 @@ while d > 0.7 {
             k = k + 1.0;
         }
 
-        // 頂面:四角同過近平面才畫
+        // top face: drawn only when all four corners pass the near plane
         let d1x = wxx - 0.5 - ex;
         let d1z = wzz - 0.5 - ez;
         let d3x = d1x + 1.0;
@@ -135,7 +135,7 @@ while d > 0.7 {
     d = d - 0.8;
 }
 
-// —— 玩家身體(鏡頭正前方 3.2,看得到自己)——
+// —— the player's body (3.2 in front of the camera; you can see yourself) ——
 col(0.0, 0.08);
 disc(cx, cy + F * (eh - gp) / 3.2, F * 0.10);
 let bw = F * 0.085;

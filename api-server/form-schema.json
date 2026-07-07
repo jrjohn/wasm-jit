@@ -1,17 +1,17 @@
 [
-  {"name":"name","label":"姓名","widget":"text"},
-  {"name":"age","label":"年齡","widget":"number",
+  {"name":"name","label":"Name","widget":"text"},
+  {"name":"age","label":"Age","widget":"number",
    "rule":"let ok = (v >= 18.0) * (v <= 65.0); out(ok, 0.0); ok","err":"18–65"},
-  {"name":"dept","label":"部門","widget":"dept-select"},
-  {"name":"grade","label":"職級","widget":"radio","options":["初級","中級","資深"]},
-  {"name":"active","label":"在職","widget":"checkbox"},
-  {"name":"joined","label":"到職日","widget":"date"},
-  {"name":"salary","label":"月薪","widget":"number",
+  {"name":"dept","label":"Department","widget":"dept-select"},
+  {"name":"grade","label":"Grade","widget":"radio","options":["Junior","Mid","Senior"]},
+  {"name":"active","label":"Active","widget":"checkbox"},
+  {"name":"joined","label":"Start date","widget":"date"},
+  {"name":"salary","label":"Monthly salary","widget":"number",
    "rule":"let ok = (v >= 28590.0) * (v <= 500000.0); out(ok, 0.0); ok","err":"28590–500000"},
-  {"name":"ratio","label":"獎金比例 %","widget":"range"},
-  {"name":"bonus","label":"獎金(計算欄,細胞驅動)","widget":"computed",
+  {"name":"ratio","label":"Bonus rate %","widget":"range"},
+  {"name":"bonus","label":"Bonus (computed field, cell-driven)","widget":"computed",
    "script":"out(salary * ratio * 0.01, ratio * 0.01);\nsalary * ratio * 0.01",
    "params":["salary","ratio"],
    "style":{"background":"surface-3","padding":"3","radius":"2"}},
-  {"name":"note","label":"備註","widget":"textarea"}
+  {"name":"note","label":"Note","widget":"textarea"}
 ]

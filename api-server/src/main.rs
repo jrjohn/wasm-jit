@@ -34,10 +34,10 @@ async fn form_schema() -> impl IntoResponse {
 async fn departments() -> Json<Value> {
     tokio::time::sleep(Duration::from_millis(120)).await;
     Json(json!([
-        { "id": 1, "name": "資訊部" },
-        { "id": 2, "name": "品保部" },
-        { "id": 3, "name": "研發部" },
-        { "id": 4, "name": "製造部" },
+        { "id": 1, "name": "IT" },
+        { "id": 2, "name": "QA" },
+        { "id": 3, "name": "R&D" },
+        { "id": 4, "name": "Manufacturing" },
     ]))
 }
 
@@ -45,23 +45,23 @@ async fn members(Path(dept): Path<u32>) -> Json<Value> {
     tokio::time::sleep(Duration::from_millis(120)).await;
     let rows = match dept {
         1 => json!([
-            { "name": "林承翰", "title": "系統工程師" },
-            { "name": "陳語彤", "title": "網路管理師" },
-            { "name": "張育誠", "title": "MIS 主任" },
+            { "name": "Lin Cheng-han", "title": "Systems Engineer" },
+            { "name": "Chen Yu-tong", "title": "Network Admin" },
+            { "name": "Chang Yu-cheng", "title": "MIS Lead" },
         ]),
         2 => json!([
-            { "name": "黃于珊", "title": "品保工程師" },
-            { "name": "劉冠廷", "title": "品保副理" },
+            { "name": "Huang Yu-shan", "title": "QA Engineer" },
+            { "name": "Liu Kuan-ting", "title": "QA Deputy Manager" },
         ]),
         3 => json!([
-            { "name": "吳沛蓉", "title": "韌體工程師" },
-            { "name": "蔡明軒", "title": "演算法工程師" },
-            { "name": "許家瑜", "title": "研發經理" },
-            { "name": "王柏森", "title": "硬體工程師" },
+            { "name": "Wu Pei-jung", "title": "Firmware Engineer" },
+            { "name": "Tsai Ming-hsuan", "title": "Algorithm Engineer" },
+            { "name": "Hsu Chia-yu", "title": "R&D Manager" },
+            { "name": "Wang Po-sen", "title": "Hardware Engineer" },
         ]),
         4 => json!([
-            { "name": "李俊毅", "title": "製程工程師" },
-            { "name": "周芷萱", "title": "產線組長" },
+            { "name": "Li Chun-yi", "title": "Process Engineer" },
+            { "name": "Chou Chih-hsuan", "title": "Line Lead" },
         ]),
         _ => json!([]),
     };
@@ -113,7 +113,7 @@ async fn as_wasm(Path(name): Path<String>) -> impl IntoResponse {
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             [(header::CONTENT_TYPE, "text/plain")],
-            format!("{name}.wasm 未編譯(cd assemblyscript && npm run build):{e}").into_bytes(),
+            format!("{name}.wasm not built (cd assemblyscript && npm run build): {e}").into_bytes(),
         ),
     }
 }

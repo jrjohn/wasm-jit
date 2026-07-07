@@ -30,19 +30,19 @@ pub fn style_of(spec: &serde_json::Map<String, serde_json::Value>) -> Result<Str
     for (k, v) in spec {
         let val = v
             .as_str()
-            .ok_or_else(|| format!("'{k}' 的值必須是 token 名(字串)"))?;
+            .ok_or_else(|| format!("'{k}' value must be a token name (string)"))?;
         let (_, css, ns, reg) = GRANTED
             .iter()
             .find(|(p, ..)| p == k)
             .ok_or_else(|| {
                 format!(
-                    "未授權的樣式屬性 '{k}' — granted props: [{}]",
+                    "unauthorized style property '{k}' — granted props: [{}]",
                     GRANTED.map(|g| g.0).join(", ")
                 )
             })?;
         if !reg.contains(&val) {
             return Err(format!(
-                "'{val}' 不是 design token — granted {ns} tokens: [{}]",
+                "'{val}' is not a design token — granted {ns} tokens: [{}]",
                 reg.join(", ")
             ));
         }

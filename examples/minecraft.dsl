@@ -1,8 +1,8 @@
-// 3D 體素世界(可走可跳,Minecraft 風)
-// ← → ↑ ↓ / WASD 移動、Space 跳。
-// 3D 只是像素表面上的數學:等角投影 + 對角線畫家演算法 + sin/cos 無限地形。
-// 物理(重力/跳躍)與鏡頭跟隨全在種子裡;跨幀狀態住在被授予的 get/set 32 槽記憶。
-// DSL 沒有 if —— 條件全用比較式(0/1)乘法合成。
+// 3D voxel world (walk + jump, Minecraft-style)
+// ← → ↑ ↓ / WASD to move, Space to jump.
+// 3D is just math on the pixel surface: isometric projection + diagonal painter's algorithm + infinite sin/cos terrain.
+// physics (gravity/jump) and camera-follow all inside the seed; cross-frame state lives in the granted get/set 32-slot memory.
+// the DSL has no if — conditionals are composed from 0/1-multiplier comparisons.
 
 let b = h * 0.036;
 let bx = b * 0.87;
@@ -11,7 +11,7 @@ let by = b * 0.95;
 let cx = w * 0.5;
 let cy = h * 0.36;
 
-// —— 讀狀態(首幀初始化到 6.5, 6.5)——
+// —— read state (first frame initializes to 6.5, 6.5) ——
 let ini = get(5.0);
 let px = get(0.0) * ini + 6.5 * (1.0 - ini);
 let pz = get(1.0) * ini + 6.5 * (1.0 - ini);
@@ -23,14 +23,14 @@ let dt = dtr * (dtr < 0.1) + 0.016 * (dtr >= 0.1);
 set(4.0, t);
 set(5.0, 1.0);
 
-// —— 移動(鍵盤 capability)——
+// —— movement (keyboard capability) ——
 px = px + (key(1.0) - key(0.0)) * 3.5 * dt;
 pz = pz + (key(3.0) - key(2.0)) * 3.5 * dt;
 
-// —— 腳下地形高度(高度場公式;下方地形迴圈用同一式)——
+// —— terrain height under the player (height-field formula; the terrain loop below uses the same one) ——
 let gp = 2.4 + sin(px * 0.55) + cos(pz * 0.65) + sin((px + pz) * 0.35) * 0.6;
 
-// —— 跳躍與重力 ——
+// —— jump and gravity ——
 let on = (py <= gp + 0.05);
 vy = vy + (7.5 - vy) * on * key(4.0);
 vy = vy - 20.0 * dt;
@@ -43,11 +43,11 @@ set(1.0, pz);
 set(2.0, py);
 set(3.0, vy);
 
-// —— 太陽 ——
+// —— sun ——
 hue(0.13);
 disc(cx + w * 0.3, h * 0.10, b * 1.2);
 
-// —— 無限體素地形:以玩家為中心 15×15,對角線由遠到近(畫家演算法)——
+// —— infinite voxel terrain: 15×15 centered on the player, far-to-near along the diagonal (painter's algorithm) ——
 let x0 = flr(px) - 7.0;
 let z0 = flr(pz) - 7.0;
 let s = 0.0;
@@ -63,21 +63,21 @@ while s < 29.0 {
         let sy = cy + ((xg - px) + (zg - pz)) * bz;
         let ty = sy - g * by;
         let d = g * by;
-        // 顏色帶:低=沙、中=草、高=雪
+        // color bands: low=sand, mid=grass, high=snow
         let lo = (g < 1.7);
         let hi = (g >= 3.4);
         let mid = (1.0 - lo) * (1.0 - hi);
         let chh = 0.12 * lo + 0.33 * mid + 0.55 * hi;
         let cll = 0.58 * lo + 0.42 * mid + 0.85 * hi;
-        // 頂面(菱形 = 兩個三角)
+        // top face (diamond = two triangles)
         col(chh, cll);
         tri(sx, ty - bz, sx + bx, ty, sx, ty + bz);
         tri(sx, ty - bz, sx - bx, ty, sx, ty + bz);
-        // 右側面(暗)
+        // right side face (dark)
         col(chh, cll * 0.55);
         tri(sx + bx, ty, sx, ty + bz, sx, ty + bz + d);
         tri(sx + bx, ty, sx + bx, ty + d, sx, ty + bz + d);
-        // 左側面(更暗)
+        // left side face (darker)
         col(chh, cll * 0.38);
         tri(sx - bx, ty, sx, ty + bz, sx, ty + bz + d);
         tri(sx - bx, ty, sx - bx, ty + d, sx, ty + bz + d);
@@ -86,7 +86,7 @@ while s < 29.0 {
     s = s + 1.0;
 }
 
-// —— 玩家(鏡頭中心;紅色小方塊 + 頭 + 影子)——
+// —— player (camera center; a small red block + head + shadow) ——
 col(0.0, 0.10);
 disc(cx, cy - gp * by + bz * 0.4, b * 0.5);
 let pgy = cy - py * by;

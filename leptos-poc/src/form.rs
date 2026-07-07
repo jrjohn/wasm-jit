@@ -137,7 +137,7 @@ pub fn FormPoc() -> impl IntoView {
                         specs.set(Some(s));
                         schema_err.set(String::new());
                     }
-                    Err(e) => schema_err.set(format!("schema 解析失敗:{e}")),
+                    Err(e) => schema_err.set(format!("schema parse failed: {e}")),
                 },
                 Err(e) => schema_err.set(format!("schema API error: {e}")),
             }
@@ -147,10 +147,10 @@ pub fn FormPoc() -> impl IntoView {
 
     view! {
         <p class="sub">
-            "此表單的 schema 不在 Rust 原始碼裡 —— runtime 由 GET /api/form-schema 載入,"
-            "server 每次請求現讀 api-server/form-schema.json。改那個檔案、按重載,表單即變,零重編。"
+            "This form's schema is not in the Rust source — it is loaded at runtime via GET /api/form-schema, "
+            "which the server reads from api-server/form-schema.json per request. Edit that file, hit reload, and the form changes — zero rebuild."
         </p>
-        <button class="apply reload-schema" on:click=move |_| load()>"重新載入 schema"</button>
+        <button class="apply reload-schema" on:click=move |_| load()>"Reload schema"</button>
         <Show when=move || !schema_err.get().is_empty()>
             <div class="cell-err">{move || schema_err.get()}</div>
         </Show>
@@ -169,7 +169,7 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
     let members = RwSignal::new(Vec::<Member>::new());
     let loading = RwSignal::new(String::new());
     spawn_local(async move {
-        loading.set("載入部門…".into());
+        loading.set("Loading departments…".into());
         match Request::get("/api/departments").send().await {
             Ok(r) => depts.set(r.json().await.unwrap_or_default()),
             Err(e) => loading.set(format!("API error: {e}")),
@@ -184,7 +184,7 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
         let id = event_target_value(&ev);
         dept_field.text.set(id.clone());
         spawn_local(async move {
-            loading.set("載入人員…".into());
+            loading.set("Loading people…".into());
             match Request::get(&format!("/api/members/{id}")).send().await {
                 Ok(r) => members.set(r.json().await.unwrap_or_default()),
                 Err(e) => loading.set(format!("API error: {e}")),
@@ -214,7 +214,7 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
                         }.into_any(),
                         "dept-select" => view! {
                             <select class="w-dept" on:change=on_dept.clone()>
-                                <option value="">"— 選擇部門 —"</option>
+                                <option value="">"— Select a department —"</option>
                                 {move || depts.get().into_iter()
                                     .map(|d| view! { <option value=d.id.to_string()>{d.name}</option> })
                                     .collect_view()}
@@ -288,9 +288,9 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
                 .collect_view()}
         </div>
 
-        <h2>"人員列表(選部門後由 Rust API 載入)" <span class="loading">{move || loading.get()}</span></h2>
+        <h2>"People (loaded by the Rust API after choosing a department)" <span class="loading">{move || loading.get()}</span></h2>
         <table class="members">
-            <thead><tr><th>"姓名"</th><th>"職稱"</th></tr></thead>
+            <thead><tr><th>"Name"</th><th>"Title"</th></tr></thead>
             <tbody>
                 {move || members.get().into_iter()
                     .map(|m| view! { <tr><td>{m.name}</td><td>{m.title}</td></tr> })

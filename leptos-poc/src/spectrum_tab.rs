@@ -89,7 +89,7 @@ pub fn SpectrumPoc() -> impl IntoView {
     let t1 = RwSignal::new(String::new());
     let t1cell: RwSignal<Option<std::rc::Rc<Cell>>, LocalStorage> = RwSignal::new_local(None);
     Effect::new(move |_| match tier_cell_from_dsl(&dsl_src.get()) {
-        Ok(c) => { t1.set(format!("DSL → 自家 codegen → {} bytes", c.size())); t1cell.set(Some(std::rc::Rc::new(c))); }
+        Ok(c) => { t1.set(format!("DSL → home codegen → {} bytes", c.size())); t1cell.set(Some(std::rc::Rc::new(c))); }
         Err(e) => { t1.set(format!("compile error: {e}")); t1cell.set(None); }
     });
 
@@ -101,8 +101,8 @@ pub fn SpectrumPoc() -> impl IntoView {
     Effect::new(move |_| {
         let bytes = external_toolchain_emit(naughty.get());
         match tier_cell_from_bytes(&bytes) {
-            Ok(c) => { t2.set(format!("外部 {} bytes → import 審計通過 → instantiate", bytes.len())); t2ok.set(true); t2cell.set(Some(std::rc::Rc::new(c))); }
-            Err(e) => { t2.set(format!("import 審計拒絕:{e}")); t2ok.set(false); t2cell.set(None); }
+            Ok(c) => { t2.set(format!("external {} bytes → import audit passed → instantiate", bytes.len())); t2ok.set(true); t2cell.set(Some(std::rc::Rc::new(c))); }
+            Err(e) => { t2.set(format!("import audit rejected: {e}")); t2ok.set(false); t2cell.set(None); }
         }
     });
 
@@ -112,9 +112,9 @@ pub fn SpectrumPoc() -> impl IntoView {
 
     view! {
         <p class="sub">
-            "種子語言光譜:兩條 tier 走同一個 run(a,b)→f64 ABI、同一組授權 capability(env.sin/cos)。"
-            "Tier 1 = 自家 DSL(codegen);Tier 2 = 外部工具鏈(AssemblyScript/Rust→wasm)產出的一段 .wasm。"
-            "host 的 Cell 不在乎 bytes 誰編的——只在乎 import 節 ⊆ 授權清單。圍欄在 import 表,不在文法。"
+            "Seed-language spectrum: both tiers use the same run(a,b)→f64 ABI and the same granted capabilities (env.sin/cos). "
+            "Tier 1 = home DSL (codegen); Tier 2 = a .wasm produced by an external toolchain (AssemblyScript / Rust→wasm). "
+            "The host's Cell doesn't care who compiled the bytes — only that the import section ⊆ the grant list. The fence is in the import table, not the grammar."
         </p>
         <div class="inputs">
             "a=" <input type="range" min="0" max="6.28" step="0.01" class="sp-a"
@@ -128,7 +128,7 @@ pub fn SpectrumPoc() -> impl IntoView {
         </div>
 
         <div class="ly-card">
-            <h3>"Tier 1 — 自家 DSL(源碼進 prompt、µs 編譯)"</h3>
+            <h3>"Tier 1 — home DSL (source fits in a prompt, µs compile)"</h3>
             <textarea class="sp-dsl" rows="2"
                 prop:value=move || dsl_src.get()
                 on:input=move |ev| dsl_src.set(event_target_value(&ev))></textarea>
@@ -140,25 +140,25 @@ pub fn SpectrumPoc() -> impl IntoView {
         </div>
 
         <div class="ly-card">
-            <h3>"Tier 2 — 外部工具鏈產物(語言豐富、塞不進 prompt;此處以 wasm-encoder 即時模擬 asc 輸出)"</h3>
+            <h3>"Tier 2 — external toolchain output (rich language, too big for a prompt; here wasm-encoder stands in for asc output, generated on the fly)"</h3>
             <label class="sp-naughty">
                 <input type="checkbox" prop:checked=move || naughty.get()
                     on:change=move |_| naughty.update(|v| *v = !*v) />
-                " 讓外部種子越權(額外 import env.fetch)"
+                " make the external seed over-reach (extra import env.fetch)"
             </label>
             <div class="sp-line">
                 <span class="draw-status" class:ok=move || t2ok.get() class:bad=move || !t2ok.get()>
                     {move || t2.get()}
                 </span>
                 " → run(a,b) = "
-                <b class="sp-t2">{move || run(t2cell).map(|v| format!("{v:.5}")).unwrap_or_else(|| "拒收".into())}</b>
+                <b class="sp-t2">{move || run(t2cell).map(|v| format!("{v:.5}")).unwrap_or_else(|| "rejected".into())}</b>
             </div>
         </div>
 
         <p class="sub">
-            "勾選越權:外部 .wasm 的 import 節多了 env::fetch,不在授權清單 → "
-            <b>"instantiate 前的 import 審計即拒(等同 DSL 的 fetch() codegen 拒絕的模組級版本)"</b>
-            "。兩個 tier 值一致(sin·b+cos),證明同 ABI 可互換;安全一致,證明圍欄語言無關。"
+            "Check the box: the external .wasm's import section gains env::fetch, not in the grant list → "
+            <b>"the import audit rejects it before instantiate (the module-level version of the DSL's fetch() codegen rejection)"</b>
+            ". The two tiers agree in value (sin·b+cos), proving the shared ABI is interchangeable; the security is identical, proving the fence is language-agnostic."
         </p>
     }
 }

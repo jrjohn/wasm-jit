@@ -1,12 +1,13 @@
-//! DynamicCell PoC — runtime 動態元件 in a pure-Rust CSR app (Leptos).
+//! DynamicCell PoC — runtime dynamic components in a pure-Rust CSR app (Leptos).
 //!
-//! 證明三件事:
-//! 1. 行為動態:每格的腳本可即時編輯 → wasm-jit 編成 WASM 細胞(~µs 級)→
-//!    細胞驅動 Leptos signal → DOM 反應式更新。全程零手寫 JS。
-//! 2. 結構動態:元件樹 = schema 資料(JSON),Apply 即重組——結構即資料,
-//!    由編譯期的靜態 renderer 解譯。
-//! 3. 沙箱:細胞的 capability 只有 sin/cos/out,無 DOM 權限;腳本裡寫
-//!    fetch() 在 codegen 即被拒(顯示 granted capabilities 清單)。
+//! Proves three things:
+//! 1. Behavior is dynamic: each cell's script can be live-edited → wasm-jit
+//!    compiles a WASM cell (~µs) → the cell drives a Leptos signal → reactive
+//!    DOM update. Zero hand-written JS throughout.
+//! 2. Structure is dynamic: the component tree = schema data (JSON), Apply to
+//!    recompose — structure is data, interpreted by a compile-time static renderer.
+//! 3. Sandbox: a cell's only capabilities are sin/cos/out, no DOM authority;
+//!    writing fetch() in a script is rejected at codegen (shows the granted list).
 
 mod cell;
 mod draw_tab;
@@ -40,8 +41,8 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
     let ret = RwSignal::new(0.0f64);
     let cell: RwSignal<Option<Rc<Cell>>, LocalStorage> = RwSignal::new_local(None);
 
-    // 種子→細胞:script 變即重編(µs 級,live)。grant 清單在此一目瞭然,
-    // 同時就是 codegen 的 import 表——兩者不可能漂移。
+    // seed→cell: recompile whenever the script changes (µs, live). The grant
+    // list is right here and is also codegen's import table — they can't drift.
     Effect::new(move |_| {
         let src = script.get();
         let built = Cell::builder(&["a", "b"])
@@ -60,7 +61,7 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
             }
         }
     });
-    // 緣→現行:輸入(或細胞)變 → 跑細胞 → out()/回傳寫 signal → DOM 反應式更新
+    // trigger→manifest: input (or cell) changes → run cell → out()/return writes signal → reactive DOM
     Effect::new(move |_| {
         let (av, bv) = (a.get(), b.get());
         if let Some(c) = cell.get() {
@@ -76,7 +77,7 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
         <div class="cell">
             <div class="cell-head">
                 <b>{spec.label.clone()}</b>
-                <button class="try-fetch" on:click=inject_fetch>"試圖越權 fetch()"</button>
+                <button class="try-fetch" on:click=inject_fetch>"try to escalate: fetch()"</button>
             </div>
             <textarea class="cell-src" rows="4"
                 prop:value=move || script.get()
@@ -100,9 +101,9 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
 }
 
 const DEFAULT_SCHEMA: &str = r#"[
-  {"label":"乘積 + 諧波","script":"out(a * b * 0.01 + sin(a * 0.1) * 20.0, a * 0.01);\na * b"},
-  {"label":"能量","script":"let e = a * a + b * b;\nout(e * 0.005, b * 0.01);\ne"},
-  {"label":"相位","script":"let p = sin(a * 0.05) * cos(b * 0.05);\nout(50.0 + p * 50.0, p * 0.5 + 0.5);\np"}
+  {"label":"Product + harmonic","script":"out(a * b * 0.01 + sin(a * 0.1) * 20.0, a * 0.01);\na * b"},
+  {"label":"Energy","script":"let e = a * a + b * b;\nout(e * 0.005, b * 0.01);\ne"},
+  {"label":"Phase","script":"let p = sin(a * 0.05) * cos(b * 0.05);\nout(50.0 + p * 50.0, p * 0.5 + 0.5);\np"}
 ]"#;
 
 #[component]
@@ -124,23 +125,23 @@ fn App() -> impl IntoView {
     let tab = RwSignal::new("cells");
 
     view! {
-        <h1>"DynamicCell — 純 Rust CSR(Leptos)裡的 runtime 動態元件"
+        <h1>"DynamicCell — runtime dynamic components in a pure-Rust CSR app (Leptos)"
             <span class="nav"><a href="../..">"↩ wasm-jit"</a></span></h1>
         <div class="tabs">
             <button class="tab-cells" class:on=move || tab.get() == "cells"
                 on:click=move |_| tab.set("cells")>"DynamicCell"</button>
             <button class="tab-form" class:on=move || tab.get() == "form"
-                on:click=move |_| tab.set("form")>"表單(全元件 × 細胞規則 × Rust API)"</button>
+                on:click=move |_| tab.set("form")>"Form (all widgets × cell rules × Rust API)"</button>
             <button class="tab-tokens" class:on=move || tab.get() == "tokens"
-                on:click=move |_| tab.set("tokens")>"Tokens(樣式即 capability)"</button>
+                on:click=move |_| tab.set("tokens")>"Tokens (style as capability)"</button>
             <button class="tab-layout" class:on=move || tab.get() == "layout"
-                on:click=move |_| tab.set("layout")>"Layout(版面即 schema)"</button>
+                on:click=move |_| tab.set("layout")>"Layout (layout as schema)"</button>
             <button class="tab-draw" class:on=move || tab.get() == "draw"
-                on:click=move |_| tab.set("draw")>"自由繪(佛陀)"</button>
+                on:click=move |_| tab.set("draw")>"Freeform draw (Buddha)"</button>
             <button class="tab-mc" class:on=move || tab.get() == "mc"
-                on:click=move |_| tab.set("mc")>"3D 體素(Minecraft)"</button>
+                on:click=move |_| tab.set("mc")>"3D voxel (Minecraft)"</button>
             <button class="tab-spectrum" class:on=move || tab.get() == "spectrum"
-                on:click=move |_| tab.set("spectrum")>"種子語言光譜"</button>
+                on:click=move |_| tab.set("spectrum")>"Seed-language spectrum"</button>
         </div>
         <Show when=move || tab.get() == "mc">
             <DrawPoc example="mc3p" />
@@ -163,9 +164,9 @@ fn App() -> impl IntoView {
         <Show when=move || tab.get() == "cells">
         <div class="cells-tab">
         <p class="sub">
-            "結構 = schema 資料(下方 JSON,Apply 即重組元件樹);行為 = 腳本種子(每格可即時編輯,"
-            "wasm-jit 當場編成 WASM 細胞);細胞的 capability 只有 sin/cos/out,無 DOM 權限——"
-            "它驅動 signal,DOM 由編譯期的 Leptos 管。全程零手寫 JS。"
+            "Structure = schema data (the JSON below; Apply to recompose the tree); behavior = script seeds (each cell "
+            "is live-editable, wasm-jit compiles a WASM cell on the spot); a cell's only capabilities are sin/cos/out, no DOM authority — "
+            "it drives a signal, the DOM is handled by compile-time Leptos. Zero hand-written JS throughout."
         </p>
         <div class="inputs">
             "a = "
@@ -188,7 +189,7 @@ fn App() -> impl IntoView {
                     .collect_view()
             }}
         </div>
-        <h2>"結構 schema(元件樹即資料)"</h2>
+        <h2>"Structure schema (the component tree is data)"</h2>
         <textarea class="schema" rows="8"
             prop:value=move || schema_text.get()
             on:input=move |ev| schema_text.set(event_target_value(&ev))></textarea>

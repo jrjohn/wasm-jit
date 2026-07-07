@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>自由繪 — primitives,無 widget</title>
+<title>Freeform draw — primitives, no widgets</title>
 <style>
   :root { color-scheme: dark; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 960px;
@@ -24,55 +24,55 @@
 </style>
 </head>
 <body>
-<h1>"畫一個佛陀的笑臉" — 無 widget,純 primitives
-  <span class="nav"><a href="./index.html">benchmark</a> · <a href="./canvas.html">畫布</a></span></h1>
-<p class="sub">腳本(模擬 AI 生成)→ wasm-jit 編成細胞 → 每 frame 呼叫 run(t, w, h)。
-granted capabilities:<code>sin cos hue disc ring arc line</code> —— 2D 完備基底,任何圖形都是它們的組合。
-細胞無 DOM、無網路;<code>fetch()</code> 在 codegen 即被拒。</p>
+<h1>"Draw a smiling Buddha" — no widgets, just primitives
+  <span class="nav"><a href="./index.html">benchmark</a> · <a href="./canvas.html">canvas</a></span></h1>
+<p class="sub">A script (simulating AI generation) → wasm-jit compiles a cell → run(t, w, h) called every frame.
+Granted capabilities: <code>sin cos hue disc ring arc line</code> — a complete 2D basis; any figure is a composition of these.
+The cell has no DOM, no network; <code>fetch()</code> is rejected at codegen.</p>
 
 <canvas id="cv" width="1440" height="900"></canvas>
 
 <div class="bar">
-  範例 <select id="example">
-    <option value="buddha" selected>佛陀的笑臉</option>
-    <option value="guanyin">觀音菩薩(全身+蓮台)</option>
+  example <select id="example">
+    <option value="buddha" selected>Smiling Buddha</option>
+    <option value="guanyin">Guanyin (full body + lotus throne)</option>
   </select>
   <button id="run">Compile & Run</button>
-  <button id="violate" class="violate">試圖越權 fetch()</button>
+  <button id="violate" class="violate">try to escalate: fetch()</button>
   <span id="status">loading…</span>
 </div>
 
-<textarea id="src" rows="22" spellcheck="false">// 佛陀的笑臉 —— 由 7 個 primitive capability 顯化
+<textarea id="src" rows="22" spellcheck="false">// Smiling Buddha — manifested by 7 primitive capabilities
 let cx = w * 0.5;
 let cy = h * 0.56;
 let r = h * 0.27;
 
-// 光環(呼吸)
+// halo (breathing)
 hue(0.13);
 ring(cx, cy - r * 0.18, r * 1.55 + sin(t) * 6.0);
 
-// 肉髻
+// ushnisha (topknot)
 hue(0.09);
 disc(cx, cy - r * 1.04, r * 0.2);
 
-// 臉
+// face
 hue(0.1);
 disc(cx, cy, r);
 
-// 長耳
+// long ears
 line(cx - r * 1.06, cy - r * 0.15, cx - r * 1.06, cy + r * 0.5);
 line(cx + r * 1.06, cy - r * 0.15, cx + r * 1.06, cy + r * 0.5);
 
-// 白毫
+// urna (forehead dot)
 hue(0.99);
 disc(cx, cy - r * 0.28, r * 0.045);
 
-// 閉目(上彎眼瞼)
+// closed eyes (upward-curving lids)
 hue(0.02);
 arc(cx - r * 0.36, cy - r * 0.02, r * 0.17, 3.35, 6.05);
 arc(cx + r * 0.36, cy - r * 0.02, r * 0.17, 3.35, 6.05);
 
-// 笑(隨呼吸)
+// smile (with the breath)
 arc(cx, cy + r * 0.22, r * 0.46 + sin(t * 2.0) * 3.0, 0.45, 2.69);
 
 0.0</textarea>
@@ -102,7 +102,7 @@ function compile() {
     const bytes = compile_draw_wasm($('src').value);
     const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
     run = inst.exports.run;
-    status(`compiled ${bytes.length} bytes in ${(performance.now() - t0).toFixed(1)}ms — 顯化中`, 'ok');
+    status(`compiled ${bytes.length} bytes in ${(performance.now() - t0).toFixed(1)}ms — manifesting`, 'ok');
     document.title = `draw OK ${bytes.length}B`;
   } catch (e) {
     run = null;
@@ -131,7 +131,7 @@ $('example').addEventListener('change', async () => {
     const r = await fetch(`examples/${$('example').value}.dsl`);
     $('src').value = await r.text();
     compile();
-  } catch (e) { status('載入範例失敗: ' + e, 'err'); }
+  } catch (e) { status('failed to load example: ' + e, 'err'); }
 });
 
 await init();
