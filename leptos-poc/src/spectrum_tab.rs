@@ -1,11 +1,13 @@
-//! spectrum_tab.rs — 種子語言光譜(Tier 1 自家 DSL ／ Tier 2 外部編 WASM)。
+//! spectrum_tab.rs — the seed-language spectrum (Tier 1 home DSL / Tier 2 externally compiled WASM).
 //!
-//! 核心證明:host 的 Cell 不在乎 bytes 誰編的,只在乎 import 節 ⊆ 授權清單。
-//! - Tier 1:DSL 源碼 → 自家 codegen → Cell::compile
-//! - Tier 2:「外部工具鏈」(此處以 wasm-encoder 在瀏覽器內即時組模組模擬
-//!   AssemblyScript/Rust→wasm 的產物)→ 一段 .wasm bytes → Cell::from_wasm_bytes
-//!   兩條路走同一個 `run(a,b)->f64` ABI、同一組授權 capability(env.sin/cos);
-//!   Tier 2 種子若 import 了未授權的 env.fetch,在 instantiate 前的 import 審計即被拒。
+//! The core proof: the host's Cell doesn't care who compiled the bytes, only that
+//! the import section ⊆ the grant list.
+//! - Tier 1: DSL source → home codegen → Cell::compile
+//! - Tier 2: an "external toolchain" (here wasm-encoder assembles a module on the fly
+//!   inside the browser to stand in for an AssemblyScript/Rust→wasm artifact) → a blob
+//!   of .wasm bytes → Cell::from_wasm_bytes.
+//!   Both paths use the same `run(a,b)->f64` ABI and the same granted capabilities (env.sin/cos);
+//!   if a Tier 2 seed imports an unauthorized env.fetch, the import audit rejects it before instantiation.
 
 use crate::cell::Cell;
 use leptos::prelude::*;
@@ -14,9 +16,9 @@ use wasm_encoder::{
     Instruction, Module, TypeSection, ValType,
 };
 
-/// 模擬「外部工具鏈的 codegen」:產出一個 run(a,b)->f64 模組。
-/// import env.sin(f64)->f64、env.cos(f64)->f64;body = sin(a)*b + cos(a)。
-/// naughty=true 時額外 import env.fetch —— 模擬外部種子越權。
+/// Simulate "an external toolchain's codegen": emit a run(a,b)->f64 module.
+/// Imports env.sin(f64)->f64 and env.cos(f64)->f64; body = sin(a)*b + cos(a).
+/// When naughty=true it additionally imports env.fetch — simulating an over-reaching external seed.
 fn external_toolchain_emit(naughty: bool) -> Vec<u8> {
     let mut m = Module::new();
 
@@ -29,7 +31,7 @@ fn external_toolchain_emit(naughty: bool) -> Vec<u8> {
     imports.import("env", "sin", EntityType::Function(0)); // func 0
     imports.import("env", "cos", EntityType::Function(0)); // func 1
     if naughty {
-        imports.import("env", "fetch", EntityType::Function(0)); // func 2 —— 未授權!
+        imports.import("env", "fetch", EntityType::Function(0)); // func 2 — unauthorized!
     }
     m.section(&imports);
 
@@ -52,7 +54,7 @@ fn external_toolchain_emit(naughty: bool) -> Vec<u8> {
     f.instruction(&Instruction::Call(1)); // cos(a)
     f.instruction(&Instruction::F64Add);
     if naughty {
-        // 頑皮種子還想呼叫 fetch(a) 丟棄結果(展示它「試圖」用越權能力)
+        // the naughty seed also tries to call fetch(a) and discard the result (showing it "attempts" to use the over-reaching capability)
         f.instruction(&Instruction::LocalGet(0));
         f.instruction(&Instruction::Call(2));
         f.instruction(&Instruction::Drop);
@@ -65,7 +67,7 @@ fn external_toolchain_emit(naughty: bool) -> Vec<u8> {
     m.finish()
 }
 
-/// 兩個 tier 都用這組 capability 建 Cell(語言無關;env.sin/cos,無 fetch)。
+/// Both tiers build the Cell from this same capability set (language-agnostic; env.sin/cos, no fetch).
 fn tier_cell_from_dsl(src: &str) -> Result<Cell, String> {
     Cell::builder(&["a", "b"])
         .cap1("sin", f64::sin)
@@ -84,7 +86,7 @@ pub fn SpectrumPoc() -> impl IntoView {
     let a = RwSignal::new(1.2f64);
     let b = RwSignal::new(2.0f64);
 
-    // Tier 1:自家 DSL
+    // Tier 1: home DSL
     let dsl_src = RwSignal::new("sin(a) * b + cos(a)".to_string());
     let t1 = RwSignal::new(String::new());
     let t1cell: RwSignal<Option<std::rc::Rc<Cell>>, LocalStorage> = RwSignal::new_local(None);
@@ -93,7 +95,7 @@ pub fn SpectrumPoc() -> impl IntoView {
         Err(e) => { t1.set(format!("compile error: {e}")); t1cell.set(None); }
     });
 
-    // Tier 2:外部工具鏈產物(good / naughty)
+    // Tier 2: external toolchain output (good / naughty)
     let naughty = RwSignal::new(false);
     let t2 = RwSignal::new(String::new());
     let t2ok = RwSignal::new(true);

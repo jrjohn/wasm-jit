@@ -1,14 +1,17 @@
-//! audit.rs — 種子語言光譜的地基:import-section 審計。
+//! audit.rs — the foundation of the seed-language spectrum: import-section auditing.
 //!
-//! 洞見:host 的 Cell 不在乎 bytes 是誰編的(自家 DSL / AssemblyScript /
-//! Rust→wasm / 手寫 WAT)。安全模型只看一件事:**模組宣告的 imports ⊆
-//! host 授予的 capability 清單**。這道審計讓「文法圍欄」升級成「import 節
-//! 審計」——語言可以豐富到塞不進 prompt,capability 圍欄一寸不動。
+//! The insight: the host's Cell doesn't care who compiled the bytes (the home
+//! DSL / AssemblyScript / Rust→wasm / hand-written WAT). The security model
+//! looks at exactly one thing: **the imports a module declares ⊆ the capability
+//! list the host grants**. This audit promotes the "grammar fence" into an
+//! "import-section audit" — the language can grow rich enough that it no longer
+//! fits in a prompt, and the capability fence doesn't move an inch.
 //!
-//! 這是 codegen.rs 那條「未授權函式 codegen 即拒」的模組級對應:自家 DSL
-//! 在 codegen 就擋掉;外部編的 WASM 在 instantiate 前擋掉。同一道牆,兩個入口。
+//! This is the module-level counterpart to codegen.rs's "unauthorized function
+//! is rejected at codegen": the home DSL is blocked at codegen; externally
+//! compiled WASM is blocked before instantiation. One wall, two entrances.
 
-/// 模組宣告的一個 import(僅取我們在意的欄位)。
+/// A single import declared by a module (only the fields we care about).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import {
     pub module: String,
@@ -28,8 +31,8 @@ fn kind_of(ty: wasmparser::TypeRef) -> &'static str {
     }
 }
 
-/// 掃出一個 WASM 模組宣告的全部 imports(用 wasmparser,不 instantiate)。
-/// 處理 0.252 的三種 import 分組格式(Single / Compact1 / Compact2)。
+/// Scan out all imports a WASM module declares (via wasmparser, without instantiating).
+/// Handles all three of 0.252's import grouping formats (Single / Compact1 / Compact2).
 pub fn imports_of(bytes: &[u8]) -> Result<Vec<Import>, String> {
     use wasmparser::{Imports, Parser, Payload};
     let mut out = Vec::new();
@@ -65,19 +68,20 @@ pub fn imports_of(bytes: &[u8]) -> Result<Vec<Import>, String> {
     Ok(out)
 }
 
-/// 授予的 capability(module::name 的函式)。
+/// A granted capability (the function at module::name).
 pub struct Grant {
     pub module: &'static str,
     pub name: &'static str,
 }
 
-/// 審計:模組的每一個 import 都必須在 grants 裡,且必須是 func。
-/// 回傳第一個違規(未授權 import / 非函式 import,如 memory/table/global),
-/// None = 通過。這就是「fetch() 被拒」的模組級版本。
+/// Audit: every import a module declares must be in `grants` and must be a func.
+/// Returns the first violation (an unauthorized import / a non-function import such
+/// as memory/table/global); Ok(()) = passed. This is the module-level version of
+/// "fetch() is rejected".
 pub fn audit(bytes: &[u8], grants: &[Grant]) -> Result<(), String> {
     let imports = imports_of(bytes)?;
     for imp in &imports {
-        // 只允許函式 import;memory/table/global import = 想要 host 給它更大的世界,拒。
+        // Only function imports are allowed; a memory/table/global import means it wants the host to hand it a bigger world — reject.
         if imp.kind != "func" {
             return Err(format!(
                 "unauthorized {} import '{}::{}' — only host-granted function capabilities are allowed",
@@ -111,7 +115,7 @@ mod tests {
         codegen::compile_kernel(&parser::parse(src).unwrap()).unwrap()
     }
 
-    // canvas kernel 的授權清單
+    // the grant list for the canvas kernel
     fn kernel_grants() -> Vec<Grant> {
         vec![
             Grant { module: "env", name: "sin" },
@@ -122,7 +126,7 @@ mod tests {
 
     #[test]
     fn imports_are_read_without_instantiation() {
-        // 用到 sin + out 的 kernel → import section 應含這兩個
+        // a kernel using sin + out → its import section should contain both
         let bytes = cell_bytes("let a = sin(t);\nout(hx + a, hy);\na");
         let imps = imports_of(&bytes).unwrap();
         let names: Vec<_> = imps.iter().map(|i| i.name.as_str()).collect();
@@ -139,7 +143,7 @@ mod tests {
 
     #[test]
     fn unauthorized_import_rejected() {
-        // 手工組一個 import 了 env::fetch 的模組(模擬外部語言編的越權種子)
+        // hand-build a module that imports env::fetch (simulating an over-reaching seed compiled by an external language)
         use wasm_encoder::{EntityType, ImportSection, Module, TypeSection};
         let mut m = Module::new();
         let mut types = TypeSection::new();
@@ -156,7 +160,7 @@ mod tests {
 
     #[test]
     fn memory_import_rejected() {
-        // 外部種子想 import host 的 memory(拿更大的世界)→ 拒
+        // an external seed wants to import the host's memory (grabbing a bigger world) → reject
         use wasm_encoder::{EntityType, ImportSection, MemoryType, Module};
         let mut m = Module::new();
         let mut imp = ImportSection::new();

@@ -14,8 +14,8 @@ wasm-encoder = "0.252.0"
 wasmparser = "0.252.0"
 
 [features]
-# 預設 = 含 wasm-bindgen JS 匯出(benchmark/canvas 頁、wasm-pack 用)。
-# 下游只要純編譯器(parser+codegen+audit)時 default-features = false → 零 wasm-bindgen 匯出。
+# Default = includes the wasm-bindgen JS exports (for the benchmark/canvas pages, used by wasm-pack).
+# When a downstream only wants the pure compiler (parser+codegen+audit), default-features = false → zero wasm-bindgen exports.
 default = ["js-api"]
 js-api = ["dep:wasm-bindgen", "dep:js-sys"]
 

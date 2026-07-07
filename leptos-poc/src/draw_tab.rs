@@ -1,7 +1,7 @@
-//! draw_tab.rs — 第 5 個 tab:自由繪(像素表面)。
-//! 佛陀/觀音的 DSL 種子(由 /api/examples/{name} 於 runtime 載入)→
-//! wasm-jit 編成細胞 → 7 個繪圖 primitive capability(sin/cos/hue/disc/ring/arc/line)
-//! → 每 frame 原生速度顯化到 <canvas>。細胞無 DOM、無網路。
+//! draw_tab.rs — the 5th tab: free-drawing (a pixel surface).
+//! Buddha/Guanyin DSL seeds (loaded at runtime from /api/examples/{name}) →
+//! compiled by wasm-jit into a cell → 7 drawing-primitive capabilities (sin/cos/hue/disc/ring/arc/line)
+//! → manifested to a <canvas> at native speed every frame. The cell has no DOM, no network.
 
 use crate::cell::Cell;
 use gloo_net::http::Request;
@@ -17,9 +17,9 @@ thread_local! {
     static DRAW_CELL: RefCell<Option<Cell>> = const { RefCell::new(None) };
     static CTX: RefCell<Option<web_sys::CanvasRenderingContext2d>> = const { RefCell::new(None) };
     static LOOP_STARTED: BoolCell<bool> = const { BoolCell::new(false) };
-    /// 鍵盤狀態:0=左 1=右 2=前 3=後 4=跳(方向鍵/WASD/Space)
+    /// Keyboard state: 0=left 1=right 2=forward 3=back 4=jump (arrow keys/WASD/Space)
     static KEYS: RefCell<[f64; 8]> = const { RefCell::new([0.0; 8]) };
-    /// 細胞的 32 槽 f64 記憶(get/set capability)——跨 frame 狀態(玩家位置/速度)住這裡
+    /// The cell's 32-slot f64 memory (get/set capability) — cross-frame state (player position/velocity) lives here
     static STATE: RefCell<[f64; 32]> = const { RefCell::new([0.0; 32]) };
     static KEYS_HOOKED: BoolCell<bool> = const { BoolCell::new(false) };
 }
@@ -67,7 +67,7 @@ fn with_ctx(f: impl FnOnce(&web_sys::CanvasRenderingContext2d)) {
 
 const TAU: f64 = 6.283185307;
 
-/// 全部繪圖 + 互動 capability 的授權組(Tier 1 DSL 與 Tier 2 AS 產物共用)。
+/// The full grant set of drawing + interaction capabilities (shared by the Tier 1 DSL and the Tier 2 AS artifact).
 fn draw_builder() -> crate::cell::CellBuilder {
     Cell::builder(&["t", "w", "h"])
         .cap1("sin", f64::sin)
@@ -108,7 +108,7 @@ fn draw_builder() -> crate::cell::CellBuilder {
                 ctx.stroke();
             })
         })
-        // 3D 用:col(hue, lightness) 精細配色、tri 填色三角形(quad = 兩個 tri)
+        // For 3D: col(hue, lightness) for fine-grained coloring, tri fills a triangle (a quad = two tris)
         .cap2_void("col", |hv, l| {
             with_ctx(|ctx| {
                 let c = format!(
@@ -130,7 +130,7 @@ fn draw_builder() -> crate::cell::CellBuilder {
                 ctx.fill();
             })
         })
-        // 互動用:key(i)=按鍵狀態、get/set=32 槽跨幀記憶、flr=floor
+        // For interaction: key(i)=key state, get/set=32-slot cross-frame memory, flr=floor
         .cap1("key", |i| {
             KEYS.with(|k| *k.borrow().get(i as usize).unwrap_or(&0.0))
         })
@@ -147,12 +147,12 @@ fn draw_builder() -> crate::cell::CellBuilder {
         })
 }
 
-/// Tier 1:自家 DSL 源碼 → codegen → cell。
+/// Tier 1: home DSL source → codegen → cell.
 fn build_draw_cell(src: &str) -> Result<Cell, String> {
     draw_builder().compile(src)
 }
 
-/// Tier 2:外部工具鏈(AssemblyScript)產物 → import 審計 → cell。同一組授權。
+/// Tier 2: external toolchain (AssemblyScript) artifact → import audit → cell. Same grant set.
 fn build_draw_cell_from_bytes(bytes: &[u8]) -> Result<Cell, String> {
     draw_builder().from_wasm_bytes(bytes)
 }
@@ -179,7 +179,7 @@ fn frame(ts: f64) {
     });
 }
 
-/// 啟一次全域 rAF 迴圈;canvas 不在(切到別的 tab)就跳過該幀,回來自動續畫。
+/// Start one global rAF loop; if the canvas isn't present (switched to another tab) skip that frame, and resume drawing automatically on return.
 fn ensure_loop() {
     if LOOP_STARTED.with(|s| s.replace(true)) {
         return;
@@ -198,7 +198,7 @@ fn ensure_loop() {
         }
     }));
     schedule(holder.borrow().as_ref().unwrap());
-    std::mem::forget(holder); // 全域常駐迴圈,刻意不回收
+    std::mem::forget(holder); // a global persistent loop, deliberately never reclaimed
 }
 
 #[component]
@@ -207,13 +207,13 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
     let status = RwSignal::new(String::from("loading example…"));
     let ok = RwSignal::new(true);
     let sel = RwSignal::new(example.to_string());
-    // Tier 2:AS 產物的 bytes（None = Tier 1 DSL 模式,編 textarea 源碼）
+    // Tier 2: the AS artifact's bytes (None = Tier 1 DSL mode, compiling the textarea source)
     let as_bytes: RwSignal<Option<Vec<u8>>, LocalStorage> = RwSignal::new_local(None);
 
     let install = move |cell: Result<Cell, String>, tier: &str| match cell {
         Ok(cell) => {
             let size = cell.size();
-            STATE.with(|s| s.borrow_mut().fill(0.0)); // 新種子 = 新世界,清記憶
+            STATE.with(|s| s.borrow_mut().fill(0.0)); // a new seed = a new world, clear the memory
             DRAW_CELL.with(|c| *c.borrow_mut() = Some(cell));
             status.set(format!("{tier} → {size} bytes — manifesting"));
             ok.set(true);
@@ -233,7 +233,7 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
     let load = move |name: String| {
         spawn_local(async move {
             if let Some(as_name) = name.strip_prefix("as:") {
-                // Tier 2:抓 AS 源碼(顯示語法)+ 真 asc 產物(執行)
+                // Tier 2: fetch the AS source (to show the syntax) + the real asc artifact (to execute)
                 let src = Request::get(&format!("/api/as-src/{as_name}"))
                     .send().await.ok();
                 if let Some(r) = src {

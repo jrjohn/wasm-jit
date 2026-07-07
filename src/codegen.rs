@@ -46,11 +46,11 @@ pub fn compile_kernel(prog: &Program) -> Result<Vec<u8>, String> {
 struct Ctx<'a> {
     locals: HashMap<String, u32>,
     imports: &'a [HostFn],
-    /// 兩個保留 scratch locals(`%` 合成用:a - trunc(a/b)*b,避免重複求值)
+    /// Two reserved scratch locals (used to synthesize `%`: a - trunc(a/b)*b, avoiding re-evaluation).
     scratch0: u32,
 }
 
-/// 內建數學函式(WASM 原生指令,不佔 import 表、任何 ABI 皆可用)。
+/// Built-in math functions (native WASM instructions — they cost no import-table slot and work under any ABI).
 fn builtin_of(name: &str) -> Option<(u32, Instruction<'static>)> {
     Some(match name {
         "min" => (2, Instruction::F64Min),
@@ -182,7 +182,7 @@ fn emit_call(
     ctx: &Ctx,
     f: &mut Function,
 ) -> Result<HostFn, String> {
-    // 內建優先(min/max/abs/sqrt/floor):原生指令,恆有回傳值
+    // Built-ins take priority (min/max/abs/sqrt/floor): native instructions, always returning a value.
     if let Some((n_args, instr)) = builtin_of(name) {
         if args.len() as u32 != n_args {
             return Err(format!(
@@ -279,7 +279,7 @@ fn emit_expr_f64(e: &Expr, ctx: &Ctx, f: &mut Function) -> Result<(), String> {
                 });
             }
             BinOp::Rem => {
-                // fmod 語意(同 JS %):a - trunc(a/b)*b;scratch 避免重複求值
+                // fmod semantics (same as JS %): a - trunc(a/b)*b; scratch locals avoid re-evaluation.
                 let (s0, s1) = (ctx.scratch0, ctx.scratch0 + 1);
                 emit_expr_f64(l, ctx, f)?;
                 f.instruction(&Instruction::LocalSet(s0));

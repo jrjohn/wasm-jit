@@ -1,10 +1,10 @@
-//! form.rs — 把 DynamicCell 模式套滿一整張表單(每種元件各一次)。
+//! form.rs — apply the DynamicCell pattern across a whole form (one of each widget).
 //!
-//! - 結構 = FORM_SCHEMA(JSON)→ 靜態 renderer 解譯(結構即資料)
-//! - 行為 = 數值欄的驗證規則 / 計算欄都是 DSL 種子 → wasm-jit 細胞
-//!   (字串驗證留在 host——§16 的邊界紀律:字串/物件不下沉)
-//! - 部門下拉 = 掛載時呼叫 Rust API(Axum)/api/departments;
-//!   選定部門 → /api/members/{id} 載入人員列表
+//! - Structure = FORM_SCHEMA (JSON) → interpreted by a static renderer (structure is data)
+//! - Behavior = a numeric field's validation rule / computed field is a DSL seed → a wasm-jit cell
+//!   (string validation stays in the host — the §16 boundary discipline: strings/objects don't sink down)
+//! - Department dropdown = calls the Rust API (Axum) /api/departments on mount;
+//!   picking a department → /api/members/{id} loads the member list
 
 use crate::cell::Cell;
 use crate::tokens::style_of;
@@ -29,12 +29,12 @@ struct FieldSpec {
     script: Option<String>,
     #[serde(default)]
     params: Vec<String>,
-    /// 樣式:只准引用 design token(tokens.rs 驗證);raw CSS 會被拒。
+    /// Style: may only reference design tokens (validated by tokens.rs); raw CSS is rejected.
     #[serde(default)]
     style: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// 每欄一組泛用 signal(text/num/flag 依 widget 取用)+ 驗證狀態。
+/// One set of generic signals per field (text/num/flag, used per widget) + validation state.
 #[derive(Clone)]
 struct FieldRt {
     spec: FieldSpec,
@@ -74,8 +74,8 @@ struct Member {
     title: String,
 }
 
-/// 規則細胞:run(v) -> 1.0/0.0;計算細胞:run(<params>) -> 值。
-/// grant 一律只有 sin/cos/out——表單邏輯也拿不到 DOM/網路。
+/// Rule cell: run(v) -> 1.0/0.0; computed cell: run(<params>) -> value.
+/// The grant is always only sin/cos/out — so form logic can't reach the DOM/network either.
 fn build_cell(params: &[&str], src: &str) -> Result<Cell, String> {
     Cell::builder(params)
         .cap1("sin", f64::sin)
@@ -86,7 +86,7 @@ fn build_cell(params: &[&str], src: &str) -> Result<Cell, String> {
 
 fn wire_rules(fields: &Rc<Vec<FieldRt>>) {
     for f in fields.iter() {
-        // 驗證規則:數值欄 → 細胞判 1.0/0.0
+        // Validation rule: numeric field → cell decides 1.0/0.0
         if let Some(rule) = &f.spec.rule {
             match build_cell(&["v"], rule) {
                 Ok(cellv) => {
@@ -97,10 +97,10 @@ fn wire_rules(fields: &Rc<Vec<FieldRt>>) {
                         valid.set(matches!(cellv.call(&[v]), Ok(x) if x == 1.0));
                     });
                 }
-                Err(_) => f.valid.set(false), // schema 規則本身壞了:恆標 invalid,浮上檯面
+                Err(_) => f.valid.set(false), // the schema rule itself is broken: always mark invalid so it surfaces
             }
         }
-        // 計算欄:params 欄位變 → 細胞重算 → 寫回本欄 num
+        // Computed field: a param field changes → cell recomputes → write back to this field's num
         if let (Some(script), false) = (&f.spec.script, f.spec.params.is_empty()) {
             let names: Vec<&str> = f.spec.params.iter().map(|s| s.as_str()).collect();
             if let Ok(cellc) = build_cell(&names, script) {
@@ -123,8 +123,9 @@ fn wire_rules(fields: &Rc<Vec<FieldRt>>) {
     }
 }
 
-/// 表單 schema 完全不在 Rust source 裡:runtime 由 GET /api/form-schema 載入
-/// (server 每次請求現讀 api-server/form-schema.json)。改檔 → 重載 → 表單即變,零重編。
+/// The form schema is not in the Rust source at all: it's loaded at runtime via
+/// GET /api/form-schema (the server reads api-server/form-schema.json fresh per request).
+/// Edit the file → reload → the form changes, zero rebuild.
 #[component]
 pub fn FormPoc() -> impl IntoView {
     let specs: RwSignal<Option<Vec<FieldSpec>>> = RwSignal::new(None);
@@ -164,7 +165,7 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
         Rc::new(specs.into_iter().map(FieldRt::new).collect());
     wire_rules(&fields);
 
-    // 部門 / 人員(Rust API)
+    // Departments / members (Rust API)
     let depts = RwSignal::new(Vec::<Dept>::new());
     let members = RwSignal::new(Vec::<Member>::new());
     let loading = RwSignal::new(String::new());
@@ -264,7 +265,7 @@ fn FormBody(specs: Vec<FieldSpec>) -> impl IntoView {
                         _ => view! { <span>"(unknown widget)"</span> }.into_any(),
                     };
                     let err = spec.err.clone().unwrap_or_default();
-                    // schema 的 style 只能引用 token;raw CSS / 未授權屬性在此被拒
+                    // the schema's style may only reference tokens; raw CSS / unauthorized properties are rejected here
                     let (style_attr, style_err) = match &spec.style {
                         Some(m) => match style_of(m) {
                             Ok(s) => (s, String::new()),

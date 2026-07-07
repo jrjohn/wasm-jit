@@ -1,5 +1,5 @@
-// main.scss — 全站樣式。index.html 的 <style> 已完全遷出至此:
-// html 退化為純艙門(mount 點 + meta),樣式歸 SCSS,結構/行為歸 Rust。
+// main.scss — site-wide styles. index.html's <style> has been fully moved out to here:
+// the HTML degenerates into a pure hatch (mount point + meta), styles belong to SCSS, structure/behavior belong to Rust.
 @import "tokens";
 
 :root {
@@ -172,7 +172,7 @@ textarea {
 }
 .loading { font-size: 0.75rem; opacity: 0.6; margin-left: 0.8rem; }
 
-// ---- Tokens tab(PoC 4)----
+// ---- Tokens tab (PoC 4) ----
 .swatches {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
@@ -211,7 +211,7 @@ textarea {
   max-width: 420px;
 }
 
-// ---- Layout tab(版面即 schema)----
+// ---- Layout tab (layout as schema) ----
 .ly-shell {
   display: grid;
   grid-template-columns: 215px 1fr;
@@ -273,7 +273,7 @@ textarea {
 }
 .ly-text { font-size: var(--tk-font-2); color: var(--tk-color-text-dim); margin: 0; }
 
-// ---- Draw tab(自由繪)----
+// ---- Draw tab (free-drawing) ----
 .draw-cv {
   display: block;
   width: 100%;
@@ -287,7 +287,7 @@ textarea {
 .draw-status.ok { color: var(--tk-color-success); }
 .draw-status.bad { color: var(--tk-color-danger); }
 
-// ---- Spectrum tab(種子語言光譜)----
+// ---- Spectrum tab (seed-language spectrum) ----
 .sp-dsl { margin: var(--tk-space-2) 0; }
 .sp-line { display: flex; align-items: center; gap: 0.5rem; margin-top: var(--tk-space-2);
            font-size: var(--tk-font-2); flex-wrap: wrap; }

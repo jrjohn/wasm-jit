@@ -1,7 +1,7 @@
-//! tokens_tab.rs — PoC 4:design-token 化的樣式層。
-//! 上半:token rails(SCSS 生成的變數,體)以 swatch 呈現。
-//! 下半:模擬 AI 生成的 style spec(JSON)——只能引用 token;
-//!       raw CSS / 未授權屬性在驗證層被拒(樣式的 capability sandbox)。
+//! tokens_tab.rs — PoC 4: the design-tokenized style layer.
+//! Top half: the token rails (SCSS-generated variables, the substance) shown as swatches.
+//! Bottom half: a simulated AI-generated style spec (JSON) — may only reference tokens;
+//!       raw CSS / unauthorized properties are rejected at the validation layer (the style capability sandbox).
 
 use crate::tokens::{style_of, COLORS};
 use leptos::prelude::*;
@@ -29,7 +29,7 @@ pub fn TokensPoc() -> impl IntoView {
         Err(e) => err.set(format!("JSON parse failed: {e}")),
     };
 
-    run(DEFAULT_SPEC); // 初始顯化一次
+    run(DEFAULT_SPEC); // manifest once on init
 
     let apply = move |_| run(&spec_text.get());
     let violate = move |_| {

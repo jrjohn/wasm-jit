@@ -39,9 +39,10 @@ pub fn compile_kernel_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     codegen::compile_kernel(&prog).map_err(|e| JsError::new(&e))
 }
 
-/// 自由繪 kernel:`run(t, w, h)`,capabilities = 2D 繪圖 primitives。
-/// 不需要任何 widget——primitive 詞彙對 2D 完備(SVG ~10 個 path 指令可表達任何圖形),
-/// 任意圖形 = 生成腳本對 primitives 的組合。
+/// Free-drawing kernel: `run(t, w, h)`, capabilities = 2D drawing primitives.
+/// No widgets required — the primitive vocabulary is complete for 2D (SVG's
+/// ~10 path commands can express any shape); any shape is just the generated
+/// script composing those primitives.
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
@@ -50,11 +51,11 @@ pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     const IMPORTS: [HostFn; 7] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "hue", n_args: 1, returns: false },   // 設定色相
-        HostFn { name: "disc", n_args: 3, returns: false },  // 實心圓 (x,y,r)
-        HostFn { name: "ring", n_args: 3, returns: false },  // 空心圓 (x,y,r)
-        HostFn { name: "arc", n_args: 5, returns: false },   // 弧 (x,y,r,a0,a1)
-        HostFn { name: "line", n_args: 4, returns: false },  // 線 (x1,y1,x2,y2)
+        HostFn { name: "hue", n_args: 1, returns: false },   // set hue
+        HostFn { name: "disc", n_args: 3, returns: false },  // filled circle (x,y,r)
+        HostFn { name: "ring", n_args: 3, returns: false },  // outlined circle (x,y,r)
+        HostFn { name: "arc", n_args: 5, returns: false },   // arc (x,y,r,a0,a1)
+        HostFn { name: "line", n_args: 4, returns: false },  // line (x1,y1,x2,y2)
     ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with(&prog, &PARAMS, &IMPORTS).map_err(|e| JsError::new(&e))

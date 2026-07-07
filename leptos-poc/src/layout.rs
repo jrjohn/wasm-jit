@@ -1,10 +1,11 @@
-//! layout.rs — 版面即 schema:整個 app 版面(header/選單/profile/表格)
-//! 由遞迴 JSON 樹於 runtime 顯化。
+//! layout.rs — layout as schema: the whole app layout (header/menu/profile/table)
+//! is manifested at runtime from a recursive JSON tree.
 //!
-//! 與 form.rs 同一個模式、升一層:form schema 是「欄位平面列表」,
-//! layout schema 是「容器遞迴樹」。詞彙 = 9 種 layout cell(編譯期的體);
-//! 組合 = schema(runtime 的用);樣式照樣只准引用 design token。
-//! 版面表面不該用繪圖 primitive 畫——文字/捲動/焦點/無障礙屬於 DOM。
+//! Same pattern as form.rs, one level up: a form schema is a "flat list of fields",
+//! a layout schema is a "recursive tree of containers". Vocabulary = 9 layout cells
+//! (the compile-time substance); composition = the schema (the runtime use); styles,
+//! as before, may only reference design tokens.
+//! A layout surface shouldn't be drawn with drawing primitives — text/scrolling/focus/accessibility belong to the DOM.
 
 use crate::tokens::style_of;
 use gloo_net::http::Request;
@@ -40,7 +41,7 @@ pub struct Node {
     style: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// 遞迴顯化一個 layout 節點。未知節點型別 = 不在詞彙裡 → 顯示錯誤(而非靜默)。
+/// Recursively manifest one layout node. An unknown node type = not in the vocabulary → show an error (rather than silently dropping it).
 fn render(node: Node) -> AnyView {
     let style = node
         .style
@@ -133,7 +134,7 @@ fn render(node: Node) -> AnyView {
     }
 }
 
-/// 表格 cell:rows 由 schema 指定的 API source 於 runtime 載入。
+/// Table cell: rows are loaded at runtime from the API source named in the schema.
 #[component]
 fn LyTable(source: String, columns: Vec<Column>) -> impl IntoView {
     let rows: RwSignal<Vec<serde_json::Value>> = RwSignal::new(Vec::new());

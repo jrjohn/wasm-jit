@@ -72,7 +72,7 @@ pub enum Stmt {
     While(Expr, Vec<Stmt>),
     /// Void host-function call statement, e.g. `out(x, y);`
     Call(String, Vec<Expr>),
-    /// `if cond { … } else { … }`(else 可省略、可接 else if 鏈)
+    /// `if cond { … } else { … }` (the `else` is optional and may chain into `else if`)
     If(Expr, Vec<Stmt>, Vec<Stmt>),
 }
 
@@ -282,7 +282,7 @@ impl Parser {
                 let else_body = if matches!(self.peek(), Tok::Else) {
                     self.advance();
                     if matches!(self.peek(), Tok::If) {
-                        vec![self.parse_stmt()?] // else-if 鏈
+                        vec![self.parse_stmt()?] // else-if chain
                     } else {
                         self.parse_block()?
                     }
@@ -444,7 +444,7 @@ pub fn to_js(prog: &Program) -> String {
                 out.push(')');
             }
             Expr::Call(name, args) => {
-                // 內建數學函式在 JS 端映射到 Math.*(DSL 無成員存取,不會撞名)
+                // Built-in math functions map to Math.* on the JS side (the DSL has no member access, so there's no name collision).
                 match name.as_str() {
                     "min" | "max" | "abs" | "sqrt" | "floor" => {
                         out.push_str("Math.");

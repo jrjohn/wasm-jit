@@ -1,8 +1,8 @@
-//! Rust API(Axum)for the form PoC.
-//! GET /api/departments        → 部門清單
-//! GET /api/members/{dept}     → 該部門人員列表
-//! 其餘路徑 → 靜態服務 leptos-poc/dist(同源,免 CORS)。
-//! 各 API 加 120ms 人工延遲,讓前端 loading 狀態可見。
+//! Rust API (Axum) for the form PoC.
+//! GET /api/departments        → the department list
+//! GET /api/members/{dept}     → the member list for that department
+//! All other paths → statically serve leptos-poc/dist (same origin, no CORS).
+//! Each API adds a 120ms artificial delay so the frontend's loading state is visible.
 
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
@@ -11,8 +11,9 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use tower_http::services::{ServeDir, ServeFile};
 
-/// 表單 schema:每次請求「現讀」磁碟檔案 —— 改 JSON、前端重載即生效,零重編。
-/// 這就是「form 不在 Rust source 裡」的證明點。
+/// Form schema: read the disk file fresh on every request — edit the JSON, reload the
+/// frontend, and it takes effect, zero rebuild. This is the proof point of "the form
+/// is not in the Rust source".
 async fn form_schema() -> impl IntoResponse {
     let path = std::env::args()
         .nth(2)
@@ -68,7 +69,7 @@ async fn members(Path(dept): Path<u32>) -> Json<Value> {
     Json(rows)
 }
 
-/// 版面 schema:同 form-schema,每次請求現讀磁碟 —— 整個 app 版面都是資料。
+/// Layout schema: like form-schema, read fresh from disk on every request — the whole app layout is data.
 async fn layout_schema() -> impl IntoResponse {
     match tokio::fs::read_to_string("api-server/layout-schema.json").await {
         Ok(s) => (
@@ -84,7 +85,7 @@ async fn layout_schema() -> impl IntoResponse {
     }
 }
 
-/// 繪圖範例種子(examples/*.dsl),白名單限定。
+/// Drawing example seeds (examples/*.dsl), restricted to a whitelist.
 async fn example(Path(name): Path<String>) -> impl IntoResponse {
     if !matches!(name.as_str(), "buddha" | "guanyin" | "minecraft" | "mc3p") {
         return (
@@ -103,7 +104,7 @@ async fn example(Path(name): Path<String>) -> impl IntoResponse {
     }
 }
 
-/// 真 AssemblyScript 編出的種子(asc 產物),application/wasm。
+/// A seed actually compiled by AssemblyScript (the asc artifact), application/wasm.
 async fn as_wasm(Path(name): Path<String>) -> impl IntoResponse {
     if name != "buddha" {
         return (StatusCode::NOT_FOUND, [(header::CONTENT_TYPE, "text/plain")], Vec::new());
@@ -118,7 +119,7 @@ async fn as_wasm(Path(name): Path<String>) -> impl IntoResponse {
     }
 }
 
-/// AssemblyScript 源碼(給前端顯示語法用)。
+/// AssemblyScript source (for the frontend to display the syntax).
 async fn as_src(Path(name): Path<String>) -> impl IntoResponse {
     if name != "buddha" {
         return (StatusCode::NOT_FOUND, [(header::CONTENT_TYPE, "text/plain")], String::new());

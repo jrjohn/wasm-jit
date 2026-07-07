@@ -153,16 +153,18 @@ impl CellBuilder {
         self.instantiate_bytes(&bytes)
     }
 
-    /// 種子語言光譜的地基:接受**任何來源**的 WASM bytes(AssemblyScript /
-    /// Rust→wasm / 手寫 WAT),先審計 import 節 ⊆ 授予的 capability,通過才
-    /// instantiate。這是 compile() 的語言無關版——圍欄在 import 表,不在文法。
+    /// The foundation of the seed-language spectrum: accept WASM bytes from **any
+    /// source** (AssemblyScript / Rust→wasm / hand-written WAT), first audit that
+    /// the import section ⊆ the granted capabilities, and only instantiate if it
+    /// passes. This is the language-agnostic version of compile() — the fence is
+    /// in the import table, not the grammar.
     pub fn from_wasm_bytes(self, bytes: &[u8]) -> Result<Cell, String> {
         let grants: Vec<wasm_jit::audit::Grant> = self
             .caps
             .iter()
             .map(|(n, _)| wasm_jit::audit::Grant { module: "env", name: n })
             .collect();
-        wasm_jit::audit::audit(bytes, &grants)?; // 越權 import → 這裡就被拒
+        wasm_jit::audit::audit(bytes, &grants)?; // an over-reaching import → rejected right here
         self.instantiate_bytes(bytes)
     }
 

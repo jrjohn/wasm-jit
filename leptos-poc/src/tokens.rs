@@ -1,10 +1,12 @@
-//! tokens.rs — 樣式層的 capability sandbox(純邏輯,native 可測)。
+//! tokens.rs — the style layer's capability sandbox (pure logic, natively testable).
 //!
-//! registry 與 styles/tokens.scss 一一對應(production 應由單一來源生成兩者;
-//! PoC 以測試守住對應)。AI 生成的 style spec 只能:
-//!   1. 使用被授權的樣式屬性(GRANTED)
-//!   2. 引用 registry 內的 token 名
-//! 其餘一律拒絕——與 DSL 的「fetch() 被 codegen 拒絕」同構,是樣式層的 import 表。
+//! The registry corresponds one-to-one with styles/tokens.scss (in production both
+//! should be generated from a single source; the PoC guards the correspondence with
+//! a test). An AI-generated style spec may only:
+//!   1. use an authorized style property (GRANTED)
+//!   2. reference a token name in the registry
+//! Everything else is rejected — isomorphic to the DSL's "fetch() rejected at codegen",
+//! this is the style layer's import table.
 
 pub const COLORS: [&str; 9] = [
     "primary", "success", "warning", "danger",
@@ -14,7 +16,7 @@ pub const SPACES: [&str; 7] = ["0", "1", "2", "3", "4", "5", "6"];
 pub const RADII: [&str; 5] = ["0", "1", "2", "3", "full"];
 pub const FONTS: [&str; 4] = ["1", "2", "3", "4"];
 
-/// (spec 屬性名, CSS 屬性, token 命名空間, registry)
+/// (spec property name, CSS property, token namespace, registry)
 const GRANTED: [(&str, &str, &str, &[&str]); 6] = [
     ("color", "color", "color", &COLORS),
     ("background", "background-color", "color", &COLORS),
@@ -24,7 +26,7 @@ const GRANTED: [(&str, &str, &str, &[&str]); 6] = [
     ("font", "font-size", "font", &FONTS),
 ];
 
-/// 驗證 style spec(JSON object)→ 合法則產出 `css-prop:var(--tk-ns-token);…`。
+/// Validate a style spec (JSON object) → if valid, emit `css-prop:var(--tk-ns-token);…`.
 pub fn style_of(spec: &serde_json::Map<String, serde_json::Value>) -> Result<String, String> {
     let mut out = String::new();
     for (k, v) in spec {
@@ -74,21 +76,21 @@ mod tests {
     #[test]
     fn raw_css_value_rejected() {
         let e = super::style_of(&spec(json!({"color": "#ff0000"}))).unwrap_err();
-        assert!(e.contains("不是 design token"), "{e}");
-        assert!(e.contains("primary"), "應列出 granted tokens: {e}");
+        assert!(e.contains("is not a design token"), "{e}");
+        assert!(e.contains("primary"), "should list granted tokens: {e}");
     }
 
     #[test]
     fn unknown_prop_rejected() {
-        // position/z-index/content 等都不在授權清單——樣式攻擊面被鎖死
+        // position/z-index/content etc. are not in the grant list — the style attack surface is locked down
         let e = super::style_of(&spec(json!({"position": "fixed"}))).unwrap_err();
-        assert!(e.contains("未授權的樣式屬性"), "{e}");
+        assert!(e.contains("unauthorized style property"), "{e}");
     }
 
     #[test]
     fn unknown_token_rejected() {
         let e = super::style_of(&spec(json!({"padding": "999"}))).unwrap_err();
-        assert!(e.contains("不是 design token"), "{e}");
+        assert!(e.contains("is not a design token"), "{e}");
     }
 
     #[test]

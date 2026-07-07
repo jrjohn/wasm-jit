@@ -1,7 +1,7 @@
-// tokens.scss — 樣式層的 rails(體)。
-// SCSS 在編譯期生成整套 design tokens(CSS 變數);
-// AI 的顯化(用)只能「引用」這裡定義的 token,不能生成任意 CSS——
-// Rust 端 tokens.rs 的 registry 與此對應(樣式層的 capability 清單)。
+// tokens.scss — the style layer's rails (the substance).
+// SCSS generates the whole set of design tokens (CSS variables) at compile time;
+// an AI's manifestation (the use) may only "reference" the tokens defined here, not generate arbitrary CSS —
+// the registry in Rust's tokens.rs corresponds to this (the style layer's capability list).
 
 $colors: (
   "primary":   #1f6feb,
