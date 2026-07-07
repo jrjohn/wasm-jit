@@ -27,7 +27,7 @@
 </style>
 </head>
 <body>
-<h1>Runtime WASM codegen(V8 JIT)vs Rhai tree-walk 直譯 — 最小 PoC</h1>
+<h1>Runtime WASM codegen(V8 JIT)vs Rhai tree-walk 直譯 — 最小 PoC <span style="float:right;font-weight:400;font-size:.8rem"><a href="./canvas.html">畫布 PoC →</a></span></h1>
 <p style="font-size:.9rem">同一段腳本、四條執行路徑。DSL 是 Rhai 的嚴格子集(同一份原始碼直接餵兩個引擎);
 JS 版由同一 AST 轉譯;native 為 AOT Rust 天花板。管線:
 <code>src → parser → AST → wasm-encoder → bytes → WebAssembly.instantiate()</code>(V8 在最後一步 JIT)。</p>

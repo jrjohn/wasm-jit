@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>畫布 PoC — N 個元件 × 生成 kernel × 60fps</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 960px;
+         margin: 1.2rem auto; padding: 0 1rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  h1 { font-size: 1.05rem; margin: .2rem 0 .6rem; }
+  .bar { display: flex; gap: .7rem; align-items: center; flex-wrap: wrap; margin: .5rem 0; font-size: .85rem; }
+  select, button { font: inherit; padding: .25rem .6rem; border-radius: 6px; border: 1px solid #30363d;
+                   background: #161b22; color: inherit; }
+  button { cursor: pointer; background: #1f6feb; border: none; color: #fff; }
+  canvas { display: block; width: 100%; border: 1px solid #30363d; border-radius: 8px; background: #010409; }
+  .stats { display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: .85rem; margin: .55rem 0; }
+  .stats b { font-size: 1.05rem; }
+  .ok { color: #3fb950; } .warn { color: #d29922; } .bad { color: #f85149; }
+  .badge { font-size: .78rem; padding: .1rem .5rem; border-radius: 99px; border: 1px solid #30363d; }
+  .note { font-size: .75rem; opacity: .65; margin-top: .8rem; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<h1>畫布 PoC — 每個元件一顆「獨立生成、獨立編譯」的 kernel 細胞,每 frame 全跑
+  <span style="float:right;font-weight:400;font-size:.8rem"><a href="./index.html">← benchmark</a></span></h1>
+
+<div class="bar">
+  N <select id="n-sel">
+      <option>50</option><option>200</option><option selected>500</option>
+      <option>1000</option><option>2000</option>
+    </select>
+  kernel 重量(substeps)<select id="steps-sel">
+      <option>1</option><option>50</option><option selected>200</option><option>1000</option>
+    </select>
+  執行 <select id="mode-sel">
+      <option value="wasm" selected>生成 WASM 細胞(瀏覽器 JIT)</option>
+      <option value="js">JS new Function(V8 JS JIT)</option>
+      <option value="rhai">Rhai 直譯</option>
+    </select>
+  <button id="regen">Regenerate</button>
+  <span id="status">loading…</span>
+</div>
+
+<canvas id="cv" width="1440" height="760"></canvas>
+
+<div class="stats">
+  <span>fps <b id="s-fps">–</b></span>
+  <span>kernel(全體/frame)<b id="s-kern">–</b> ms(p95 <span id="s-kern95">–</span>)</span>
+  <span>draw <b id="s-draw">–</b> ms</span>
+  <span>幀預算 16.6ms 佔用 <b id="s-budget">–</b></span>
+  <span>編譯 <b id="s-compile">–</b></span>
+  <span id="s-sandbox" class="badge">–</span>
+</div>
+
+<p class="note">
+每個元件的腳本是<b>獨一份的原始碼</b>(模板 × 依 index 烘焙的常數 = 模擬「AI 對每個元件各生成一段行為」),
+各自編成一顆 WASM 模組(僅能呼叫被授予的 capability:<code>sin</code>、<code>cos</code>、<code>out</code>——import 表即能力清單)。
+kernel 重量 = while 迴圈 substep 數(模擬物理/幾何迭代)。三種執行模式吃同一批腳本原文。
+PoC 未做 fuel metering;Rhai 模式在大 N×重 kernel 時會凍住頁面——這正是要展示的差距。
+</p>
+
+<pre id="metrics-json" style="display:none"></pre>
+
+<script type="module">
+import init, { compile_kernel_wasm, transpile_to_js, RhaiKernel, kernel_out_x, kernel_out_y }
+  from './pkg/wasm_jit.js';
+
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const frac = x => x - Math.floor(x);
+
+// ---- per-element script generation (deterministic pseudo-random from index) ----
+function genScript(i, steps, cell) {
+  const p1 = frac(i * 0.754877666), p2 = frac(i * 0.569840291), p3 = frac(i * 0.362436867);
+  const w  = (0.25 + p1 * 1.1).toFixed(4);            // angular speed
+  const ph = (p2 * 6.2832).toFixed(4);                // phase
+  const r  = (cell * (0.18 + 0.24 * p3)).toFixed(2);  // radius
+  const st = steps.toFixed(1);
+  const base =
+`let a = t * ${w} + ${ph};
+let c = cos(a / ${st});
+let s = sin(a / ${st});
+let x = ${r};
+let y = 0.0;
+let k = 0.0;
+while k < ${st} {
+    let nx = x * c - y * s;
+    y = x * s + y * c;
+    x = nx;
+    k = k + 1.0;
+}
+`;
+  const hue = `a * 0.1592 + ${p2.toFixed(3)}`;
+  switch (i % 4) {
+    case 0: return base + `out(hx + x, hy + y);\n${hue}`;
+    case 1: return base + `out(hx + x * 1.55, hy + y * 0.6);\n${hue}`;
+    case 2: return base + `let m = 0.55 + 0.45 * cos(a * 3.0);\nout(hx + x * m, hy + y * m);\n${hue}`;
+    default: return base + `out(hx + x, hy + y * 0.35 + sin(t * ${(1.0 + p3 * 2.0).toFixed(3)} + ${ph}) * ${(cell * 0.28).toFixed(2)});\n${hue}`;
+  }
+}
+
+// ---- world state ----
+let elements = [], POS, HUE, mode = 'wasm', running = false;
+let compileInfo = { ms: 0, bytes: 0 };
+const COLORS = Array.from({ length: 64 }, (_, k) => `hsl(${(k / 64 * 360) | 0},72%,58%)`);
+
+function build() {
+  const N = +$('n-sel').value, steps = +$('steps-sel').value;
+  mode = $('mode-sel').value;
+  const cols = Math.ceil(Math.sqrt(N * W / H)), rows = Math.ceil(N / cols);
+  const cw = W / cols, ch = H / rows, cell = Math.min(cw, ch);
+  POS = new Float64Array(2 * N); HUE = new Float64Array(N);
+  elements = []; compileInfo = { ms: 0, bytes: 0 };
+
+  const t0 = performance.now();
+  for (let i = 0; i < N; i++) {
+    const hx = (i % cols) * cw + cw / 2, hy = Math.floor(i / cols) * ch + ch / 2;
+    const src = genScript(i, steps, cell);
+    const el = { i, idx: i, ptr: 2 * i, hx, hy, sz: Math.max(3, cell * 0.16) };
+    if (mode === 'wasm') {
+      const bytes = compile_kernel_wasm(src);
+      compileInfo.bytes += bytes.length;
+      const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: {
+        sin: Math.sin, cos: Math.cos,
+        out: (x, y) => { POS[el.ptr] = x; POS[el.ptr + 1] = y; },
+      }});
+      const run = inst.exports.run;
+      el.run = t => run(t, i, hx, hy);
+    } else if (mode === 'js') {
+      const fn = new Function('t', 'i', 'hx', 'hy', 'sin', 'cos', 'out', transpile_to_js(src));
+      const out = (x, y) => { POS[el.ptr] = x; POS[el.ptr + 1] = y; };
+      el.run = t => fn(t, i, hx, hy, Math.sin, Math.cos, out);
+    } else {
+      const rk = new RhaiKernel(src);
+      el.run = t => {
+        const h = rk.run(t, i, hx, hy);
+        POS[el.ptr] = kernel_out_x(); POS[el.ptr + 1] = kernel_out_y();
+        return h;
+      };
+    }
+    elements.push(el);
+  }
+  compileInfo.ms = performance.now() - t0;
+  $('s-compile').textContent = `${N} cells / ${compileInfo.ms.toFixed(0)}ms` +
+    (mode === 'wasm' ? ` / ${(compileInfo.bytes / 1024).toFixed(1)}KB` : '');
+  $('s-sandbox').textContent = mode === 'wasm'
+    ? '沙箱 ✅ capability cell(imports: sin, cos, out)'
+    : mode === 'rhai' ? '沙箱 ✅ 直譯器(可 metering,但慢)' : '沙箱 ❌ new Function 持整頁權限';
+  $('s-sandbox').className = 'badge ' + (mode === 'js' ? 'bad' : 'ok');
+}
+
+// ---- frame loop with rolling metrics ----
+const ring = { dt: [], kern: [], draw: [] };
+let lastT = 0, lastStat = 0;
+const push = (a, v) => { a.push(v); if (a.length > 120) a.shift(); };
+const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+const p95 = a => a.length ? [...a].sort((x, y) => x - y)[Math.floor(a.length * 0.95)] : 0;
+
+function drawAll() {
+  ctx.clearRect(0, 0, W, H);
+  for (const e of elements) {
+    ctx.fillStyle = COLORS[(((HUE[e.idx] % 1) + 1) % 1 * 64) & 63];
+    ctx.fillRect(POS[e.ptr] - e.sz / 2, POS[e.ptr + 1] - e.sz / 2, e.sz, e.sz);
+  }
+}
+
+function frame(now) {
+  if (!running) return;
+  if (lastT) push(ring.dt, now - lastT);
+  lastT = now;
+  const t = now / 1000;
+  const k0 = performance.now();
+  try {
+    for (const e of elements) HUE[e.idx] = e.run(t);
+  } catch (err) {
+    running = false;
+    $('status').textContent = 'kernel error: ' + (err?.message ?? err);
+    return;
+  }
+  const k1 = performance.now();
+  drawAll();
+  push(ring.kern, k1 - k0);
+  push(ring.draw, performance.now() - k1);
+
+  if (now - lastStat > 500 && ring.dt.length > 10) {
+    lastStat = now;
+    const fps = 1000 / avg(ring.dt), kern = avg(ring.kern), kp95 = p95(ring.kern);
+    const budget = kern / 16.6 * 100;
+    $('s-fps').textContent = fps.toFixed(0);
+    $('s-fps').className = fps >= 55 ? 'ok' : fps >= 30 ? 'warn' : 'bad';
+    $('s-kern').textContent = kern.toFixed(2);
+    $('s-kern95').textContent = kp95.toFixed(2);
+    $('s-draw').textContent = avg(ring.draw).toFixed(2);
+    $('s-budget').textContent = budget.toFixed(0) + '%';
+    $('s-budget').className = budget < 50 ? 'ok' : budget < 100 ? 'warn' : 'bad';
+    $('metrics-json').textContent = JSON.stringify({
+      mode, n: elements.length, steps: +$('steps-sel').value,
+      fps: +fps.toFixed(1), kernelMsAvg: +kern.toFixed(3), kernelMsP95: +kp95.toFixed(3),
+      drawMsAvg: +avg(ring.draw).toFixed(3), budgetPct: +budget.toFixed(1),
+      compileMs: +compileInfo.ms.toFixed(1), totalBytes: compileInfo.bytes,
+    });
+    document.title = `畫布 ${mode} N=${elements.length} ${fps.toFixed(0)}fps kern=${kern.toFixed(1)}ms`;
+  }
+  requestAnimationFrame(frame);
+}
+
+async function rebuild() {
+  running = false;
+  $('status').textContent = 'compiling…';
+  await new Promise(r => setTimeout(r, 30));   // let the UI paint
+  ring.dt = []; ring.kern = []; ring.draw = []; lastT = 0;
+  try { build(); } catch (err) {
+    $('status').textContent = 'build error: ' + (err?.message ?? err);
+    return;
+  }
+  $('status').textContent = 'running';
+  running = true;
+  requestAnimationFrame(frame);
+}
+
+for (const id of ['n-sel', 'steps-sel', 'mode-sel']) $(id).addEventListener('change', rebuild);
+$('regen').addEventListener('click', rebuild);
+
+await init();
+rebuild();
+</script>
+</body>
+</html>

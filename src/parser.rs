@@ -6,11 +6,12 @@
 //!   stmt    := "let" ident "=" expr ";"
 //!            | ident "=" expr ";"
 //!            | "while" expr "{" stmt* "}"
+//!            | ident "(" args ")" ";"          (void host-fn call, e.g. out(x,y);)
 //!   expr    := add (("<"|">"|"<="|">=") add)?
 //!   add     := mul (("+"|"-") mul)*
 //!   mul     := unary (("*"|"/") unary)*
 //!   unary   := "-" unary | primary
-//!   primary := number | ident | "(" expr ")"
+//!   primary := number | ident | ident "(" args ")" | "(" expr ")"
 //!
 //! All values are f64. Comparisons yield 1.0/0.0 in value position.
 
@@ -30,6 +31,7 @@ pub enum Tok {
     Ge,
     Eq,
     Semi,
+    Comma,
     LParen,
     RParen,
     LBrace,
@@ -54,6 +56,8 @@ pub enum Expr {
     Num(f64),
     Var(String),
     Binary(Box<Expr>, BinOp, Box<Expr>),
+    /// Host-function call, e.g. `sin(x)`. Resolved against the import table at codegen.
+    Call(String, Vec<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +65,8 @@ pub enum Stmt {
     Let(String, Expr),
     Assign(String, Expr),
     While(Expr, Vec<Stmt>),
+    /// Void host-function call statement, e.g. `out(x, y);`
+    Call(String, Vec<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +129,10 @@ fn lex(src: &str) -> Result<Vec<Tok>, String> {
             }
             ';' => {
                 toks.push(Tok::Semi);
+                i += 1;
+            }
+            ',' => {
+                toks.push(Tok::Comma);
                 i += 1;
             }
             '(' => {
@@ -206,17 +216,31 @@ impl Parser {
                     stmts.push(self.parse_stmt()?)
                 }
                 Tok::Eof => return Err("expected a final expression (return value)".into()),
-                _ => break,
+                _ => {
+                    // Could be a call statement (`out(x, y);`) or the final expression.
+                    let e = self.parse_expr()?;
+                    if matches!(self.peek(), Tok::Semi) {
+                        match e {
+                            Expr::Call(name, args) => {
+                                self.advance();
+                                stmts.push(Stmt::Call(name, args));
+                                continue;
+                            }
+                            _ => return Err(
+                                "only call expressions may be used as statements".into(),
+                            ),
+                        }
+                    }
+                    if !matches!(self.peek(), Tok::Eof) {
+                        return Err(format!(
+                            "unexpected token after final expression: {:?} (the final expression must be last and have no ';')",
+                            self.peek()
+                        ));
+                    }
+                    return Ok(Program { stmts, ret: e });
+                }
             }
         }
-        let ret = self.parse_expr()?;
-        if !matches!(self.peek(), Tok::Eof) {
-            return Err(format!(
-                "unexpected token after final expression: {:?} (the final expression must be last and have no ';')",
-                self.peek()
-            ));
-        }
-        Ok(Program { stmts, ret })
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, String> {
@@ -247,6 +271,17 @@ impl Parser {
                 Ok(Stmt::While(cond, body))
             }
             Tok::Ident(name) => {
+                if matches!(self.peek2(), Tok::LParen) {
+                    // call statement inside a block, e.g. `out(x, y);`
+                    let e = self.parse_expr()?;
+                    return match e {
+                        Expr::Call(name, args) => {
+                            self.expect(&Tok::Semi, "';'")?;
+                            Ok(Stmt::Call(name, args))
+                        }
+                        _ => Err("only call expressions may be used as statements".into()),
+                    };
+                }
                 self.advance();
                 self.expect(&Tok::Eq, "'='")?;
                 let e = self.parse_expr()?;
@@ -315,7 +350,25 @@ impl Parser {
     fn parse_primary(&mut self) -> Result<Expr, String> {
         match self.advance() {
             Tok::Num(v) => Ok(Expr::Num(v)),
-            Tok::Ident(s) => Ok(Expr::Var(s)),
+            Tok::Ident(s) => {
+                if matches!(self.peek(), Tok::LParen) {
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    if !matches!(self.peek(), Tok::RParen) {
+                        loop {
+                            args.push(self.parse_expr()?);
+                            if matches!(self.peek(), Tok::Comma) {
+                                self.advance();
+                                continue;
+                            }
+                            break;
+                        }
+                    }
+                    self.expect(&Tok::RParen, "')'")?;
+                    return Ok(Expr::Call(s, args));
+                }
+                Ok(Expr::Var(s))
+            }
             Tok::LParen => {
                 let e = self.parse_expr()?;
                 self.expect(&Tok::RParen, "')'")?;
@@ -354,6 +407,17 @@ pub fn to_js(prog: &Program) -> String {
                 expr_js(r, out);
                 out.push(')');
             }
+            Expr::Call(name, args) => {
+                out.push_str(name);
+                out.push('(');
+                for (k, a) in args.iter().enumerate() {
+                    if k > 0 {
+                        out.push(',');
+                    }
+                    expr_js(a, out);
+                }
+                out.push(')');
+            }
         }
     }
     fn stmt_js(s: &Stmt, out: &mut String) {
@@ -380,6 +444,10 @@ pub fn to_js(prog: &Program) -> String {
                 }
                 out.push_str("}\n");
             }
+            Stmt::Call(name, args) => {
+                expr_js(&Expr::Call(name.clone(), args.clone()), out);
+                out.push_str(";\n");
+            }
         }
     }
     let mut out = String::new();
@@ -401,6 +469,7 @@ mod tests {
         match e {
             Expr::Num(v) => *v,
             Expr::Var(_) => panic!("no vars in const test"),
+            Expr::Call(_, _) => panic!("no calls in const test"),
             Expr::Binary(l, op, r) => {
                 let (a, b) = (eval_const(l), eval_const(r));
                 match op {
