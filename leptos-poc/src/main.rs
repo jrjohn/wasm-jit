@@ -9,12 +9,14 @@
 //!    fetch() 在 codegen 即被拒(顯示 granted capabilities 清單)。
 
 mod cell;
+mod draw_tab;
 mod form;
 mod layout;
 mod tokens;
 mod tokens_tab;
 
 use cell::Cell;
+use draw_tab::DrawPoc;
 use form::FormPoc;
 use layout::LayoutPoc;
 use tokens_tab::TokensPoc;
@@ -131,9 +133,14 @@ fn App() -> impl IntoView {
                 on:click=move |_| tab.set("tokens")>"Tokens(樣式即 capability)"</button>
             <button class="tab-layout" class:on=move || tab.get() == "layout"
                 on:click=move |_| tab.set("layout")>"Layout(版面即 schema)"</button>
+            <button class="tab-draw" class:on=move || tab.get() == "draw"
+                on:click=move |_| tab.set("draw")>"自由繪(佛陀)"</button>
         </div>
         <Show when=move || tab.get() == "layout">
             <LayoutPoc />
+        </Show>
+        <Show when=move || tab.get() == "draw">
+            <DrawPoc />
         </Show>
         <Show when=move || tab.get() == "form">
             <FormPoc />

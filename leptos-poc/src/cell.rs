@@ -21,21 +21,34 @@ use wasm_jit::parser;
 
 enum Cap {
     Fn1(Closure<dyn Fn(f64) -> f64>),
+    Fn1Void(Closure<dyn Fn(f64)>),
     Fn2Void(Closure<dyn Fn(f64, f64)>),
+    Fn3Void(Closure<dyn Fn(f64, f64, f64)>),
+    Fn4Void(Closure<dyn Fn(f64, f64, f64, f64)>),
+    Fn5Void(Closure<dyn Fn(f64, f64, f64, f64, f64)>),
 }
 
 impl Cap {
     fn js(&self) -> &JsValue {
         match self {
             Cap::Fn1(c) => c.as_ref(),
+            Cap::Fn1Void(c) => c.as_ref(),
             Cap::Fn2Void(c) => c.as_ref(),
+            Cap::Fn3Void(c) => c.as_ref(),
+            Cap::Fn4Void(c) => c.as_ref(),
+            Cap::Fn5Void(c) => c.as_ref(),
         }
     }
     fn host_fn(&self, name: &'static str) -> HostFn {
-        match self {
-            Cap::Fn1(_) => HostFn { name, n_args: 1, returns: true },
-            Cap::Fn2Void(_) => HostFn { name, n_args: 2, returns: false },
-        }
+        let (n_args, returns) = match self {
+            Cap::Fn1(_) => (1, true),
+            Cap::Fn1Void(_) => (1, false),
+            Cap::Fn2Void(_) => (2, false),
+            Cap::Fn3Void(_) => (3, false),
+            Cap::Fn4Void(_) => (4, false),
+            Cap::Fn5Void(_) => (5, false),
+        };
+        HostFn { name, n_args, returns }
     }
 }
 
@@ -49,6 +62,7 @@ pub struct CellBuilder {
 /// the caller's discipline.
 pub struct Cell {
     run: Function,
+    bytes_len: usize,
     _caps: Vec<Cap>,
 }
 
@@ -58,6 +72,11 @@ impl Cell {
             params: params.iter().map(|p| p.to_string()).collect(),
             caps: Vec::new(),
         }
+    }
+
+    /// Generated module size in bytes.
+    pub fn size(&self) -> usize {
+        self.bytes_len
     }
 
     /// Call the cell with `args` (arity = the builder's params).
@@ -87,6 +106,30 @@ impl CellBuilder {
         self
     }
 
+    pub fn cap1_void(mut self, name: &'static str, f: impl Fn(f64) + 'static) -> Self {
+        self.caps.push((name, Cap::Fn1Void(Closure::new(f))));
+        self
+    }
+
+    pub fn cap3_void(mut self, name: &'static str, f: impl Fn(f64, f64, f64) + 'static) -> Self {
+        self.caps.push((name, Cap::Fn3Void(Closure::new(f))));
+        self
+    }
+
+    pub fn cap4_void(mut self, name: &'static str, f: impl Fn(f64, f64, f64, f64) + 'static) -> Self {
+        self.caps.push((name, Cap::Fn4Void(Closure::new(f))));
+        self
+    }
+
+    pub fn cap5_void(
+        mut self,
+        name: &'static str,
+        f: impl Fn(f64, f64, f64, f64, f64) + 'static,
+    ) -> Self {
+        self.caps.push((name, Cap::Fn5Void(Closure::new(f))));
+        self
+    }
+
     /// Compile DSL source against exactly the granted capabilities, then
     /// instantiate (sync — generated modules are tiny, far under Chrome's 4KB
     /// main-thread limit).
@@ -109,7 +152,11 @@ impl CellBuilder {
             .map_err(fmt_js)?
             .dyn_into::<Function>()
             .map_err(|_| "export 'run' is not a function".to_string())?;
-        Ok(Cell { run, _caps: self.caps.into_iter().map(|(_, c)| c).collect() })
+        Ok(Cell {
+            run,
+            bytes_len: bytes.len(),
+            _caps: self.caps.into_iter().map(|(_, c)| c).collect(),
+        })
     }
 }
 

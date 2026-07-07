@@ -272,3 +272,17 @@ textarea {
   th { color: var(--tk-color-text-dim); }
 }
 .ly-text { font-size: var(--tk-font-2); color: var(--tk-color-text-dim); margin: 0; }
+
+// ---- Draw tab(自由繪)----
+.draw-cv {
+  display: block;
+  width: 100%;
+  border: 1px solid #30363d;
+  border-radius: var(--tk-radius-2);
+  background: #010409;
+  margin-top: var(--tk-space-2);
+}
+.draw-src { margin-top: var(--tk-space-2); }
+.draw-status { font-size: var(--tk-font-2); }
+.draw-status.ok { color: var(--tk-color-success); }
+.draw-status.bad { color: var(--tk-color-danger); }

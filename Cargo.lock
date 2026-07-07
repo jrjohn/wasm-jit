@@ -999,6 +999,7 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "wasm-jit",
+ "web-sys",
 ]
 
 [[package]]

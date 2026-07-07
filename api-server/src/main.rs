@@ -84,6 +84,25 @@ async fn layout_schema() -> impl IntoResponse {
     }
 }
 
+/// 繪圖範例種子(examples/*.dsl),白名單限定。
+async fn example(Path(name): Path<String>) -> impl IntoResponse {
+    if !matches!(name.as_str(), "buddha" | "guanyin") {
+        return (
+            StatusCode::NOT_FOUND,
+            [(header::CONTENT_TYPE, "text/plain")],
+            "unknown example".to_string(),
+        );
+    }
+    match tokio::fs::read_to_string(format!("examples/{name}.dsl")).await {
+        Ok(s) => (StatusCode::OK, [(header::CONTENT_TYPE, "text/plain")], s),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("examples/{name}.dsl unreadable: {e}"),
+        ),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let dist = std::env::args()
@@ -95,6 +114,7 @@ async fn main() {
         .route("/api/members/{dept}", get(members))
         .route("/api/form-schema", get(form_schema))
         .route("/api/layout-schema", get(layout_schema))
+        .route("/api/examples/{name}", get(example))
         .fallback_service(ServeDir::new(&dist).not_found_service(ServeFile::new(index)));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8645").await.unwrap();
