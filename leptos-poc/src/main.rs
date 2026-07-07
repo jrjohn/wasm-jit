@@ -135,7 +135,12 @@ fn App() -> impl IntoView {
                 on:click=move |_| tab.set("layout")>"Layout(版面即 schema)"</button>
             <button class="tab-draw" class:on=move || tab.get() == "draw"
                 on:click=move |_| tab.set("draw")>"自由繪(佛陀)"</button>
+            <button class="tab-mc" class:on=move || tab.get() == "mc"
+                on:click=move |_| tab.set("mc")>"3D 體素(Minecraft)"</button>
         </div>
+        <Show when=move || tab.get() == "mc">
+            <DrawPoc example="minecraft" />
+        </Show>
         <Show when=move || tab.get() == "layout">
             <LayoutPoc />
         </Show>

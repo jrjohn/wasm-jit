@@ -17,6 +17,44 @@ thread_local! {
     static DRAW_CELL: RefCell<Option<Cell>> = const { RefCell::new(None) };
     static CTX: RefCell<Option<web_sys::CanvasRenderingContext2d>> = const { RefCell::new(None) };
     static LOOP_STARTED: BoolCell<bool> = const { BoolCell::new(false) };
+    /// 鍵盤狀態:0=左 1=右 2=前 3=後 4=跳(方向鍵/WASD/Space)
+    static KEYS: RefCell<[f64; 8]> = const { RefCell::new([0.0; 8]) };
+    /// 細胞的 32 槽 f64 記憶(get/set capability)——跨 frame 狀態(玩家位置/速度)住這裡
+    static STATE: RefCell<[f64; 32]> = const { RefCell::new([0.0; 32]) };
+    static KEYS_HOOKED: BoolCell<bool> = const { BoolCell::new(false) };
+}
+
+fn key_index(code: &str) -> Option<usize> {
+    match code {
+        "ArrowLeft" | "KeyA" => Some(0),
+        "ArrowRight" | "KeyD" => Some(1),
+        "ArrowUp" | "KeyW" => Some(2),
+        "ArrowDown" | "KeyS" => Some(3),
+        "Space" => Some(4),
+        _ => None,
+    }
+}
+
+fn ensure_keys() {
+    if KEYS_HOOKED.with(|s| s.replace(true)) {
+        return;
+    }
+    let Some(w) = web_sys::window() else { return };
+    let down = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(|e: web_sys::KeyboardEvent| {
+        if let Some(i) = key_index(&e.code()) {
+            e.prevent_default();
+            KEYS.with(|k| k.borrow_mut()[i] = 1.0);
+        }
+    });
+    let up = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(|e: web_sys::KeyboardEvent| {
+        if let Some(i) = key_index(&e.code()) {
+            KEYS.with(|k| k.borrow_mut()[i] = 0.0);
+        }
+    });
+    let _ = w.add_event_listener_with_callback("keydown", down.as_ref().unchecked_ref());
+    let _ = w.add_event_listener_with_callback("keyup", up.as_ref().unchecked_ref());
+    std::mem::forget(down);
+    std::mem::forget(up);
 }
 
 fn with_ctx(f: impl FnOnce(&web_sys::CanvasRenderingContext2d)) {
@@ -69,6 +107,43 @@ fn build_draw_cell(src: &str) -> Result<Cell, String> {
                 ctx.stroke();
             })
         })
+        // 3D 用:col(hue, lightness) 精細配色、tri 填色三角形(quad = 兩個 tri)
+        .cap2_void("col", |hv, l| {
+            with_ctx(|ctx| {
+                let c = format!(
+                    "hsl({},55%,{}%)",
+                    hv.rem_euclid(1.0) * 360.0,
+                    (l.clamp(0.0, 1.0)) * 100.0
+                );
+                ctx.set_stroke_style_str(&c);
+                ctx.set_fill_style_str(&c);
+            })
+        })
+        .cap6_void("tri", |x1, y1, x2, y2, x3, y3| {
+            with_ctx(|ctx| {
+                ctx.begin_path();
+                ctx.move_to(x1, y1);
+                ctx.line_to(x2, y2);
+                ctx.line_to(x3, y3);
+                ctx.close_path();
+                ctx.fill();
+            })
+        })
+        // 互動用:key(i)=按鍵狀態、get/set=32 槽跨幀記憶、flr=floor
+        .cap1("key", |i| {
+            KEYS.with(|k| *k.borrow().get(i as usize).unwrap_or(&0.0))
+        })
+        .cap1("flr", f64::floor)
+        .cap1("get", |i| {
+            STATE.with(|s| *s.borrow().get(i as usize).unwrap_or(&0.0))
+        })
+        .cap2_void("set", |i, v| {
+            STATE.with(|s| {
+                if let Some(slot) = s.borrow_mut().get_mut(i as usize) {
+                    *slot = v;
+                }
+            })
+        })
         .compile(src)
 }
 
@@ -117,14 +192,16 @@ fn ensure_loop() {
 }
 
 #[component]
-pub fn DrawPoc() -> impl IntoView {
+pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoView {
     let script = RwSignal::new(String::new());
     let status = RwSignal::new(String::from("載入範例…"));
     let ok = RwSignal::new(true);
+    let sel = RwSignal::new(example.to_string());
 
     let compile_now = move || match build_draw_cell(&script.get_untracked()) {
         Ok(cell) => {
             let size = cell.size();
+            STATE.with(|s| s.borrow_mut().fill(0.0)); // 新種子 = 新世界,清記憶
             DRAW_CELL.with(|c| *c.borrow_mut() = Some(cell));
             status.set(format!("compiled {size} bytes — 顯化中"));
             ok.set(true);
@@ -152,19 +229,28 @@ pub fn DrawPoc() -> impl IntoView {
     };
 
     ensure_loop();
-    load("buddha".to_string());
+    ensure_keys();
+    load(example.to_string());
 
     view! {
         <p class="sub">
-            "像素表面:DSL 種子由 /api/examples 載入 → 細胞 → 7 個繪圖 primitive"
-            "(sin/cos/hue/disc/ring/arc/line,2D 完備基底)每 frame 顯化。無 widget、無 DOM 權限。"
+            "像素表面:DSL 種子由 /api/examples 載入 → 細胞 → 繪圖 primitives + "
+            "key/get/set 互動 capabilities,每 frame 顯化。無 widget、無 DOM 權限。"
+            "3D 範例:← → ↑ ↓ / WASD 移動、Space 跳(物理與投影全在種子裡算)。"
         </p>
         <canvas id="draw-cv" class="draw-cv" width="1440" height="900"></canvas>
         <div class="tok-row">
             "範例 "
-            <select class="draw-example" on:change=move |ev| load(event_target_value(&ev))>
-                <option value="buddha" selected>"佛陀的笑臉"</option>
+            <select class="draw-example"
+                prop:value=move || sel.get()
+                on:change=move |ev| {
+                    let v = event_target_value(&ev);
+                    sel.set(v.clone());
+                    load(v);
+                }>
+                <option value="buddha">"佛陀的笑臉"</option>
                 <option value="guanyin">"觀音菩薩(全身+蓮台)"</option>
+                <option value="minecraft">"3D 體素地形(Minecraft 風)"</option>
             </select>
             <button class="apply draw-run" on:click=move |_| compile_now()>"Compile & Run"</button>
             <button class="tok-violate draw-violate" on:click=move |_| {

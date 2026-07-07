@@ -26,6 +26,7 @@ enum Cap {
     Fn3Void(Closure<dyn Fn(f64, f64, f64)>),
     Fn4Void(Closure<dyn Fn(f64, f64, f64, f64)>),
     Fn5Void(Closure<dyn Fn(f64, f64, f64, f64, f64)>),
+    Fn6Void(Closure<dyn Fn(f64, f64, f64, f64, f64, f64)>),
 }
 
 impl Cap {
@@ -37,6 +38,7 @@ impl Cap {
             Cap::Fn3Void(c) => c.as_ref(),
             Cap::Fn4Void(c) => c.as_ref(),
             Cap::Fn5Void(c) => c.as_ref(),
+            Cap::Fn6Void(c) => c.as_ref(),
         }
     }
     fn host_fn(&self, name: &'static str) -> HostFn {
@@ -47,6 +49,7 @@ impl Cap {
             Cap::Fn3Void(_) => (3, false),
             Cap::Fn4Void(_) => (4, false),
             Cap::Fn5Void(_) => (5, false),
+            Cap::Fn6Void(_) => (6, false),
         };
         HostFn { name, n_args, returns }
     }
@@ -127,6 +130,15 @@ impl CellBuilder {
         f: impl Fn(f64, f64, f64, f64, f64) + 'static,
     ) -> Self {
         self.caps.push((name, Cap::Fn5Void(Closure::new(f))));
+        self
+    }
+
+    pub fn cap6_void(
+        mut self,
+        name: &'static str,
+        f: impl Fn(f64, f64, f64, f64, f64, f64) + 'static,
+    ) -> Self {
+        self.caps.push((name, Cap::Fn6Void(Closure::new(f))));
         self
     }
 

@@ -86,7 +86,7 @@ async fn layout_schema() -> impl IntoResponse {
 
 /// 繪圖範例種子(examples/*.dsl),白名單限定。
 async fn example(Path(name): Path<String>) -> impl IntoResponse {
-    if !matches!(name.as_str(), "buddha" | "guanyin") {
+    if !matches!(name.as_str(), "buddha" | "guanyin" | "minecraft") {
         return (
             StatusCode::NOT_FOUND,
             [(header::CONTENT_TYPE, "text/plain")],
