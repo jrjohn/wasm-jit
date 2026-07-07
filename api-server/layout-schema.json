@@ -1,0 +1,18 @@
+{"type":"shell","children":[
+  {"type":"header","title":"Arcana 後台(整個版面 = schema 顯化)","items":["首頁","使用者","報表","設定"]},
+  {"type":"side","children":[
+    {"type":"profile","name":"John","text":"系統管理員"},
+    {"type":"menu","items":["Dashboard","部門","人員","簽核","報表"]}
+  ]},
+  {"type":"main","children":[
+    {"type":"card","title":"研發部人員(table cell,資料來自 Rust API)","children":[
+      {"type":"table","source":"/api/members/3",
+       "columns":[{"key":"name","label":"姓名"},{"key":"title","label":"職稱"}]}
+    ]},
+    {"type":"card","title":"說明",
+     "style":{"background":"surface-3","padding":"4","radius":"2"},
+     "children":[
+      {"type":"text","text":"header、選單、profile、表格——全部是 layout-schema.json 的遞迴顯化;改檔按重載即變,style 只准引用 design token。"}
+    ]}
+  ]}
+]}

@@ -68,6 +68,22 @@ async fn members(Path(dept): Path<u32>) -> Json<Value> {
     Json(rows)
 }
 
+/// 版面 schema:同 form-schema,每次請求現讀磁碟 —— 整個 app 版面都是資料。
+async fn layout_schema() -> impl IntoResponse {
+    match tokio::fs::read_to_string("api-server/layout-schema.json").await {
+        Ok(s) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            s,
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("layout-schema.json unreadable: {e}"),
+        ),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let dist = std::env::args()
@@ -78,6 +94,7 @@ async fn main() {
         .route("/api/departments", get(departments))
         .route("/api/members/{dept}", get(members))
         .route("/api/form-schema", get(form_schema))
+        .route("/api/layout-schema", get(layout_schema))
         .fallback_service(ServeDir::new(&dist).not_found_service(ServeFile::new(index)));
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8645").await.unwrap();

@@ -210,3 +210,65 @@ textarea {
   border: 1px solid #30363d;
   max-width: 420px;
 }
+
+// ---- Layout tab(版面即 schema)----
+.ly-shell {
+  display: grid;
+  grid-template-columns: 215px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "header header" "side main";
+  gap: var(--tk-space-3);
+  margin-top: var(--tk-space-3);
+}
+.ly-header {
+  grid-area: header;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--tk-color-surface-2);
+  border: 1px solid #30363d;
+  border-radius: var(--tk-radius-2);
+  padding: var(--tk-space-3) var(--tk-space-4);
+
+  b { font-size: var(--tk-font-3); }
+  nav { display: flex; gap: var(--tk-space-4); font-size: var(--tk-font-2); color: var(--tk-color-text-dim); }
+}
+.ly-side { grid-area: side; display: flex; flex-direction: column; gap: var(--tk-space-3); }
+.ly-main { grid-area: main; display: flex; flex-direction: column; gap: var(--tk-space-3); }
+.ly-card {
+  background: var(--tk-color-surface-2);
+  border: 1px solid #30363d;
+  border-radius: var(--tk-radius-2);
+  padding: var(--tk-space-4);
+
+  h3 { margin: 0 0 var(--tk-space-3); font-size: var(--tk-font-2); }
+}
+.ly-menu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  li { padding: var(--tk-space-2) var(--tk-space-3); border-radius: var(--tk-radius-1);
+       font-size: var(--tk-font-2); cursor: pointer; }
+  li:hover { background: var(--tk-color-surface-3); }
+}
+.ly-profile {
+  display: flex;
+  gap: var(--tk-space-3);
+  align-items: center;
+
+  .avatar { width: 40px; height: 40px; border-radius: var(--tk-radius-full);
+            background: var(--tk-color-primary); color: #fff; display: flex;
+            align-items: center; justify-content: center; font-weight: 700; }
+  .who b { display: block; font-size: var(--tk-font-2); }
+  .who span { font-size: var(--tk-font-1); color: var(--tk-color-text-dim); }
+}
+.ly-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th, td { text-align: left; padding: 0.4rem 0.7rem; border-bottom: 1px solid #30363d;
+           font-size: var(--tk-font-2); }
+  th { color: var(--tk-color-text-dim); }
+}
+.ly-text { font-size: var(--tk-font-2); color: var(--tk-color-text-dim); margin: 0; }

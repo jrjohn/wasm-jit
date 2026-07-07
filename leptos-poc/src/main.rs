@@ -10,11 +10,13 @@
 
 mod cell;
 mod form;
+mod layout;
 mod tokens;
 mod tokens_tab;
 
 use cell::Cell;
 use form::FormPoc;
+use layout::LayoutPoc;
 use tokens_tab::TokensPoc;
 use leptos::prelude::*;
 use serde::Deserialize;
@@ -127,7 +129,12 @@ fn App() -> impl IntoView {
                 on:click=move |_| tab.set("form")>"表單(全元件 × 細胞規則 × Rust API)"</button>
             <button class="tab-tokens" class:on=move || tab.get() == "tokens"
                 on:click=move |_| tab.set("tokens")>"Tokens(樣式即 capability)"</button>
+            <button class="tab-layout" class:on=move || tab.get() == "layout"
+                on:click=move |_| tab.set("layout")>"Layout(版面即 schema)"</button>
         </div>
+        <Show when=move || tab.get() == "layout">
+            <LayoutPoc />
+        </Show>
         <Show when=move || tab.get() == "form">
             <FormPoc />
         </Show>
