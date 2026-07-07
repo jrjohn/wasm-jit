@@ -40,7 +40,7 @@ impl Cap {
 }
 
 pub struct CellBuilder {
-    params: Vec<&'static str>,
+    params: Vec<String>,
     caps: Vec<(&'static str, Cap)>,
 }
 
@@ -53,8 +53,11 @@ pub struct Cell {
 }
 
 impl Cell {
-    pub fn builder(params: &[&'static str]) -> CellBuilder {
-        CellBuilder { params: params.to_vec(), caps: Vec::new() }
+    pub fn builder(params: &[&str]) -> CellBuilder {
+        CellBuilder {
+            params: params.iter().map(|p| p.to_string()).collect(),
+            caps: Vec::new(),
+        }
     }
 
     /// Call the cell with `args` (arity = the builder's params).
@@ -90,7 +93,8 @@ impl CellBuilder {
     pub fn compile(self, src: &str) -> Result<Cell, String> {
         let host: Vec<HostFn> = self.caps.iter().map(|(n, c)| c.host_fn(n)).collect();
         let prog = parser::parse(src)?;
-        let bytes = codegen::compile_with(&prog, &self.params, &host)?;
+        let params: Vec<&str> = self.params.iter().map(|s| s.as_str()).collect();
+        let bytes = codegen::compile_with(&prog, &params, &host)?;
 
         let module =
             WebAssembly::Module::new(&Uint8Array::from(&bytes[..]).into()).map_err(fmt_js)?;

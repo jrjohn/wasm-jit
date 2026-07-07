@@ -9,8 +9,10 @@
 //!    fetch() 在 codegen 即被拒(顯示 granted capabilities 清單)。
 
 mod cell;
+mod form;
 
 use cell::Cell;
+use form::FormPoc;
 use leptos::prelude::*;
 use serde::Deserialize;
 use std::rc::Rc;
@@ -110,9 +112,22 @@ fn App() -> impl IntoView {
         Err(e) => schema_err.set(e.to_string()),
     };
 
+    let tab = RwSignal::new("cells");
+
     view! {
         <h1>"DynamicCell — 純 Rust CSR(Leptos)裡的 runtime 動態元件"
             <span class="nav"><a href="../..">"↩ wasm-jit"</a></span></h1>
+        <div class="tabs">
+            <button class="tab-cells" class:on=move || tab.get() == "cells"
+                on:click=move |_| tab.set("cells")>"DynamicCell"</button>
+            <button class="tab-form" class:on=move || tab.get() == "form"
+                on:click=move |_| tab.set("form")>"表單(全元件 × 細胞規則 × Rust API)"</button>
+        </div>
+        <Show when=move || tab.get() == "form">
+            <FormPoc />
+        </Show>
+        <Show when=move || tab.get() == "cells">
+        <div class="cells-tab">
         <p class="sub">
             "結構 = schema 資料(下方 JSON,Apply 即重組元件樹);行為 = 腳本種子(每格可即時編輯,"
             "wasm-jit 當場編成 WASM 細胞);細胞的 capability 只有 sin/cos/out,無 DOM 權限——"
@@ -149,6 +164,8 @@ fn App() -> impl IntoView {
                 <span class="cell-err">{move || schema_err.get()}</span>
             </Show>
         </div>
+        </div>
+        </Show>
     }
 }
 
