@@ -2,7 +2,7 @@
 name = "wasm-jit"
 version = "0.1.0"
 edition = "2021"
-description = "PoC: runtime script→WASM codegen (let V8 JIT it) vs Rhai tree-walking interpretation"
+description = "Runtime script→WASM codegen: the browser engine JITs it, a capability sandbox contains it"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -10,17 +10,14 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
-rhai = { version = "1", optional = true }
 wasm-encoder = "0.252.0"
 wasmparser = "0.252.0"
-getrandom = { version = "0.3", features = ["wasm_js"], optional = true }
 
 [features]
-# 預設 = benchmark/canvas 頁的完整形態(wasm-pack 用)。
-# 下游只要純編譯器(parser+codegen)時 default-features = false —— 零 wasm-bindgen 匯出、零 Rhai。
-default = ["js-api", "rhai-bench"]
+# 預設 = 含 wasm-bindgen JS 匯出(benchmark/canvas 頁、wasm-pack 用)。
+# 下游只要純編譯器(parser+codegen+audit)時 default-features = false → 零 wasm-bindgen 匯出。
+default = ["js-api"]
 js-api = ["dep:wasm-bindgen", "dep:js-sys"]
-rhai-bench = ["dep:rhai", "dep:getrandom", "js-api"]
 
 [profile.release]
 opt-level = 3

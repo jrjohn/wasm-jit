@@ -1,5 +1,6 @@
-//! Minimal DSL parser. The DSL is deliberately a strict subset of Rhai syntax
-//! so the SAME source text runs on both the Rhai interpreter and our compiler.
+//! Minimal DSL parser for the seed language — a small f64-scalar language
+//! that compiles to WASM. Deliberately tiny so its whole contract fits in a
+//! prompt and "what this code can touch" is a compile-time-enumerable list.
 //!
 //! Grammar:
 //!   program := stmt* expr EOF          (final bare expression is the return value)

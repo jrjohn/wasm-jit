@@ -37,7 +37,6 @@
   執行 <select id="mode-sel">
       <option value="wasm" selected>生成 WASM 細胞(瀏覽器 JIT)</option>
       <option value="js">JS new Function(V8 JS JIT)</option>
-      <option value="rhai">Rhai 直譯</option>
     </select>
   <button id="regen">Regenerate</button>
   <span id="status">loading…</span>
@@ -57,14 +56,15 @@
 <p class="note">
 每個元件的腳本是<b>獨一份的原始碼</b>(模板 × 依 index 烘焙的常數 = 模擬「AI 對每個元件各生成一段行為」),
 各自編成一顆 WASM 模組(僅能呼叫被授予的 capability:<code>sin</code>、<code>cos</code>、<code>out</code>——import 表即能力清單)。
-kernel 重量 = while 迴圈 substep 數(模擬物理/幾何迭代)。三種執行模式吃同一批腳本原文。
-PoC 未做 fuel metering;Rhai 模式在大 N×重 kernel 時會凍住頁面——這正是要展示的差距。
+kernel 重量 = while 迴圈 substep 數(模擬物理/幾何迭代)。兩種執行模式吃同一批腳本原文。
+選 WASM 的理由是 capability 沙箱(每顆細胞只能 sin/cos/out,連 fetch 都叫不到);JS 速度打平但零隔離。
+PoC 未做 fuel metering(production 需 Worker+terminate 或 back-edge 計數)。
 </p>
 
 <pre id="metrics-json" style="display:none"></pre>
 
 <script type="module">
-import init, { compile_kernel_wasm, transpile_to_js, RhaiKernel, kernel_out_x, kernel_out_y }
+import init, { compile_kernel_wasm, transpile_to_js }
   from './pkg/wasm_jit.js';
 
 const $ = id => document.getElementById(id);
@@ -129,17 +129,10 @@ function build() {
       }});
       const run = inst.exports.run;
       el.run = t => run(t, i, hx, hy);
-    } else if (mode === 'js') {
+    } else {
       const fn = new Function('t', 'i', 'hx', 'hy', 'sin', 'cos', 'out', transpile_to_js(src));
       const out = (x, y) => { POS[el.ptr] = x; POS[el.ptr + 1] = y; };
       el.run = t => fn(t, i, hx, hy, Math.sin, Math.cos, out);
-    } else {
-      const rk = new RhaiKernel(src);
-      el.run = t => {
-        const h = rk.run(t, i, hx, hy);
-        POS[el.ptr] = kernel_out_x(); POS[el.ptr + 1] = kernel_out_y();
-        return h;
-      };
     }
     elements.push(el);
   }
@@ -148,7 +141,7 @@ function build() {
     (mode === 'wasm' ? ` / ${(compileInfo.bytes / 1024).toFixed(1)}KB` : '');
   $('s-sandbox').textContent = mode === 'wasm'
     ? '沙箱 ✅ capability cell(imports: sin, cos, out)'
-    : mode === 'rhai' ? '沙箱 ✅ 直譯器(可 metering,但慢)' : '沙箱 ❌ new Function 持整頁權限';
+    : '沙箱 ❌ new Function 持整頁權限';
   $('s-sandbox').className = 'badge ' + (mode === 'js' ? 'bad' : 'ok');
 }
 
