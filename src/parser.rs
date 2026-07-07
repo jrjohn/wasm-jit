@@ -21,10 +21,13 @@ pub enum Tok {
     Ident(String),
     Let,
     While,
+    If,
+    Else,
     Plus,
     Minus,
     Star,
     Slash,
+    Percent,
     Lt,
     Gt,
     Le,
@@ -45,6 +48,7 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Rem,
     Lt,
     Gt,
     Le,
@@ -67,6 +71,8 @@ pub enum Stmt {
     While(Expr, Vec<Stmt>),
     /// Void host-function call statement, e.g. `out(x, y);`
     Call(String, Vec<Expr>),
+    /// `if cond { … } else { … }`(else 可省略、可接 else if 鏈)
+    If(Expr, Vec<Stmt>, Vec<Stmt>),
 }
 
 #[derive(Debug, Clone)]
@@ -93,6 +99,10 @@ fn lex(src: &str) -> Result<Vec<Tok>, String> {
             }
             '*' => {
                 toks.push(Tok::Star);
+                i += 1;
+            }
+            '%' => {
+                toks.push(Tok::Percent);
                 i += 1;
             }
             '/' => {
@@ -169,6 +179,8 @@ fn lex(src: &str) -> Result<Vec<Tok>, String> {
                 toks.push(match s {
                     "let" => Tok::Let,
                     "while" => Tok::While,
+                    "if" => Tok::If,
+                    "else" => Tok::Else,
                     _ => Tok::Ident(s.to_string()),
                 });
             }
@@ -211,7 +223,7 @@ impl Parser {
         let mut stmts = Vec::new();
         loop {
             match self.peek() {
-                Tok::Let | Tok::While => stmts.push(self.parse_stmt()?),
+                Tok::Let | Tok::While | Tok::If => stmts.push(self.parse_stmt()?),
                 Tok::Ident(_) if matches!(self.peek2(), Tok::Eq) => {
                     stmts.push(self.parse_stmt()?)
                 }
@@ -259,16 +271,24 @@ impl Parser {
             Tok::While => {
                 self.advance();
                 let cond = self.parse_expr()?;
-                self.expect(&Tok::LBrace, "'{'")?;
-                let mut body = Vec::new();
-                while !matches!(self.peek(), Tok::RBrace) {
-                    if matches!(self.peek(), Tok::Eof) {
-                        return Err("unterminated while body: missing '}'".into());
-                    }
-                    body.push(self.parse_stmt()?);
-                }
-                self.expect(&Tok::RBrace, "'}'")?;
+                let body = self.parse_block()?;
                 Ok(Stmt::While(cond, body))
+            }
+            Tok::If => {
+                self.advance();
+                let cond = self.parse_expr()?;
+                let then_body = self.parse_block()?;
+                let else_body = if matches!(self.peek(), Tok::Else) {
+                    self.advance();
+                    if matches!(self.peek(), Tok::If) {
+                        vec![self.parse_stmt()?] // else-if 鏈
+                    } else {
+                        self.parse_block()?
+                    }
+                } else {
+                    Vec::new()
+                };
+                Ok(Stmt::If(cond, then_body, else_body))
             }
             Tok::Ident(name) => {
                 if matches!(self.peek2(), Tok::LParen) {
@@ -290,6 +310,19 @@ impl Parser {
             }
             t => Err(format!("expected statement, found {t:?}")),
         }
+    }
+
+    fn parse_block(&mut self) -> Result<Vec<Stmt>, String> {
+        self.expect(&Tok::LBrace, "'{'")?;
+        let mut body = Vec::new();
+        while !matches!(self.peek(), Tok::RBrace) {
+            if matches!(self.peek(), Tok::Eof) {
+                return Err("unterminated block: missing '}'".into());
+            }
+            body.push(self.parse_stmt()?);
+        }
+        self.expect(&Tok::RBrace, "'}'")?;
+        Ok(body)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, String> {
@@ -326,6 +359,7 @@ impl Parser {
             let op = match self.peek() {
                 Tok::Star => BinOp::Mul,
                 Tok::Slash => BinOp::Div,
+                Tok::Percent => BinOp::Rem,
                 _ => return Ok(lhs),
             };
             self.advance();
@@ -399,6 +433,7 @@ pub fn to_js(prog: &Program) -> String {
                     BinOp::Sub => "-",
                     BinOp::Mul => "*",
                     BinOp::Div => "/",
+                    BinOp::Rem => "%",
                     BinOp::Lt => "<",
                     BinOp::Gt => ">",
                     BinOp::Le => "<=",
@@ -408,7 +443,14 @@ pub fn to_js(prog: &Program) -> String {
                 out.push(')');
             }
             Expr::Call(name, args) => {
-                out.push_str(name);
+                // 內建數學函式在 JS 端映射到 Math.*(DSL 無成員存取,不會撞名)
+                match name.as_str() {
+                    "min" | "max" | "abs" | "sqrt" | "floor" => {
+                        out.push_str("Math.");
+                        out.push_str(name);
+                    }
+                    _ => out.push_str(name),
+                }
                 out.push('(');
                 for (k, a) in args.iter().enumerate() {
                     if k > 0 {
@@ -448,6 +490,23 @@ pub fn to_js(prog: &Program) -> String {
                 expr_js(&Expr::Call(name.clone(), args.clone()), out);
                 out.push_str(";\n");
             }
+            Stmt::If(cond, then_body, else_body) => {
+                out.push_str("if(");
+                expr_js(cond, out);
+                out.push_str("){\n");
+                for s in then_body {
+                    stmt_js(s, out);
+                }
+                out.push('}');
+                if !else_body.is_empty() {
+                    out.push_str("else{\n");
+                    for s in else_body {
+                        stmt_js(s, out);
+                    }
+                    out.push('}');
+                }
+                out.push('\n');
+            }
         }
     }
     let mut out = String::new();
@@ -477,6 +536,7 @@ mod tests {
                     BinOp::Sub => a - b,
                     BinOp::Mul => a * b,
                     BinOp::Div => a / b,
+                    BinOp::Rem => a - (a / b).trunc() * b,
                     BinOp::Lt => (a < b) as i32 as f64,
                     BinOp::Gt => (a > b) as i32 as f64,
                     BinOp::Le => (a <= b) as i32 as f64,
@@ -496,6 +556,27 @@ mod tests {
         assert_eq!(eval_const(&p.ret), -6.0);
         let p = parse("1.0 < 2.0").unwrap();
         assert_eq!(eval_const(&p.ret), 1.0);
+        let p = parse("7.5 % 2.0").unwrap();
+        assert_eq!(eval_const(&p.ret), 1.5);
+    }
+
+    #[test]
+    fn if_else_chain_parses() {
+        let src = "let x = 0.0; if n > 2.0 { x = 1.0; } else if n > 1.0 { x = 0.5; } else { x = 0.0; } x";
+        let p = parse(src).unwrap();
+        assert!(matches!(&p.stmts[1], Stmt::If(_, t, e) if t.len() == 1 && e.len() == 1));
+        let js = to_js(&p);
+        assert!(js.contains("if((n>2.0))"), "{js}");
+        assert!(js.contains("else{"), "{js}");
+    }
+
+    #[test]
+    fn builtins_transpile_to_math() {
+        let js = to_js(&parse("min(max(n, 0.0), abs(sqrt(floor(n))))").unwrap());
+        assert!(
+            js.contains("Math.min(Math.max(n,0.0),Math.abs(Math.sqrt(Math.floor(n))))"),
+            "{js}"
+        );
     }
 
     #[test]

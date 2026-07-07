@@ -46,6 +46,20 @@ pub fn compile_kernel(prog: &Program) -> Result<Vec<u8>, String> {
 struct Ctx<'a> {
     locals: HashMap<String, u32>,
     imports: &'a [HostFn],
+    /// 兩個保留 scratch locals(`%` 合成用:a - trunc(a/b)*b,避免重複求值)
+    scratch0: u32,
+}
+
+/// 內建數學函式(WASM 原生指令,不佔 import 表、任何 ABI 皆可用)。
+fn builtin_of(name: &str) -> Option<(u32, Instruction<'static>)> {
+    Some(match name {
+        "min" => (2, Instruction::F64Min),
+        "max" => (2, Instruction::F64Max),
+        "abs" => (1, Instruction::F64Abs),
+        "sqrt" => (1, Instruction::F64Sqrt),
+        "floor" => (1, Instruction::F64Floor),
+        _ => return None,
+    })
 }
 
 pub fn compile_with(
@@ -99,8 +113,9 @@ pub fn compile_with(
     exports.export("run", ExportKind::Func, kernel_idx);
     module.section(&exports);
 
-    let ctx = Ctx { locals, imports };
-    let mut f = Function::new([(n_extra_locals, ValType::F64)]);
+    let scratch0 = locals.len() as u32;
+    let ctx = Ctx { locals, imports, scratch0 };
+    let mut f = Function::new([(n_extra_locals + 2, ValType::F64)]);
     for s in &prog.stmts {
         emit_stmt(s, &ctx, &mut f)?;
     }
@@ -127,6 +142,10 @@ fn collect_lets(stmts: &[Stmt], locals: &mut HashMap<String, u32>) -> Result<(),
                 locals.insert(name.clone(), idx);
             }
             Stmt::While(_, body) => collect_lets(body, locals)?,
+            Stmt::If(_, then_body, else_body) => {
+                collect_lets(then_body, locals)?;
+                collect_lets(else_body, locals)?;
+            }
             Stmt::Assign(_, _) | Stmt::Call(_, _) => {}
         }
     }
@@ -163,6 +182,20 @@ fn emit_call(
     ctx: &Ctx,
     f: &mut Function,
 ) -> Result<HostFn, String> {
+    // 內建優先(min/max/abs/sqrt/floor):原生指令,恆有回傳值
+    if let Some((n_args, instr)) = builtin_of(name) {
+        if args.len() as u32 != n_args {
+            return Err(format!(
+                "builtin '{name}' expects {n_args} argument(s), got {}",
+                args.len()
+            ));
+        }
+        for a in args {
+            emit_expr_f64(a, ctx, f)?;
+        }
+        f.instruction(&instr);
+        return Ok(HostFn { name: "builtin", n_args, returns: true });
+    }
     let (idx, hf) = import_of(name, ctx)?;
     if args.len() as u32 != hf.n_args {
         return Err(format!(
@@ -205,6 +238,20 @@ fn emit_stmt(s: &Stmt, ctx: &Ctx, f: &mut Function) -> Result<(), String> {
                 f.instruction(&Instruction::Drop);
             }
         }
+        Stmt::If(cond, then_body, else_body) => {
+            emit_cond_i32(cond, ctx, f)?;
+            f.instruction(&Instruction::If(BlockType::Empty));
+            for s in then_body {
+                emit_stmt(s, ctx, f)?;
+            }
+            if !else_body.is_empty() {
+                f.instruction(&Instruction::Else);
+                for s in else_body {
+                    emit_stmt(s, ctx, f)?;
+                }
+            }
+            f.instruction(&Instruction::End);
+        }
     }
     Ok(())
 }
@@ -230,6 +277,22 @@ fn emit_expr_f64(e: &Expr, ctx: &Ctx, f: &mut Function) -> Result<(), String> {
                     BinOp::Div => &Instruction::F64Div,
                     _ => unreachable!(),
                 });
+            }
+            BinOp::Rem => {
+                // fmod 語意(同 JS %):a - trunc(a/b)*b;scratch 避免重複求值
+                let (s0, s1) = (ctx.scratch0, ctx.scratch0 + 1);
+                emit_expr_f64(l, ctx, f)?;
+                f.instruction(&Instruction::LocalSet(s0));
+                emit_expr_f64(r, ctx, f)?;
+                f.instruction(&Instruction::LocalSet(s1));
+                f.instruction(&Instruction::LocalGet(s0));
+                f.instruction(&Instruction::LocalGet(s0));
+                f.instruction(&Instruction::LocalGet(s1));
+                f.instruction(&Instruction::F64Div);
+                f.instruction(&Instruction::F64Trunc);
+                f.instruction(&Instruction::LocalGet(s1));
+                f.instruction(&Instruction::F64Mul);
+                f.instruction(&Instruction::F64Sub);
             }
             BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
                 emit_cmp_i32(l, *op, r, ctx, f)?;
@@ -316,6 +379,18 @@ mod tests {
     #[test]
     fn arity_mismatch_rejected() {
         assert!(super::compile_kernel(&parse("sin(1.0, 2.0)").unwrap()).is_err());
+    }
+
+    #[test]
+    fn if_else_and_builtins_validate() {
+        let src = "let x = 0.0;\nif n % 2.0 < 1.0 { x = min(n, 10.0); } else { x = max(sqrt(n), abs(0.0 - n)); }\nfloor(x)";
+        let bytes = super::compile(&parse(src).unwrap()).unwrap();
+        wasmparser::validate(&bytes).expect("if/else + builtins must validate");
+    }
+
+    #[test]
+    fn builtin_arity_rejected() {
+        assert!(super::compile(&parse("min(1.0)").unwrap()).is_err());
     }
 
     #[test]
