@@ -19,3 +19,7 @@ opt-level = 3
 
 [dev-dependencies]
 wasmparser = "0.252.0"
+
+[workspace]
+members = [".", "leptos-poc"]
+resolver = "2"

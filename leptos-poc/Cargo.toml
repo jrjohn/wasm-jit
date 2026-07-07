@@ -1,0 +1,14 @@
+[package]
+name = "leptos-poc"
+version = "0.1.0"
+edition = "2021"
+description = "DynamicCell PoC: runtime-edited scripts compiled to WASM cells driving Leptos signals — dynamic behavior in a pure-Rust CSR app"
+
+[dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+wasm-jit = { path = ".." }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+console_error_panic_hook = "0.1"

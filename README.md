@@ -1,8 +1,9 @@
 # wasm-jit — Runtime WASM codegen(借 V8 JIT)vs Rhai tree-walk 直譯
 
-兩個 PoC:
+三個 PoC:
 1. **`index.html` — benchmark**:同一段腳本四路執行(Rhai / 生成 WASM / JS / AOT Rust),量化差距。
 2. **`canvas.html` — 畫布**:N 個元件各掛一顆「獨立生成、獨立編譯」的 WASM kernel 細胞,每 frame 全跑,驗證 60fps 可行性(§16「腳本即種子」執行層的活證明)。
+3. **`leptos-poc/` — DynamicCell**:純 Rust CSR(Leptos 0.8)裡的 runtime 動態元件——「JS 元件動態」的 Rust 替身:**行為動態** = 腳本即時編輯 → wasm-jit 當場編成細胞 → 細胞經 `out()` capability 驅動 Leptos signal → DOM 反應式更新(細胞零 DOM 權限);**結構動態** = 元件樹即 schema 資料(JSON,Apply 即重組);**沙箱** = 腳本寫 `fetch()` 在 codegen 即被拒並列出 granted capabilities。全程零手寫 JS(僅 js-sys 做 instantiate)。`cd leptos-poc && trunk build --release`,serve `dist/`。CDP 驗證 4/4:渲染 / slider 反應 / fetch 拒絕 / schema 重組。
 
 驗證主張:**腳本在 runtime 編成 WASM bytes → `WebAssembly.instantiate()` → V8 幫你 JIT → 近原生執行**,對比 Rhai(tree-walking 直譯器)。
 

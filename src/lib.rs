@@ -12,8 +12,8 @@
 //!    capabilities (imports): env.sin, env.cos, env.out(x,y)
 //! - `RhaiKernel` + `kernel_out_x/y()`: same kernel interpreted by Rhai
 
-mod codegen;
-mod parser;
+pub mod codegen;
+pub mod parser;
 
 use std::cell::Cell;
 use wasm_bindgen::prelude::*;
