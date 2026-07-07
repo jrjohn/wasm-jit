@@ -1,0 +1,56 @@
+// tokens.scss — 樣式層的 rails(體)。
+// SCSS 在編譯期生成整套 design tokens(CSS 變數);
+// AI 的顯化(用)只能「引用」這裡定義的 token,不能生成任意 CSS——
+// Rust 端 tokens.rs 的 registry 與此對應(樣式層的 capability 清單)。
+
+$colors: (
+  "primary":   #1f6feb,
+  "success":   #3fb950,
+  "warning":   #d29922,
+  "danger":    #f85149,
+  "surface-1": #0d1117,
+  "surface-2": #161b22,
+  "surface-3": #21262d,
+  "text":      #e6edf3,
+  "text-dim":  #8b949e,
+);
+
+$spaces: (
+  "0": 0,
+  "1": 0.25rem,
+  "2": 0.5rem,
+  "3": 0.75rem,
+  "4": 1rem,
+  "5": 1.5rem,
+  "6": 2rem,
+);
+
+$radii: (
+  "0": 0,
+  "1": 4px,
+  "2": 8px,
+  "3": 16px,
+  "full": 999px,
+);
+
+$fonts: (
+  "1": 0.72rem,
+  "2": 0.85rem,
+  "3": 1rem,
+  "4": 1.2rem,
+);
+
+:root {
+  @each $name, $v in $colors {
+    --tk-color-#{$name}: #{$v};
+  }
+  @each $name, $v in $spaces {
+    --tk-space-#{$name}: #{$v};
+  }
+  @each $name, $v in $radii {
+    --tk-radius-#{$name}: #{$v};
+  }
+  @each $name, $v in $fonts {
+    --tk-font-#{$name}: #{$v};
+  }
+}

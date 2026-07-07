@@ -4,53 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DynamicCell — Leptos × wasm-jit</title>
+<link data-trunk rel="scss" href="styles/main.scss" />
 <link data-trunk rel="rust" />
-<style>
-  :root { color-scheme: dark; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 900px;
-         margin: 1.5rem auto; padding: 0 1rem; line-height: 1.5; background: #0d1117; color: #e6edf3; }
-  h1 { font-size: 1.05rem; } h2 { font-size: .95rem; margin-top: 1.4rem; }
-  .nav { float: right; font-weight: 400; font-size: .8rem; }
-  a { color: #58a6ff; }
-  .sub { font-size: .82rem; opacity: .75; }
-  .inputs { display: flex; gap: .8rem; align-items: center; margin: 1rem 0; font-size: .9rem; }
-  input[type=range] { width: 180px; }
-  .cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .8rem; }
-  .cell { border: 1px solid #30363d; border-radius: 8px; padding: .7rem; background: #161b22; }
-  .cell-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .45rem; }
-  .cell-head button { font: inherit; font-size: .72rem; padding: .12rem .5rem; border-radius: 6px;
-                      border: 1px solid #f8514966; background: transparent; color: #f85149; cursor: pointer; }
-  textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: .78rem; padding: .45rem;
-             border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; }
-  .cell-err { color: #f85149; font-size: .76rem; margin: .4rem 0; word-break: break-all; }
-  .cell-vis { display: flex; gap: .7rem; align-items: center; margin-top: .55rem; }
-  .cell-ret { font-size: 1.05rem; font-weight: 700; min-width: 5.2em; }
-  .bar { flex: 1; height: 10px; background: #30363d; border-radius: 6px; overflow: hidden; }
-  .bar-fill { height: 100%; background: #1f6feb; transition: width .1s; }
-  .patch { width: 22px; height: 22px; border-radius: 6px; border: 1px solid #30363d; }
-  .apply { font: inherit; padding: .3rem .9rem; border-radius: 6px; border: none;
-           background: #1f6feb; color: #fff; cursor: pointer; margin-top: .4rem; }
-  .tabs { display: flex; gap: .5rem; margin: .6rem 0 1rem; }
-  .tabs button { font: inherit; font-size: .82rem; padding: .3rem .9rem; border-radius: 6px;
-                 border: 1px solid #30363d; background: #161b22; color: inherit; cursor: pointer; }
-  .tabs button.on { background: #1f6feb; border-color: #1f6feb; color: #fff; }
-  .form { display: flex; flex-direction: column; gap: .55rem; max-width: 560px; }
-  .field { display: flex; align-items: center; gap: .7rem; }
-  .f-label { min-width: 12em; font-size: .85rem; opacity: .85; }
-  .field input[type=text], .field input[type=number], .field input[type=date],
-  .field select, .field textarea { font: inherit; font-size: .85rem; padding: .3rem .5rem;
-      border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; flex: 1; }
-  .field.invalid input { border-color: #f85149; }
-  .f-err { color: #f85149; font-size: .76rem; }
-  .w-radio { display: flex; gap: .9rem; font-size: .85rem; }
-  .w-radio label { display: flex; gap: .3rem; align-items: center; }
-  .w-range { display: flex; gap: .6rem; align-items: center; flex: 1; }
-  .w-computed { font-weight: 700; font-size: 1.05rem; color: #3fb950; }
-  .members { border-collapse: collapse; min-width: 380px; margin-top: .4rem; }
-  .members th, .members td { text-align: left; padding: .35rem .8rem; border-bottom: 1px solid #30363d;
-                             font-size: .85rem; }
-  .loading { font-size: .75rem; opacity: .6; margin-left: .8rem; }
-</style>
 </head>
 <body></body>
 </html>
