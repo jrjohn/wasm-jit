@@ -576,6 +576,43 @@ slow loop (build-time, minutes to hours): when the expressive space isn't enough
 
 ---
 
+## 18. From PoC to Live UI Manifestation: The Remaining Substrate
+
+An honest gap analysis, written against the actual codebase. **What is already solved and needs no further investment**: speed (generated WASM = the AOT ceiling, ties hand-written JS) and the sandbox model (the import-table audit is language-agnostic; Tier-2 seeds already pass through it). What remains are six pieces of substrate — two of them hard gates — and none of them carries research risk: every item is engineering with a known solution. The real bottleneck stays §9's: LLM generation is seconds-slow. So the correct product shape is **generate slowly, manifest fast** — once a seed enters the ālaya, every condition-triggered manifestation is µs-level.
+
+### The two hard gates (nothing ships without them)
+
+**Gate 1 — fuel metering (back-edge counters).** The biggest hole, and the README's stated known limit: a cell containing `while 1.0 < 2.0 {}` hangs the main thread today. The PoC survived because we wrote every seed ourselves; "live UI generation" means an LLM continuously emitting code that *will* contain bad loops — this promotes the known limit to a blocker. The implementation path is clear: codegen inserts a "decrement counter → trap at zero" at every loop back-edge (~10–30% tax, charged only to frame-path cells); heavy background cells go to a Worker + `terminate()` (zero tax). Roughly 1–2 days against the current codegen.rs. **First priority** — it is standalone, testable (a bad-loop seed must trap), and unlocks every "run untrusted seeds" scenario downstream.
+
+**Gate 2 — `emit_patch` + a declarative event ABI: the UI-generation loop itself is not built yet.** Today, structural dynamism means "replace the whole schema and re-render," and events are hand-wired in the demo (slider→signal→cell). True live manifestation needs:
+- **A patch grammar**: the cell/AI emits incremental `add/remove/update node` patches; the host validates (patch contents ⊆ vocabulary + tokens) and reconciles into the retained tree — the `emit_patch` capability §16 names but never implements.
+- **Declarative event wiring**: a schema can write `"on_change": "cell-id"`, with a convention for flattening event payloads into f64 parameters. Without this, a generated form is dead.
+
+### Four pieces of scaling substrate (in order, after the gates)
+
+**3. Module cache + supervision tree.** Continuous generation = continuous compilation; needs a content-hash → `WebAssembly.Module` cache (re-manifesting an identical seed costs zero) plus a per-cell supervisor: degraded rendering after a trap or fuel-kill (error chip, last-good value), backoff restart, quarantine for repeat offenders. Today an error is just status text.
+
+**4. Memory capability + buffer ABI — the largest codegen effort.** The DSL is pure f64 scalars; cells cannot touch arrays or strings, yet UI inherently needs lists (table rows, options). The direction was settled early: "wanting containers = granting a memory capability — a security decision, not a grammar one." Grant a size-capped linear memory; the host writes arrays in, the cell computes, the host reads back. Strings should *not* sink into the cell: formatting/i18n become host vocabulary (formatter capabilities), preserving "generation never creates vocabulary, only composes it." Roughly 1–2 weeks.
+
+**5. Inter-cell communication = a host-side event bus.** Components as mutually-connected agents (§8's synapses) must not call each other directly — the correct shape is a host event bus: a cell writes via `out()` → the bus dispatches along subscription edges (themselves schema data) to downstream cells, with budgets to stop cascade storms. Today's shared thread-local 32 slots are an embryo, not a bus.
+
+**6. Landing the ālaya: named durable state + input recording.** The 32 f64 slots are per-surface scratch; needed are per-cell named state, IndexedDB persistence, and **input-stream recording** — cells are already bit-level deterministic, so recording `(t, keys, events)` yields full replay/audit. This is the deepest moat of this path versus JS, and it is one append-only log away.
+
+### Priority and one judgment
+
+| # | Gap | Why this order |
+|---|---|---|
+| 1 | fuel metering | without it, no seed you didn't write yourself may run |
+| 2 | patch + event ABI | this *is* the "UI generation" loop |
+| 3 | cache + supervision | hygiene for continuous generation |
+| 4 | memory ABI | unlocks lists/data; largest effort |
+| 5 | event bus | components interacting as a net |
+| 6 | persistence + replay | cashing in the moat |
+
+The judgment: this list contains zero research risk — fuel metering is literally a few instructions of instrumentation in codegen. What makes the plan viable is that the two expensive properties (native speed, language-agnostic sandbox) are already banked; everything remaining is orthogonal, independently testable engineering.
+
+---
+
 ### Appendix: Metaphor → Engineering Coordinate Cheatsheet
 
 | Metaphor | Engineering coordinate |
