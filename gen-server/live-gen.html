@@ -418,6 +418,19 @@ function terrainH(x, z) {
   return FIELD[zi * g + xi];
 }
 
+// Bilinear field read — smooth height/water UNDER a sub-cell entity so a
+// slowly-drifting rider doesn't snap between adjacent cell heights (the up-down
+// "jitter"). Same reason the terrain columns look stepped; here we un-step the
+// one value that places an inhabitant on the ground.
+function sampleF(c, x, y) {
+  const g = fieldWorld.grid;
+  const fx = Math.min(Math.max(x, 0), g - 1.001), fy = Math.min(Math.max(y, 0), g - 1.001);
+  const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
+  const at = (xx, yy) => FIELD[(c * g + yy) * g + xx];
+  const a = at(x0, y0), b = at(x0 + 1, y0), d = at(x0, y0 + 1), e = at(x0 + 1, y0 + 1);
+  return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + d * (1 - tx) * ty + e * tx * ty;
+}
+
 function updateCam(dt) {
   const g = fieldWorld.grid;
   cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
@@ -479,7 +492,7 @@ function renderFieldFP() {
     const off = xc / zc;
     if (Math.abs(off) > fov * 0.7) continue;
     const sx = (off / fov + 0.5) * W;
-    const groundY = terrainH(e.x, e.y) * K2 + Math.min(FIELD[(fieldWorld.grid + (e.y | 0)) * fieldWorld.grid + (e.x | 0)], 3) * 0.6 * K2;
+    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2;
     const sy = horizon + ((eye - groundY) * focal) / zc;
     const s = Math.max(3, (focal / zc) * 1.1);
     drawSkin(e, sx, sy - s * 0.4, s, performance.now() / 1000);
@@ -938,6 +951,7 @@ setInterval(() => {
 
 // e2e hooks: deterministic manifestation + direct audit access
 window.__manifestWorld = w => manifestField(w);
+window.__sampleF = (c, x, y) => sampleF(c, x, y); // e2e: verify smooth ground
 window.__auditEntity = bytes => audit_entity_bytes(new Uint8Array(bytes));
 window.__compileDraw = src => compile_draw_wasm(src); // e2e: mint a wrong-ABI module locally
 
