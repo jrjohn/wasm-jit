@@ -61,6 +61,32 @@ pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     codegen::compile_with(&prog, &PARAMS, &IMPORTS).map_err(|e| JsError::new(&e))
 }
 
+/// UI-logic cell for the live-generation demo: `run(x) -> f64`, capabilities
+/// env.{sin, cos, get, set} — get/set is a host-granted 32-slot f64 store so
+/// multi-input logic works (input cells persist to slots, computed cells read
+/// them). Fuel-metered at 200k. The same contract the gen-server validates
+/// against natively — browser and server compile identical modules.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_ui_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 1] = ["x"];
+    const IMPORTS: [HostFn; 4] = [
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+        HostFn { name: "get", n_args: 1, returns: true },
+        HostFn { name: "set", n_args: 2, returns: false },
+    ];
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &IMPORTS,
+        codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
 /// Benchmark lane with fuel metering on: same `run(n)->f64` ABI plus an
 /// exported "fuel" gauge. Used to measure the back-edge-counter tax.
 #[cfg(feature = "js-api")]
