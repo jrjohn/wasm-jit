@@ -28,7 +28,7 @@
   button:disabled { opacity: .5; cursor: wait; }
   select { font: inherit; font-size: .78rem; padding: .3rem; border-radius: 6px;
            border: 1px solid #30363d; background: #161b22; color: inherit; }
-  .stage-wrap { border: 1px solid #30363d; border-radius: 8px; min-height: 560px; padding: 1rem; }
+  .stage-wrap { border: 1px solid #30363d; border-radius: 8px; min-height: 560px; padding: 1rem; position: relative; }
   .stage-head { display: flex; gap: 1rem; align-items: center; font-size: .75rem; opacity: .7; margin-bottom: .8rem; }
   #stage { display: flex; flex-direction: column; gap: .8rem; }
   canvas { width: 100%; border: 1px solid #30363d; border-radius: 8px; background: #010409; display: none; }
@@ -101,7 +101,12 @@ Generation is seconds; every interaction after is µs.
     <div class="stage-head">
       <span id="stage-status">nothing manifested yet</span>
       <button id="view-toggle" style="display:none; margin-left:auto; font-size:.75rem; padding:.25rem .7rem"></button>
+      <button id="world-save" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">💾 save world</button>
+      <button id="world-load" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">🌀 worlds</button>
     </div>
+    <div id="worlds-menu" style="display:none; position:absolute; right:1rem; top:3rem; z-index:6;
+      background:#161b22; border:1px solid #30363d; border-radius:8px; max-height:280px; overflow-y:auto;
+      box-shadow:0 8px 24px #0009; min-width:200px"></div>
     <div id="stage"></div>
     <canvas id="cv" width="1200" height="700"></canvas>
     <p style="font-size:.7rem; opacity:.45; margin:.8rem 0 0; text-align:right">
@@ -125,12 +130,21 @@ await initSkins();
 
 const $ = id => document.getElementById(id);
 const msgs = $('msgs');
+let chatLog = [];  // the conversation, saved with the world
 function say(cls, text) {
   const d = document.createElement('div');
   d.className = 'msg ' + cls;
   d.textContent = text;
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
+  if (cls !== 'ai') chatLog.push({ cls, text }); // skip the static help bubble
+}
+function restoreChat(log) {
+  // keep the first help bubble, drop the rest, replay the saved transcript
+  const help = msgs.querySelector('.msg.ai');
+  msgs.innerHTML = ''; if (help) msgs.appendChild(help);
+  chatLog = [];
+  for (const m of (log || [])) say(m.cls, m.text);
 }
 
 // ---------------- UI surface: compile cells + render + bus ----------------
@@ -138,6 +152,7 @@ let cells = {};    // id -> { run, quarantined, fails }
 let outputs = {};  // id -> latest f64
 let wires = [];
 let priorSchema = null;
+let lastManifest = null; // {surface, payload} — what to re-manifest on load
 let drawRun = null;
 let slots = new Float64Array(32); // the granted get/set store — multi-input logic lives here
 
@@ -372,6 +387,7 @@ function manifestUi(schema) {
   for (const entry of schema.init ?? []) fire({ cell: entry.cell, arg: entry.arg ?? 0 });
   redrawCharts();
   priorSchema = schema;
+  lastManifest = { surface: 'ui', payload: schema };
   const n = schema.cells.length;
   $('stage-status').textContent =
     `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)`;
@@ -504,6 +520,7 @@ function renderFieldFP() {
 }
 
 function setFieldView(view) {
+  const wasFp = fieldView === 'fp';
   fieldView = view;
   const btn = $('view-toggle');
   if (btn) {
@@ -511,8 +528,13 @@ function setFieldView(view) {
     btn.textContent = view === 'fp' ? '🗺 top view' : '⛰ walk into it (first person)';
   }
   if (fieldWorld && view === 'fp') {
-    const g = fieldWorld.grid;
-    cam.px = g / 2; cam.pz = g - 8; cam.yaw = Math.PI; cam.yoff = 0; cam.vy = 0; // enter from the south, facing the peak
+    // Only reset the camera on a FRESH entry (top→fp / first walk-in). Re-
+    // manifesting while already walking — growing a skin, an iteration —
+    // keeps your viewpoint exactly where it is (隨心所想,視角不跳).
+    if (!wasFp) {
+      const g = fieldWorld.grid;
+      cam.px = g / 2; cam.pz = g - 8; cam.yaw = Math.PI; cam.yoff = 0; cam.vy = 0; // enter from the south
+    }
     // the walker needs the keys — take them back from the chat box
     if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) document.activeElement.blur();
   }
@@ -520,6 +542,7 @@ function setFieldView(view) {
 }
 
 // e2e / debugging: honest state, no pixel guessing
+window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from outside the module
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
       entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, soul: e.soul ?? 'none',
@@ -805,6 +828,7 @@ function manifestField(world) {
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
+  lastManifest = { surface: 'field', payload: world };
   setFieldView(world.view === 'first_person' ? 'fp' : 'top');
   $('stage-status').textContent =
     `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
@@ -986,6 +1010,7 @@ function manifestDraw(seed) {
   cv.style.display = 'block';
   $('stage-status').textContent =
     `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms (7 primitives, no DOM, no net)`;
+  lastManifest = { surface: 'draw', payload: seed };
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = seed;
   document.title = 'live-gen DRAW OK';
@@ -1113,6 +1138,42 @@ $('prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && $('at-me
 $('prompt').focus();
 
 $('view-toggle').onclick = () => setFieldView(fieldView === 'fp' ? 'top' : 'fp');
+
+// ---- the world library: save a manifested world + its conversation, switch instantly ----
+function manifestSaved(bundle) {
+  if (!bundle || !bundle.surface) return;
+  if (bundle.surface === 'ui') manifestUi(bundle.payload);
+  else if (bundle.surface === 'field') manifestField(bundle.payload);
+  else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
+  restoreChat(bundle.chat);
+  say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
+}
+$('world-save').onclick = async () => {
+  if (!lastManifest) { say('err', 'nothing manifested to save yet'); return; }
+  const name = (prompt('save this world as… (letters/digits/_/-)') || '').trim().replace(/[^A-Za-z0-9_-]/g, '-');
+  if (!name) return;
+  const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog };
+  try {
+    const r = await fetch('/api/worlds', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bundle) });
+    say(r.ok ? 'ai' : 'err', r.ok ? `💾 saved world '${name}' — load it anytime, instantly` : `save failed: ${await r.text()}`);
+  } catch (e) { say('err', 'save failed: ' + e); }
+};
+$('world-load').onclick = async () => {
+  const menu = $('worlds-menu');
+  if (menu.style.display === 'block') { menu.style.display = 'none'; return; }
+  let names = [];
+  try { const r = await fetch('/api/worlds'); names = (await r.json()).worlds || []; } catch (e) {}
+  if (!names.length) { menu.innerHTML = '<div style="padding:.6rem;font-size:.75rem;opacity:.6">no saved worlds yet — 💾 save one first</div>'; }
+  else menu.innerHTML = '<div style="padding:.35rem .6rem;font-size:.68rem;opacity:.5;border-bottom:1px solid #30363d">switch instantly — the 三千大千世界</div>' +
+    names.map(n => `<div class="at-item" data-w="${n}"><span>🌀 ${n}</span></div>`).join('');
+  menu.style.display = 'block';
+  menu.querySelectorAll('.at-item').forEach(el => el.onclick = async () => {
+    menu.style.display = 'none';
+    try { const r = await fetch(`/api/worlds/${el.dataset.w}`); if (r.ok) manifestSaved(await r.json()); }
+    catch (e) { say('err', 'load failed: ' + e); }
+  });
+};
+document.addEventListener('click', e => { if (!e.target.closest('#worlds-menu') && e.target.id !== 'world-load') $('worlds-menu').style.display = 'none'; });
 
 // The world is there before the first word: gentle plains, waiting for a mountain.
 manifestField(DEFAULT_WORLD);

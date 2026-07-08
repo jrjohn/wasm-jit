@@ -601,6 +601,52 @@ struct SkinSave {
     skin_seed: String,
 }
 
+fn slug_ok(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Save a manifested world + its conversation — the whole "三千大千世界" is data
+/// (surface + payload JSON + chat transcript), so a save is just a file. Loading
+/// it re-manifests in µs: generate once (slow), then switch worlds at will.
+async fn world_save(Json(body): Json<Value>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    let name = body.get("name").and_then(|n| n.as_str()).unwrap_or("");
+    if !slug_ok(name) {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "name must be letters/digits/_/-".to_string());
+    }
+    let _ = tokio::fs::create_dir_all("worlds").await;
+    let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
+    match tokio::fs::write(format!("worlds/{name}.json"), pretty).await {
+        Ok(()) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], format!("saved world '{name}'")),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [(CONTENT_TYPE, "text/plain")], format!("save failed: {e}")),
+    }
+}
+
+async fn world_get(axum::extract::Path(name): axum::extract::Path<String>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !slug_ok(&name) {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], String::new());
+    }
+    match tokio::fs::read_to_string(format!("worlds/{name}.json")).await {
+        Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "application/json")], s),
+        Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
+    }
+}
+
+async fn world_list() -> impl IntoResponse {
+    let mut names = Vec::new();
+    if let Ok(mut rd) = tokio::fs::read_dir("worlds").await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            if let Some(n) = e.file_name().to_str().and_then(|n| n.strip_suffix(".json")) {
+                names.push(n.to_string());
+            }
+        }
+    }
+    names.sort();
+    Json(json!({ "worlds": names }))
+}
+
 fn skin_type_ok(ty: &str) -> bool {
     !ty.is_empty()
         && ty.len() <= 40
@@ -767,6 +813,8 @@ async fn main() {
         .route("/api/mind", post(mind))
         .route("/api/skins", get(skin_list).post(skin_save))
         .route("/api/skins/{ty}", get(skin_get))
+        .route("/api/worlds", get(world_list).post(world_save))
+        .route("/api/worlds/{name}", get(world_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route_service("/", ServeFile::new("gen-server/live-gen.html"))
