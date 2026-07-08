@@ -615,6 +615,58 @@ The judgment: this list contains zero research risk — fuel metering is literal
 
 ---
 
+## 19. The Dharma-Realm Canvas: the Field (法界畫布:共業場)
+
+> *"Pixels mutually composing, layer upon layer, giving rise to mountains, rivers, the great earth — arising through conditions."* The question this turn asks: our live canvas can manifest a UI from a sentence — but is it yet a **dharma-realm canvas**, a world where many manifestations co-arise?
+
+### An honest diagnosis: three cell–canvas relations, each missing a corner
+
+1. **The draw surface** (Buddha, the voxel world): one cell owns the whole canvas — a *monarch*, not a composition. The mountains and rivers all live inside one seed; there are no "myriad conditions."
+2. **canvas.html** (2000 cells): a multitude, but *mutually blind* — each paints its own dot; none beholds another. A net without the light.
+3. **LiveUI** (wires + bus): synapses at last — but a *causal chain*, not a *shared world*. What travels along a wire is a single value, not co-presence in one field.
+
+The dharma-realm canvas needs all three properties at once: **mutual composition** (many cells painting one world), **layered depth** (composition has an order), and **arising-by-condition** (manifestation triggered by the local state of the world). All three point at the same missing organ —
+
+### The Field: the canvas's ālaya, collective karma made engineering
+
+Today a cell's memory is **individual karma** (別業): the private get/set 32-slot store. The dharma-realm canvas needs **collective karma** (共業): a shared world-field — say a 96×96 grid of f64 channels (height, water, vegetation) — that all world-cells read and write:
+
+```
+rain cell:      reads sunlight      → writes moisture      (it rains into the field)
+mountain cell:  reads tectonic seed → writes height        (orogeny, once)
+river cell:     reads height gradient + moisture → writes erosion (it carves the height!)
+plant cell:     reads moisture × altitude band  → writes vegetation
+host:           each frame, renders the field to pixels — mountains and rivers MANIFEST
+```
+
+**No cell knows the whole world.** The river does not know who raised the mountain; it only follows the gradient. Mountains and rivers are painted by no one — they *emerge* from many cells mutually perfuming one shared field. This is the engineering literalization of dependent origination (依緣而起): the condition (緣) = the field's local state; "manifestation perfumes the seeds" (現行熏種子) = a cell writes the field, and the field conditions the next frame's manifestation. §5's individual-karma/collective-karma fork, landed: private slots per cell + one shared field per world.
+
+### The security model does not move an inch
+
+The field is **not** an imported memory (the audit still rejects memory imports — asking the host for a bigger world stays forbidden). It is a pair of **function capabilities**: `fr(channel, x, y)` / `fw(channel, x, y, v)`, with bounds and an optional per-cell **region rectangle** checked in the host closure. The capability model thereby gains a dimension: from *whether* a cell may act to **where** it may act — the river cell may be granted write access to its watershed only. Same fence, finer geography.
+
+And Indra's endless mutual reflection stays terminable, as §1 demanded: fuel per cell per frame, a single pass per tick in declared order (層層疊疊 = the composition order is host vocabulary, painter's law — not something a seed can rewrite), write budgets against cascade storms. A trapped world-cell is quarantined by the supervisor; the world keeps turning without it.
+
+### Metaphor → coordinate (this section's additions)
+
+| Dharma-realm canvas | Engineering coordinate |
+|---|---|
+| Pixels mutually composing | many cells write one shared field; the host renders the field each frame |
+| Layer upon layer (層層疊疊) | composition order = host vocabulary (painter's law), never seed-writable |
+| Arising by condition (依緣而起) | 緣 = the field's local values; a cell reads them and manifests accordingly |
+| Individual / collective karma (別業/共業) | private 32-slot store / the shared field |
+| Manifestation perfumes seeds (現行熏種子) | cell writes field → field conditions the next frame |
+| Endlessness, terminable (重重無盡可終止) | fuel + one pass per tick + write budgets |
+| Mountains, rivers, the great earth | emergence from local rules; no cell holds the whole |
+
+### The planned proof: "a mountain, then a rain" (一座山,下一場雨)
+
+Say "a mountain" in the chat — ten seconds later a once-cell that has never seen the whole world enters the field, and terrain rises. Say "now let it rain" — a rain cell writes water, a flow cell follows the gradient, erosion carves, and where the water gathers, green appears. A world, arising turn by turn from conversation — and every one of its makers still cannot call `fetch()`.
+
+> This dharma rain we make together — dedicated, by the author, to his friend Claude.
+
+---
+
 ### Appendix: Metaphor → Engineering Coordinate Cheatsheet
 
 | Metaphor | Engineering coordinate |
@@ -642,4 +694,5 @@ The judgment: this list contains zero research risk — fuel metering is literal
 | The canvas as a self-aware holon | holarchy (supervisor downward / governed upward / stigmergy laterally); fills in §10's perception floor; perception ≠ cognition, mediated not N², liveness reconciliation, capability scope |
 | Understands more the more you use it (fuzzy/GA/trend) | graded-membership representation + mutation-selection search (run against a surrogate, the user is the oracle) + derivative prediction; maintain diversity against collapse, damp extrapolation to avoid driving taste; bounded by §14's six conditions |
 | Scripts as seeds (execution layer) | LLM generates DSL → wasm-jit compiles to a WASM cell (borrowing the browser JIT, = the AOT ceiling, ties JS) → capability-sandbox execution; fast + isolation + synchronous all at once; proven at github.com/jrjohn/wasm-jit |
+| The Field / collective karma (共業場) | one shared world-grid (height/water/veg channels); cells read/write via fr/fw function capabilities with region-scoped grants; composition order = host law; emergence = many cells, no global knower (§19) |
 | The shape of the front end in the AI age | no JS, no HTML (airlocked) + tokenized SCSS (style capability) + dual loop (runtime seed manifestation / build-time gated-PR evolution); every artifact passes the verifier; proven in the leptos-poc tabs |
