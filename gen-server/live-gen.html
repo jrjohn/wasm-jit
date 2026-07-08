@@ -509,7 +509,9 @@ function renderFieldFP() {
     if (Math.abs(off) > fov * 0.7) continue;
     const sx = (off / fov + 0.5) * W;
     const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2;
-    const sy = horizon + ((eye - groundY) * focal) / zc;
+    // altitude lifts a being off the ground toward the sky (the vertical realm)
+    const surfaceY = groundY + (e.alt ?? 0) * 60 * K2;
+    const sy = horizon + ((eye - surfaceY) * focal) / zc;
     const s = Math.max(3, (focal / zc) * 1.1);
     drawSkin(e, sx, sy - s * 0.4, s, performance.now() / 1000);
   }
@@ -543,9 +545,10 @@ function setFieldView(view) {
 
 // e2e / debugging: honest state, no pixel guessing
 window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from outside the module
+window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, soul: e.soul ?? 'none',
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
         mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
@@ -628,14 +631,17 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
     },
     mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
     unbind: () => { if (ent.on) { ent.on = null; ent.freed = true; } }, // §19: leave the condition
+    rise: dz => { ent.alt = Math.min(Math.max((ent.alt ?? 0) + dz, 0), 1); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
   };
 }
 
 function compileEntities(world, g) {
   const defs = world.entities ?? [];
   return defs.map(def => {
+    const aloft = def.realm === 'sky' || def.aloft === true;
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
+                  alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
                   slots: new Float64Array(32),
                   mind: def.mind ?? null,
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
@@ -813,7 +819,8 @@ function renderField() {
   ctx.drawImage(fieldCanvas, ox, 0, size, size);
   const s = size / g; // canvas px per grid unit — the skins live at full resolution
   const tNow = performance.now() / 1000;
-  for (const e of ENTITIES) drawSkin(e, ox + e.x * s, e.y * s, s, tNow);
+  // top view: an aloft being is drawn a little larger + toward the top (nearer the sky)
+  for (const e of ENTITIES) drawSkin(e, ox + e.x * s, e.y * s - (e.alt ?? 0) * size * 0.32, s * (1 + (e.alt ?? 0) * 0.4), tNow);
   if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
 }
 
@@ -906,12 +913,26 @@ function perceptionOf(ent, g) {
       win.snow.push(Math.round(FIELD[(3 * g + y) * g + x] * 100) / 100);
     }
   }
+  // who is near — the faculty for other beings (他有情根)
+  const neighbors = ENTITIES.filter(o => o !== ent).map(o => ({ o, d: Math.hypot(o.x - ent.x, o.y - ent.y) }))
+    .filter(n => n.d < 12).sort((a, b) => a.d - b.d).slice(0, 4).map(({ o, d }) => {
+      const dir = Math.abs(o.x - ent.x) > Math.abs(o.y - ent.y)
+        ? (o.x > ent.x ? 'east' : 'west') : (o.y > ent.y ? 'south' : 'north');
+      return { id: o.id, kind: o.type, dir, dist: Math.round(d) };
+    });
   return {
-    you: { id: ent.id, type: ent.type, x: Math.round(ent.x * 10) / 10, y: Math.round(ent.y * 10) / 10, riding: ent.on ?? undefined },
+    // 身根: what and where you are, including your vertical nature
+    you: {
+      id: ent.id, kind: ent.type,
+      realm: ent.realm ?? 'ground', altitude: Math.round((ent.alt ?? 0) * 100) / 100,
+      x: Math.round(ent.x * 10) / 10, y: Math.round(ent.y * 10) / 10,
+      riding: ent.on ?? undefined,
+    },
+    neighbors,                       // 他有情根
+    window: win,                     // 眼根 (what you see around you)
+    snowing: snowing(),              // the weather your senses report
     time: Math.round(performance.now() / 100) / 10,
-    snowing: snowing(),
-    window: win,
-    slots: Array.from(ent.slots.slice(0, 8)).map(v => Math.round(v * 100) / 100),
+    slots: Array.from(ent.slots.slice(0, 8)).map(v => Math.round(v * 100) / 100), // 意根
     last_thought: ent.mindState?.lastThought || undefined,
   };
 }

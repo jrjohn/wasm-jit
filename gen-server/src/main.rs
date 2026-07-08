@@ -66,7 +66,7 @@ const FIELD_FUEL: u32 = 2_000_000;
 /// loop); the bounds are this grant template. `mv(dx,dy)` REQUESTS movement —
 /// position is host-owned state, clamped and bounded by the host.
 const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
-const ENTITY_IMPORTS: [HostFn; 7] = [
+const ENTITY_IMPORTS: [HostFn; 8] = [
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
     HostFn { name: "get", n_args: 1, returns: true },
@@ -74,6 +74,7 @@ const ENTITY_IMPORTS: [HostFn; 7] = [
     HostFn { name: "fr", n_args: 3, returns: true },
     HostFn { name: "mv", n_args: 2, returns: false },
     HostFn { name: "unbind", n_args: 0, returns: false }, // §19: the freedom to leave a condition
+    HostFn { name: "rise", n_args: 1, returns: false },   // the vertical faculty: aloft/descend (host clamps 0..1)
 ];
 const ENTITY_FUEL: u32 = 200_000;
 /// The curated skin registry — types the host draws with hand-tuned Rust skins.
@@ -450,6 +451,11 @@ fn validate(obj: &Value) -> Result<(), String> {
                         compile_check(seed, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000)
                             .map_err(|e| format!("entity '{id}' skin_seed failed to compile: {e}"))?;
                     }
+                    if let Some(realm) = ent.get("realm").and_then(|r| r.as_str()) {
+                        if !matches!(realm, "sky" | "ground") {
+                            return Err(format!("entity '{id}': realm must be \"sky\" or \"ground\""));
+                        }
+                    }
                     let at: Vec<f64> = ent
                         .get("at")
                         .and_then(|a| a.as_array())
@@ -490,7 +496,13 @@ fn validate(obj: &Value) -> Result<(), String> {
 /// reflex passes the same compiler gate as everything else.
 const MIND_CONTRACT: &str = r#"You are the MIND of one being living on a small world-grid. Stay in character. Be brief — a being of few words.
 
-You receive a PERCEPTION package (JSON): your position, a small window of the world around you (channels: height, water, vegetation, snow), your memory slots, whether snow falls, your last thought, and optionally WORDS someone spoke to you.
+You receive a PERCEPTION package (JSON) — these are your faculties; you know ONLY what they report:
+- who you are: your id, your kind (type), your realm ("sky" or "ground") and your altitude (0 = on the ground, 1 = high in the sky)
+- where you are: your x,y position, whether you ride something, and a small 5×5 window of the world around you (channels: height, water, vegetation, snow)
+- who is near: neighbors — nearby beings with their kind and direction from you
+- your inner state: your memory slots and your last thought
+- the world: whether snow falls; and optionally WORDS someone spoke to you.
+Answer only from what these report. If a faculty does not tell you something (e.g. you have no altitude sense), you do not know it — do not invent it.
 
 Reply with ONE JSON object only (no prose outside it):
 {"say":"<one short in-character sentence (reply to words, or react) — may be empty>",
@@ -501,7 +513,8 @@ Reply with ONE JSON object only (no prose outside it):
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
 - float literals with a decimal point (2.0 not 2); identifiers letters/digits/underscore
-- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps] unbind() [step off whatever you ride — a boat, a car; ONLY after unbind() does your own mv move you]
+- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps] unbind() [step off whatever you ride; ONLY after unbind() does your own mv move you] rise(dz) [change your altitude — rise(0.02) to climb toward the sky, rise(-0.02) to descend; the host clamps 0..1]
+- to answer 'go back to the sky' / 'come down', rewrite your reflex to call rise() each tick, e.g. climb: "rise(0.02);\n0.0"; descend to the ground: "rise(0.0 - 0.02);\n0.0"
 - ex/ey = your current position. Example, drift gently east: "mv(0.02, 0.0);
 0.0"
 - to move TOWARD a point, store it in slots and steer each tick, e.g. head for x=10:

@@ -123,7 +123,7 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "ex", "ey"];
-    const IMPORTS: [HostFn; 7] = [
+    const IMPORTS: [HostFn; 8] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "get", n_args: 1, returns: true },
@@ -131,6 +131,7 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
         HostFn { name: "fr", n_args: 3, returns: true },
         HostFn { name: "mv", n_args: 2, returns: false },
         HostFn { name: "unbind", n_args: 0, returns: false },
+        HostFn { name: "rise", n_args: 1, returns: false }, // the vertical faculty: request a change in altitude (host clamps)
     ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
@@ -180,7 +181,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
     use audit::Grant;
-    const GRANTS: [Grant; 7] = [
+    const GRANTS: [Grant; 8] = [
         Grant { module: "env", name: "sin" },
         Grant { module: "env", name: "cos" },
         Grant { module: "env", name: "get" },
@@ -188,6 +189,7 @@ pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
         Grant { module: "env", name: "fr" },
         Grant { module: "env", name: "mv" },
         Grant { module: "env", name: "unbind" },
+        Grant { module: "env", name: "rise" },
     ];
     audit::audit(bytes, &GRANTS).map_err(|e| JsError::new(&e))
 }

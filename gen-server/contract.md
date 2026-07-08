@@ -171,6 +171,9 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   Claude) that reacts to world events and answers when the user writes "@<id> ...". When a
   scene has a named or human character (a fisherman, a driver, a traveler), give that entity a
   memorable "id" (e.g. "weng") AND a mind, so the user can speak to it.
+- optional "realm":"sky" (or "altitude":0..1) makes a being CELESTIAL — the host draws it high
+  in the sky, not on the terrain, and its mind can rise()/descend and perceives its altitude.
+  A moon, sun, cloud, star, or bird should be "realm":"sky".
 - A snow scene example: a "frame" cell writing channel 3 on land:
   "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 { fw(3.0, x, y, min(fr(3.0, x, y) + 0.002, 1.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
 - Poetry/scenes: compose terrain cells + weather cells + entities. 孤舟蓑笠翁,獨釣寒江雪 =
