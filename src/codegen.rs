@@ -14,7 +14,8 @@ use crate::parser::{BinOp, Expr, Program, Stmt};
 use std::collections::HashMap;
 use wasm_encoder::{
     BlockType, CodeSection, EntityType, ExportKind, ExportSection, Function, FunctionSection,
-    ImportSection, Instruction, Module, TypeSection, ValType,
+    GlobalSection, GlobalType, ImportSection, Instruction, MemArg, MemorySection, MemoryType,
+    Module, TypeSection, ValType,
 };
 
 /// A host function importable by generated modules, as `env.<name>`.
@@ -23,6 +24,23 @@ pub struct HostFn {
     pub name: &'static str,
     pub n_args: u32,
     pub returns: bool,
+}
+
+/// Optional substrate grants for a generated module. Both default to off —
+/// a plain `compile_with` module is byte-identical to the pre-opts encoder.
+#[derive(Clone, Copy, Default)]
+pub struct CompileOpts {
+    /// Fuel budget per `run()` call. When set, every loop iteration burns one
+    /// unit; hitting zero traps (`unreachable`) instead of hanging the thread.
+    /// The remaining fuel is exported as the mutable i32 global `"fuel"`, so
+    /// the host can read per-call consumption. ~10–30% tax on loop-heavy code.
+    pub fuel: Option<u32>,
+    /// Linear-memory grant, in 64KiB pages (min = max — the cell cannot grow
+    /// it). Enables the `load(i)` / `store(i, v)` builtins over f64 slots
+    /// (slot i = byte offset i*8, explicitly bounds-checked → trap, never
+    /// aliasing). The memory is the module's OWN and is exported as `"mem"` —
+    /// importing memory from the host stays forbidden by the audit.
+    pub memory_pages: Option<u32>,
 }
 
 /// Benchmark signature (index.html): `run(n) -> f64`, no capabilities.
@@ -48,6 +66,12 @@ struct Ctx<'a> {
     imports: &'a [HostFn],
     /// Two reserved scratch locals (used to synthesize `%`: a - trunc(a/b)*b, avoiding re-evaluation).
     scratch0: u32,
+    /// i32 scratch local for memory addressing (only allocated when memory is granted).
+    scratch_i32: u32,
+    /// Fuel metering on: loop headers burn 1 unit/iteration from global 0, trap at zero.
+    fuel: bool,
+    /// Number of f64 slots addressable via load/store (0 = memory not granted).
+    mem_slots: u32,
 }
 
 /// Built-in math functions (native WASM instructions — they cost no import-table slot and work under any ABI).
@@ -66,6 +90,15 @@ pub fn compile_with(
     prog: &Program,
     params: &[&str],
     imports: &[HostFn],
+) -> Result<Vec<u8>, String> {
+    compile_with_opts(prog, params, imports, CompileOpts::default())
+}
+
+pub fn compile_with_opts(
+    prog: &Program,
+    params: &[&str],
+    imports: &[HostFn],
+    opts: CompileOpts,
 ) -> Result<Vec<u8>, String> {
     // Local layout: params 0..p, then every `let` in source order (flat scope).
     let mut locals: HashMap<String, u32> = HashMap::new();
@@ -108,14 +141,59 @@ pub fn compile_with(
     funcs.function(kernel_ty);
     module.section(&funcs);
 
+    // The cell's OWN memory (never imported): min = max, so it can't grow.
+    if let Some(pages) = opts.memory_pages {
+        let mut mem = MemorySection::new();
+        mem.memory(MemoryType {
+            minimum: pages as u64,
+            maximum: Some(pages as u64),
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        module.section(&mem);
+    }
+
+    // Fuel counter: one mutable i32 global, reset in the prologue each call.
+    if opts.fuel.is_some() {
+        let mut globals = GlobalSection::new();
+        globals.global(
+            GlobalType { val_type: ValType::I32, mutable: true, shared: false },
+            &wasm_encoder::ConstExpr::i32_const(0),
+        );
+        module.section(&globals);
+    }
+
     let kernel_idx = imports.len() as u32;
     let mut exports = ExportSection::new();
     exports.export("run", ExportKind::Func, kernel_idx);
+    if opts.memory_pages.is_some() {
+        exports.export("mem", ExportKind::Memory, 0);
+    }
+    if opts.fuel.is_some() {
+        exports.export("fuel", ExportKind::Global, 0);
+    }
     module.section(&exports);
 
     let scratch0 = locals.len() as u32;
-    let ctx = Ctx { locals, imports, scratch0 };
-    let mut f = Function::new([(n_extra_locals + 2, ValType::F64)]);
+    let ctx = Ctx {
+        locals,
+        imports,
+        scratch0,
+        scratch_i32: scratch0 + 2,
+        fuel: opts.fuel.is_some(),
+        mem_slots: opts.memory_pages.map_or(0, |p| p * 8192), // 64KiB page / 8 bytes per f64
+    };
+    let mut local_decls: Vec<(u32, ValType)> = vec![(n_extra_locals + 2, ValType::F64)];
+    if opts.memory_pages.is_some() {
+        local_decls.push((1, ValType::I32));
+    }
+    let mut f = Function::new(local_decls);
+    if let Some(budget) = opts.fuel {
+        // Per-call budget reset: a fresh tank every run().
+        f.instruction(&Instruction::I32Const(budget as i32));
+        f.instruction(&Instruction::GlobalSet(0));
+    }
     for s in &prog.stmts {
         emit_stmt(s, &ctx, &mut f)?;
     }
@@ -176,12 +254,56 @@ fn import_of(name: &str, ctx: &Ctx) -> Result<(u32, HostFn), String> {
         })
 }
 
+/// Emit an f64 slot index as a bounds-checked byte address (i32) on the stack.
+/// trunc traps on NaN/negative/huge; the explicit `< mem_slots` check prevents
+/// the shift-left-3 wrap that could otherwise alias low slots.
+fn emit_mem_addr(idx: &Expr, ctx: &Ctx, f: &mut Function) -> Result<(), String> {
+    emit_expr_f64(idx, ctx, f)?;
+    f.instruction(&Instruction::I32TruncF64U);
+    f.instruction(&Instruction::LocalSet(ctx.scratch_i32));
+    f.instruction(&Instruction::LocalGet(ctx.scratch_i32));
+    f.instruction(&Instruction::I32Const(ctx.mem_slots as i32));
+    f.instruction(&Instruction::I32GeU);
+    f.instruction(&Instruction::If(BlockType::Empty));
+    f.instruction(&Instruction::Unreachable); // out-of-bounds slot → trap
+    f.instruction(&Instruction::End);
+    f.instruction(&Instruction::LocalGet(ctx.scratch_i32));
+    f.instruction(&Instruction::I32Const(3));
+    f.instruction(&Instruction::I32Shl); // slot → byte offset (×8)
+    Ok(())
+}
+
+const MEMARG_F64: MemArg = MemArg { offset: 0, align: 3, memory_index: 0 };
+
 fn emit_call(
     name: &str,
     args: &[Expr],
     ctx: &Ctx,
     f: &mut Function,
 ) -> Result<HostFn, String> {
+    // Memory builtins — only exist when the memory capability was granted.
+    if name == "load" || name == "store" {
+        if ctx.mem_slots == 0 {
+            return Err(format!(
+                "'{name}' requires the memory capability (not granted to this cell)"
+            ));
+        }
+        if name == "load" {
+            if args.len() != 1 {
+                return Err(format!("'load' expects 1 argument (slot index), got {}", args.len()));
+            }
+            emit_mem_addr(&args[0], ctx, f)?;
+            f.instruction(&Instruction::F64Load(MEMARG_F64));
+            return Ok(HostFn { name: "load", n_args: 1, returns: true });
+        }
+        if args.len() != 2 {
+            return Err(format!("'store' expects 2 arguments (slot index, value), got {}", args.len()));
+        }
+        emit_mem_addr(&args[0], ctx, f)?;
+        emit_expr_f64(&args[1], ctx, f)?;
+        f.instruction(&Instruction::F64Store(MEMARG_F64));
+        return Ok(HostFn { name: "store", n_args: 2, returns: false });
+    }
     // Built-ins take priority (min/max/abs/sqrt/floor): native instructions, always returning a value.
     if let Some((n_args, instr)) = builtin_of(name) {
         if args.len() as u32 != n_args {
@@ -219,9 +341,22 @@ fn emit_stmt(s: &Stmt, ctx: &Ctx, f: &mut Function) -> Result<(), String> {
             f.instruction(&Instruction::LocalSet(idx));
         }
         Stmt::While(cond, body) => {
-            // block $exit { loop $top { if !cond br $exit; body; br $top } }
+            // block $exit { loop $top { fuel?; if !cond br $exit; body; br $top } }
             f.instruction(&Instruction::Block(BlockType::Empty));
             f.instruction(&Instruction::Loop(BlockType::Empty));
+            if ctx.fuel {
+                // Burn 1 unit per iteration; an exhausted tank traps instead
+                // of hanging the thread — the supervisor catches the trap.
+                f.instruction(&Instruction::GlobalGet(0));
+                f.instruction(&Instruction::I32Eqz);
+                f.instruction(&Instruction::If(BlockType::Empty));
+                f.instruction(&Instruction::Unreachable);
+                f.instruction(&Instruction::End);
+                f.instruction(&Instruction::GlobalGet(0));
+                f.instruction(&Instruction::I32Const(1));
+                f.instruction(&Instruction::I32Sub);
+                f.instruction(&Instruction::GlobalSet(0));
+            }
             emit_cond_i32(cond, ctx, f)?;
             f.instruction(&Instruction::I32Eqz);
             f.instruction(&Instruction::BrIf(1));
@@ -401,5 +536,95 @@ mod tests {
     #[test]
     fn duplicate_let_rejected() {
         assert!(super::compile(&parse("let a = 1.0; let a = 2.0; a").unwrap()).is_err());
+    }
+
+    // ---- CompileOpts: fuel + memory ----
+
+    fn opts(fuel: Option<u32>, pages: Option<u32>) -> super::CompileOpts {
+        super::CompileOpts { fuel, memory_pages: pages }
+    }
+
+    #[test]
+    fn fuel_module_validates_and_exports_gauge() {
+        let bytes = super::compile_with_opts(
+            &parse(KERNEL).unwrap(),
+            &["n"],
+            &[],
+            opts(Some(1_000_000), None),
+        )
+        .unwrap();
+        wasmparser::validate(&bytes).expect("fueled module must validate");
+        // Structural: global section present, "fuel" export present.
+        let mut has_global = false;
+        let mut has_fuel_export = false;
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            match payload.unwrap() {
+                wasmparser::Payload::GlobalSection(_) => has_global = true,
+                wasmparser::Payload::ExportSection(reader) => {
+                    for e in reader {
+                        if e.unwrap().name == "fuel" {
+                            has_fuel_export = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(has_global && has_fuel_export);
+    }
+
+    #[test]
+    fn no_fuel_means_byte_identical_to_plain_compile() {
+        let plain = super::compile(&parse(KERNEL).unwrap()).unwrap();
+        let via_opts = super::compile_with_opts(
+            &parse(KERNEL).unwrap(),
+            &["n"],
+            &[],
+            super::CompileOpts::default(),
+        )
+        .unwrap();
+        assert_eq!(plain, via_opts);
+    }
+
+    #[test]
+    fn memory_module_validates_and_exports_mem() {
+        let src = "let i = 0.0;\nlet s = 0.0;\nwhile i < n {\n s = s + load(i);\n i = i + 1.0;\n}\nstore(0.0, s);\ns";
+        let bytes = super::compile_with_opts(
+            &parse(src).unwrap(),
+            &["n"],
+            &[],
+            opts(Some(100_000), Some(1)),
+        )
+        .unwrap();
+        wasmparser::validate(&bytes).expect("memory module must validate");
+        let mut has_mem_export = false;
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            if let wasmparser::Payload::ExportSection(reader) = payload.unwrap() {
+                for e in reader {
+                    let e = e.unwrap();
+                    if e.name == "mem" && e.kind == wasmparser::ExternalKind::Memory {
+                        has_mem_export = true;
+                    }
+                }
+            }
+        }
+        assert!(has_mem_export);
+        // And the audit sees no imports at all — own memory is not an import.
+        assert!(crate::audit::imports_of(&bytes).unwrap().is_empty());
+    }
+
+    #[test]
+    fn load_store_rejected_without_memory_grant() {
+        let e = super::compile(&parse("load(0.0)").unwrap()).unwrap_err();
+        assert!(e.contains("memory capability"), "{e}");
+        let e2 = super::compile(&parse("store(0.0, 1.0);\n0.0").unwrap()).unwrap_err();
+        assert!(e2.contains("memory capability"), "{e2}");
+    }
+
+    #[test]
+    fn memory_builtin_arity_rejected() {
+        let o = opts(None, Some(1));
+        assert!(super::compile_with_opts(&parse("load(0.0, 1.0)").unwrap(), &["n"], &[], o).is_err());
+        assert!(super::compile_with_opts(&parse("store(0.0);\n0.0").unwrap(), &["n"], &[], o).is_err());
     }
 }

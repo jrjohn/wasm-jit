@@ -9,11 +9,15 @@
 //! 3. Sandbox: a cell's only capabilities are sin/cos/out, no DOM authority;
 //!    writing fetch() in a script is rejected at codegen (shows the granted list).
 
+mod bus;
 mod cell;
 mod draw_tab;
 mod form;
 mod layout;
+mod live_tab;
+mod patch;
 mod spectrum_tab;
+mod supervisor;
 mod tokens;
 mod tokens_tab;
 
@@ -21,6 +25,7 @@ use cell::Cell;
 use draw_tab::DrawPoc;
 use form::FormPoc;
 use layout::LayoutPoc;
+use live_tab::LivePoc;
 use spectrum_tab::SpectrumPoc;
 use tokens_tab::TokensPoc;
 use leptos::prelude::*;
@@ -49,6 +54,7 @@ fn DynamicCell(spec: CellSpec, a: RwSignal<f64>, b: RwSignal<f64>) -> impl IntoV
             .cap1("sin", f64::sin)
             .cap1("cos", f64::cos)
             .cap2_void("out", move |x, y| out.set((x, y)))
+            .fuel(200_000)
             .compile(&src);
         match built {
             Ok(c) => {
@@ -142,7 +148,12 @@ fn App() -> impl IntoView {
                 on:click=move |_| tab.set("mc")>"3D voxel (Minecraft)"</button>
             <button class="tab-spectrum" class:on=move || tab.get() == "spectrum"
                 on:click=move |_| tab.set("spectrum")>"Seed-language spectrum"</button>
+            <button class="tab-live" class:on=move || tab.get() == "live"
+                on:click=move |_| tab.set("live")>"LiveUI (patch + bus + supervision)"</button>
         </div>
+        <Show when=move || tab.get() == "live">
+            <LivePoc />
+        </Show>
         <Show when=move || tab.get() == "mc">
             <DrawPoc example="mc3p" />
         </Show>

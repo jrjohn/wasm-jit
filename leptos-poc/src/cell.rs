@@ -14,10 +14,68 @@
 //! import table (what the script may call) and the JS `env` object (what the
 //! instance actually gets) — the two can never drift.
 
-use js_sys::{Array, Function, Object, Reflect, Uint8Array, WebAssembly};
+use js_sys::{Array, Float64Array, Function, Object, Reflect, Uint8Array, WebAssembly};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use wasm_bindgen::{closure::Closure, JsCast, JsValue};
-use wasm_jit::codegen::{self, HostFn};
+use wasm_jit::codegen::{self, CompileOpts, HostFn};
 use wasm_jit::parser;
+
+// ---------------------------------------------------------------------------
+// Module cache: content-hash → compiled WebAssembly.Module. Re-manifesting an
+// identical seed skips parse+codegen+Module::new entirely (instantiation still
+// happens per cell — imports differ). Crude eviction: clear at capacity.
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    static MODULE_CACHE: RefCell<HashMap<u64, WebAssembly::Module>> =
+        RefCell::new(HashMap::new());
+    static CACHE_STATS: std::cell::Cell<(u32, u32)> = const { std::cell::Cell::new((0, 0)) }; // (hits, misses)
+}
+
+const CACHE_CAP: usize = 256;
+
+fn fnv1a(bytes: &[u8], seed: u64) -> u64 {
+    let mut h = seed ^ 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x1000_0000_01b3);
+    }
+    h
+}
+
+/// (hits, misses) since page load — surfaced in the LiveUI status panel.
+pub fn cache_stats() -> (u32, u32) {
+    CACHE_STATS.with(|s| s.get())
+}
+
+fn cached_module(
+    key: u64,
+    make_bytes: impl FnOnce() -> Result<Vec<u8>, String>,
+) -> Result<(WebAssembly::Module, usize), String> {
+    if let Some(m) = MODULE_CACHE.with(|c| c.borrow().get(&key).cloned()) {
+        CACHE_STATS.with(|s| {
+            let (h, mi) = s.get();
+            s.set((h + 1, mi));
+        });
+        return Ok((m, 0)); // cached: no fresh bytes were produced
+    }
+    CACHE_STATS.with(|s| {
+        let (h, mi) = s.get();
+        s.set((h, mi + 1));
+    });
+    let bytes = make_bytes()?;
+    let module =
+        WebAssembly::Module::new(&Uint8Array::from(bytes.as_slice()).into()).map_err(fmt_js)?;
+    MODULE_CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= CACHE_CAP {
+            c.clear();
+        }
+        c.insert(key, module.clone());
+    });
+    Ok((module, bytes.len()))
+}
 
 enum Cap {
     Fn1(Closure<dyn Fn(f64) -> f64>),
@@ -58,6 +116,8 @@ impl Cap {
 pub struct CellBuilder {
     params: Vec<String>,
     caps: Vec<(&'static str, Cap)>,
+    fuel: Option<u32>,
+    memory_pages: Option<u32>,
 }
 
 /// A live generated cell. Holds the import closures for exactly as long as
@@ -66,6 +126,9 @@ pub struct CellBuilder {
 pub struct Cell {
     run: Function,
     bytes_len: usize,
+    memory: Option<WebAssembly::Memory>,
+    fuel_gauge: Option<WebAssembly::Global>,
+    fuel_budget: Option<u32>,
     _caps: Vec<Cap>,
 }
 
@@ -74,10 +137,12 @@ impl Cell {
         CellBuilder {
             params: params.iter().map(|p| p.to_string()).collect(),
             caps: Vec::new(),
+            fuel: None,
+            memory_pages: None,
         }
     }
 
-    /// Generated module size in bytes.
+    /// Generated module size in bytes (0 when served from the module cache).
     pub fn size(&self) -> usize {
         self.bytes_len
     }
@@ -93,6 +158,43 @@ impl Cell {
             .map_err(fmt_js)?
             .as_f64()
             .ok_or_else(|| "cell returned a non-number".into())
+    }
+
+    /// Fuel consumed by the most recent call (budget − remaining), if metered.
+    pub fn fuel_used(&self) -> Option<f64> {
+        let budget = self.fuel_budget? as f64;
+        let remaining = self.fuel_gauge.as_ref()?.value().as_f64()?;
+        Some(budget - remaining)
+    }
+
+    /// Write f64 values into the cell's own exported memory at `slot`.
+    pub fn write_mem(&self, slot: u32, data: &[f64]) -> Result<(), String> {
+        let mem = self.memory.as_ref().ok_or("cell has no memory capability")?;
+        let view = Float64Array::new(&mem.buffer());
+        if (slot as usize + data.len()) as u32 > view.length() {
+            return Err(format!(
+                "write_mem out of bounds: slot {slot} + len {} > {} slots",
+                data.len(),
+                view.length()
+            ));
+        }
+        for (k, v) in data.iter().enumerate() {
+            view.set_index(slot + k as u32, *v);
+        }
+        Ok(())
+    }
+
+    /// Read `len` f64 values from the cell's exported memory at `slot`.
+    pub fn read_mem(&self, slot: u32, len: u32) -> Result<Vec<f64>, String> {
+        let mem = self.memory.as_ref().ok_or("cell has no memory capability")?;
+        let view = Float64Array::new(&mem.buffer());
+        if slot + len > view.length() {
+            return Err(format!(
+                "read_mem out of bounds: slot {slot} + len {len} > {} slots",
+                view.length()
+            ));
+        }
+        Ok((0..len).map(|k| view.get_index(slot + k)).collect())
     }
 }
 
@@ -142,22 +244,53 @@ impl CellBuilder {
         self
     }
 
+    /// Fuel-meter every loop: `budget` units per call, trap at zero. The one
+    /// switch that makes running seeds you didn't write yourself survivable.
+    pub fn fuel(mut self, budget: u32) -> Self {
+        self.fuel = Some(budget);
+        self
+    }
+
+    /// Grant the cell its own `pages`×64KiB linear memory (fixed size),
+    /// enabling the DSL's load/store builtins and host read/write_mem.
+    pub fn memory(mut self, pages: u32) -> Self {
+        self.memory_pages = Some(pages);
+        self
+    }
+
     /// Compile DSL source against exactly the granted capabilities, then
     /// instantiate (sync — generated modules are tiny, far under Chrome's 4KB
-    /// main-thread limit).
+    /// main-thread limit). Identical (source, params, grants, opts) hits the
+    /// module cache and skips parse+codegen+Module compilation.
     pub fn compile(self, src: &str) -> Result<Cell, String> {
-        let prog = parser::parse(src)?;
-        let params: Vec<&str> = self.params.iter().map(|s| s.as_str()).collect();
+        let mut key = fnv1a(src.as_bytes(), 0);
+        for p in &self.params {
+            key = fnv1a(p.as_bytes(), key);
+        }
+        for (n, _) in &self.caps {
+            key = fnv1a(n.as_bytes(), key);
+        }
+        key = fnv1a(&self.fuel.unwrap_or(0).to_le_bytes(), key);
+        key = fnv1a(&self.memory_pages.unwrap_or(0).to_le_bytes(), key);
+
+        let params: Vec<String> = self.params.clone();
         let host: Vec<HostFn> = self.caps.iter().map(|(n, c)| c.host_fn(n)).collect();
-        let bytes = codegen::compile_with(&prog, &params, &host)?;
-        self.instantiate_bytes(&bytes)
+        let opts = CompileOpts { fuel: self.fuel, memory_pages: self.memory_pages };
+        let (module, bytes_len) = cached_module(key, || {
+            let prog = parser::parse(src)?;
+            let p: Vec<&str> = params.iter().map(|s| s.as_str()).collect();
+            codegen::compile_with_opts(&prog, &p, &host, opts)
+        })?;
+        self.instantiate_module(&module, bytes_len)
     }
 
     /// The foundation of the seed-language spectrum: accept WASM bytes from **any
     /// source** (AssemblyScript / Rust→wasm / hand-written WAT), first audit that
     /// the import section ⊆ the granted capabilities, and only instantiate if it
     /// passes. This is the language-agnostic version of compile() — the fence is
-    /// in the import table, not the grammar.
+    /// in the import table, not the grammar. (The audit always runs, even on a
+    /// module-cache hit — it is a cheap parse, and correctness must not depend
+    /// on cache-key discipline.)
     pub fn from_wasm_bytes(self, bytes: &[u8]) -> Result<Cell, String> {
         let grants: Vec<wasm_jit::audit::Grant> = self
             .caps
@@ -165,26 +298,38 @@ impl CellBuilder {
             .map(|(n, _)| wasm_jit::audit::Grant { module: "env", name: n })
             .collect();
         wasm_jit::audit::audit(bytes, &grants)?; // an over-reaching import → rejected right here
-        self.instantiate_bytes(bytes)
+        let key = fnv1a(bytes, 1); // distinct seed from the DSL path
+        let len = bytes.len();
+        let owned = bytes.to_vec();
+        let (module, _) = cached_module(key, move || Ok(owned))?;
+        self.instantiate_module(&module, len)
     }
 
-    fn instantiate_bytes(self, bytes: &[u8]) -> Result<Cell, String> {
-        let module =
-            WebAssembly::Module::new(&Uint8Array::from(bytes).into()).map_err(fmt_js)?;
+    fn instantiate_module(self, module: &WebAssembly::Module, bytes_len: usize) -> Result<Cell, String> {
         let env = Object::new();
         for (name, cap) in &self.caps {
             Reflect::set(&env, &(*name).into(), cap.js()).map_err(fmt_js)?;
         }
         let imports = Object::new();
         Reflect::set(&imports, &"env".into(), &env).map_err(fmt_js)?;
-        let instance = WebAssembly::Instance::new(&module, &imports).map_err(fmt_js)?;
-        let run = Reflect::get(&instance.exports(), &"run".into())
+        let instance = WebAssembly::Instance::new(module, &imports).map_err(fmt_js)?;
+        let exports = instance.exports();
+        let run = Reflect::get(&exports, &"run".into())
             .map_err(fmt_js)?
             .dyn_into::<Function>()
             .map_err(|_| "export 'run' is not a function".to_string())?;
+        let memory = Reflect::get(&exports, &"mem".into())
+            .ok()
+            .and_then(|v| v.dyn_into::<WebAssembly::Memory>().ok());
+        let fuel_gauge = Reflect::get(&exports, &"fuel".into())
+            .ok()
+            .and_then(|v| v.dyn_into::<WebAssembly::Global>().ok());
         Ok(Cell {
             run,
-            bytes_len: bytes.len(),
+            bytes_len,
+            memory,
+            fuel_gauge,
+            fuel_budget: self.fuel,
             _caps: self.caps.into_iter().map(|(_, c)| c).collect(),
         })
     }

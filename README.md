@@ -23,6 +23,7 @@ Theory: `docs/multidimensional-composition-architecture.md` (§16 execution laye
 | Freeform draw | pixel surface: Buddha/Guanyin read from DSL seeds; **+ "Buddha — AssemblyScript" = a real 637-byte asc-compiled seed running through the same import audit** |
 | **3D voxel** | **a playable Minecraft-style world**: ←→ turn, ↑↓ walk, Space jump; true perspective + chase camera + infinite terrain + distance fog, **the renderer and physics all live in a ~2.4KB seed**; interaction via `key`/`get`/`set` (state itself is a granted capability) |
 | Seed-language spectrum | **the fence is language-agnostic**: Tier 1 (DSL codegen) vs Tier 2 (external WASM via `Cell::from_wasm_bytes`'s import audit) — same ABI, bit-identical value; an over-reaching external seed (extra `env::fetch` import) is rejected |
+| **LiveUI** | **the live-manifestation loop** (docs §18, implemented): one schema declares cells + widget tree + patches + wires; events run cells, outputs cascade along a **budgeted event bus** (a wiring cycle degrades into a report, not a hang), and a cell's verdict **gates structural patches** (vocabulary-validated before touching the tree). Every cell is **fuel-metered** and **supervised**: an injected runaway loop traps → degrades → quarantines → restartable — the page never freezes. Plus the **memory capability** (host writes an array into the cell's own exported memory, the cell reduces it via `load()`, cross-checked bit-exact) and live module-cache stats |
 
 **Three surfaces, three complete vocabularies**: pixels (7 primitives), forms (9 widgets), layout (9 layout cells) — generation never creates vocabulary, it only composes it.
 
@@ -107,12 +108,23 @@ cargo run --example audit_as --no-default-features   # dogfood: audit a real asc
 
 **Files you can play with (edit + reload, no Rust)**: `api-server/form-schema.json` (form), `api-server/layout-schema.json` (layout), `examples/*.dsl` (Buddha / Guanyin / isometric voxel / third-person voxel), `assemblyscript/assembly/buddha.ts` (Tier 2 AS seed, active after `npm run build`).
 
-## Known limits (deliberately not done in a PoC)
+## The §18 substrate (implemented)
 
-- **No fuel metering**: an infinite loop in a generated module hangs the thread. Production needs a Worker + `terminate()`, or codegen inserting a "decrement-a-counter, trap-at-zero" at loop back-edges (~10–30% cost).
-- The DSL is an f64-scalar language: let / assign / while / **if-else** / arithmetic+**%** / comparison / built-in **min/max/abs/sqrt/floor**; still no functions/arrays/strings — strings and data structures stay in the host, only numeric hot kernels go down (wanting containers = granting a memory capability, a security decision, not a grammar one).
+The six gaps named in docs §18 ("from PoC to live UI manifestation") are now built and e2e-verified (19/19 in headless Chrome):
+
+1. **Fuel metering** — `CompileOpts{fuel}` / `CellBuilder::fuel(budget)`: every loop iteration burns one unit of an exported i32 gauge; zero traps (`unreachable`) instead of hanging. **Measured tax on the benchmark kernel: ≈0%** (interleaved medians, 3.6ms plain vs 3.5ms fueled at N=1e6 — V8 absorbs the check into the f64 pipeline; the 10–30% textbook estimate turned out pessimistic here). Applies to Tier 1 codegen; Tier 2 external artifacts still need a Worker + `terminate()`.
+2. **Patch grammar + declarative event ABI** — `patch.rs` (`add/remove/update`, vocabulary-validated pre-mutation) + schema events (`on_click`/`on_input` → cell, `arg_from`, verdict-gated `patch`). The LiveUI tab is this loop, live.
+3. **Module cache + supervision** — content-hash → `WebAssembly.Module` cache (identical seed = zero recompile); `Supervised` cells serve last-good values on a trap, rebuild, and quarantine after 3 consecutive failures (restartable).
+4. **Memory capability** — `CompileOpts{memory_pages}` grants the cell its OWN fixed-size linear memory (exported, never imported — the audit still rejects memory imports); `load(i)`/`store(i,v)` builtins are bounds-checked (trap, never wrap-aliasing); host `write_mem`/`read_mem` complete the buffer ABI.
+5. **Event bus** — `bus.rs`: cells never call cells; outputs cascade along schema-declared wires, breadth-first, under a hard dispatch budget (a cycle reports overflow instead of hanging).
+6. **Durable state + replay** — the 3D world records `(t, keys)` per frame and replays from a zeroed world: **121-frame replay verified bit-identical** (f64 `to_bits` equality across all 32 state slots); world state persists to localStorage.
+
+## Known limits (still deliberate)
+
+- The DSL remains f64-scalar: no functions/strings; arrays only via the granted memory (`load`/`store`) — strings and rich structures stay in the host as vocabulary (formatter capabilities), by design.
+- Tier 2 (external WASM) is not fuel-metered — its containment story is a Worker + `terminate()` (not built).
 - Strict CSP needs `'wasm-unsafe-eval'` (instantiating bytes at runtime is treated as eval-class).
-- Single flat scope (a duplicate `let` of the same name errors).
+- Single flat scope (a duplicate `let` of the same name errors); module cache eviction is clear-at-capacity, not LRU.
 
 ## Files
 
@@ -121,7 +133,8 @@ cargo run --example audit_as --no-default-features   # dogfood: audit a real asc
 - `src/audit.rs` — the foundation of the seed-language spectrum: `imports_of()` / `audit(bytes, grants)` scan a module's import section, rejecting any import not in the grant list (or any memory/table/global import) — the module-level twin of codegen's "fetch() rejection", language-agnostic
 - `assemblyscript/` — Tier 2 seed (`assembly/buddha.ts` → asc → 637B .wasm); produced by `npm run build`, served by api-server
 - `src/lib.rs` — wasm-bindgen exports (`compile_to_wasm`/`compile_kernel_wasm`/`compile_draw_wasm`/`transpile_to_js`/`native_kernel`); feature `js-api` — downstream with `default-features = false` gets the pure compiler + audit, zero wasm-bindgen exports
-- `leptos-poc/` — the seven-tab app; `src/cell.rs` = the only module that touches js-sys (CellBuilder: the grant list generates both the codegen import table and the JS env, so they can't drift; closure lifetimes encoded in the type)
-- `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
+- `leptos-poc/` — the eight-tab app; `src/cell.rs` = the only module that touches js-sys (CellBuilder: the grant list generates both the codegen import table and the JS env, so they can't drift; closure lifetimes encoded in the type; module cache + fuel gauge + write/read_mem live here too)
+- `leptos-poc/src/{patch,bus,supervisor,live_tab}.rs` — the §18 substrate: patch grammar, budgeted event bus, per-cell supervision, and the LiveUI tab assembling them
+- `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,live-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
 - `examples/*.dsl` — buddha / guanyin / minecraft (isometric) / mc3p (playable third-person)
 - `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§17, in Chinese)

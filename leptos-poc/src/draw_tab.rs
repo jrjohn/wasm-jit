@@ -22,6 +22,31 @@ thread_local! {
     /// The cell's 32-slot f64 memory (get/set capability) — cross-frame state (player position/velocity) lives here
     static STATE: RefCell<[f64; 32]> = const { RefCell::new([0.0; 32]) };
     static KEYS_HOOKED: BoolCell<bool> = const { BoolCell::new(false) };
+
+    // ---- input recording / deterministic replay (docs §18, layer #6) ----
+    /// Recorded input stream: one (t, keys[0..5]) sample per frame.
+    static TAPE: RefCell<Vec<(f64, [f64; 5])>> = const { RefCell::new(Vec::new()) };
+    static RECORDING: BoolCell<bool> = const { BoolCell::new(false) };
+    static REPLAYING: BoolCell<bool> = const { BoolCell::new(false) };
+    static REPLAY_IDX: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// STATE snapshot taken when recording stops — the replay's expected end state.
+    static END_STATE: RefCell<Option<[f64; 32]>> = const { RefCell::new(None) };
+    /// Signal handle for reporting record/replay results back into the view.
+    static REC_SIG: std::cell::Cell<Option<RwSignal<String>>> = const { std::cell::Cell::new(None) };
+}
+
+fn rec_report(msg: String) {
+    if let Some(sig) = REC_SIG.with(|s| s.get()) {
+        sig.set(msg);
+    }
+}
+
+/// Zero the cell's cross-frame state and the key latches: a fresh world.
+/// Determinism makes this the whole story — same seed + same inputs from a
+/// zeroed world ⇒ a bit-identical trajectory.
+fn reset_world() {
+    STATE.with(|s| s.borrow_mut().fill(0.0));
+    KEYS.with(|k| k.borrow_mut().fill(0.0));
 }
 
 fn key_index(code: &str) -> Option<usize> {
@@ -67,9 +92,18 @@ fn with_ctx(f: impl FnOnce(&web_sys::CanvasRenderingContext2d)) {
 
 const TAU: f64 = 6.283185307;
 
+/// Fuel budget per frame call. mc3p runs ~2k loop iterations/frame — 5M is
+/// generous headroom for hand-tuned seeds while still trapping a runaway
+/// loop within milliseconds instead of hanging the tab.
+const DRAW_FUEL: u32 = 5_000_000;
+
 /// The full grant set of drawing + interaction capabilities (shared by the Tier 1 DSL and the Tier 2 AS artifact).
+/// Fuel metering applies to Tier 1 (our codegen instruments the loops); a
+/// Tier 2 external artifact carries no back-edge counters — its containment
+/// story is a Worker + terminate (docs §18).
 fn draw_builder() -> crate::cell::CellBuilder {
     Cell::builder(&["t", "w", "h"])
+        .fuel(DRAW_FUEL)
         .cap1("sin", f64::sin)
         .cap1("cos", f64::cos)
         .cap1_void("hue", |v| {
@@ -172,9 +206,52 @@ fn frame(ts: f64) {
     ctx.set_line_width(7.0);
     ctx.set_line_cap("round");
     CTX.with(|c| *c.borrow_mut() = Some(ctx));
+
+    // Deterministic replay: override t and the key latches from the tape.
+    let mut t = ts / 1000.0;
+    if REPLAYING.get() {
+        let step = TAPE.with(|tp| tp.borrow().get(REPLAY_IDX.get()).copied());
+        match step {
+            Some((rt, keys)) => {
+                t = rt;
+                KEYS.with(|k| {
+                    let mut k = k.borrow_mut();
+                    k[..5].copy_from_slice(&keys);
+                });
+                REPLAY_IDX.set(REPLAY_IDX.get() + 1);
+            }
+            None => {
+                REPLAYING.set(false);
+                // The moat, cashed in: same seed + same inputs ⇒ the replay's
+                // end state must be BIT-identical to the recorded one.
+                let now = STATE.with(|s| *s.borrow());
+                let expected = END_STATE.with(|e| *e.borrow());
+                let msg = match expected {
+                    Some(exp) => {
+                        let identical = exp
+                            .iter()
+                            .zip(now.iter())
+                            .all(|(a, b)| a.to_bits() == b.to_bits());
+                        let frames = TAPE.with(|tp| tp.borrow().len());
+                        format!("replay done ({frames} frames) — bit-identical: {identical}")
+                    }
+                    None => "replay done (no recorded end state to compare)".into(),
+                };
+                rec_report(msg);
+                return;
+            }
+        }
+    } else if RECORDING.get() {
+        let keys = KEYS.with(|k| {
+            let k = k.borrow();
+            [k[0], k[1], k[2], k[3], k[4]]
+        });
+        TAPE.with(|tp| tp.borrow_mut().push((t, keys)));
+    }
+
     DRAW_CELL.with(|c| {
         if let Some(cell) = c.borrow().as_ref() {
-            let _ = cell.call(&[ts / 1000.0, w, h]);
+            let _ = cell.call(&[t, w, h]);
         }
     });
 }
@@ -213,7 +290,7 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
     let install = move |cell: Result<Cell, String>, tier: &str| match cell {
         Ok(cell) => {
             let size = cell.size();
-            STATE.with(|s| s.borrow_mut().fill(0.0)); // a new seed = a new world, clear the memory
+            reset_world(); // a new seed = a new world, clear the memory
             DRAW_CELL.with(|c| *c.borrow_mut() = Some(cell));
             status.set(format!("{tier} → {size} bytes — manifesting"));
             ok.set(true);
@@ -263,6 +340,64 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
     ensure_keys();
     load(example.to_string());
 
+    // ---- record / replay / durable state (docs §18, layer #6) ----
+    let rec_status = RwSignal::new(String::new());
+    REC_SIG.with(|s| s.set(Some(rec_status)));
+
+    let start_rec = move |_| {
+        REPLAYING.set(false);
+        reset_world();
+        TAPE.with(|t| t.borrow_mut().clear());
+        END_STATE.with(|e| *e.borrow_mut() = None);
+        RECORDING.set(true);
+        rec_status.set("recording from a zeroed world… play, then Stop".into());
+    };
+    let stop_rec = move |_| {
+        if !RECORDING.get() {
+            return;
+        }
+        RECORDING.set(false);
+        END_STATE.with(|e| *e.borrow_mut() = Some(STATE.with(|s| *s.borrow())));
+        let n = TAPE.with(|t| t.borrow().len());
+        rec_status.set(format!("recorded {n} frames + end-state snapshot — Replay to verify"));
+    };
+    let replay = move |_| {
+        let n = TAPE.with(|t| t.borrow().len());
+        if n == 0 {
+            rec_status.set("nothing recorded yet".into());
+            return;
+        }
+        RECORDING.set(false);
+        reset_world();
+        REPLAY_IDX.set(0);
+        REPLAYING.set(true);
+        rec_status.set(format!("replaying {n} frames from the tape…"));
+    };
+
+    let storage = || web_sys::window().and_then(|w| w.local_storage().ok().flatten());
+    let save_state = move |_| {
+        let key = format!("wasmjit-state-{}", sel.get_untracked());
+        let state: Vec<f64> = STATE.with(|s| s.borrow().to_vec());
+        let json = serde_json::to_string(&state).unwrap_or_default();
+        match storage() {
+            Some(st) if st.set_item(&key, &json).is_ok() => {
+                rec_status.set(format!("world state persisted to localStorage[{key}]"));
+            }
+            _ => rec_status.set("localStorage unavailable".into()),
+        }
+    };
+    let restore_state = move |_| {
+        let key = format!("wasmjit-state-{}", sel.get_untracked());
+        let loaded = storage().and_then(|st| st.get_item(&key).ok().flatten());
+        match loaded.and_then(|j| serde_json::from_str::<Vec<f64>>(&j).ok()) {
+            Some(v) if v.len() == 32 => {
+                STATE.with(|s| s.borrow_mut().copy_from_slice(&v));
+                rec_status.set(format!("world state restored from localStorage[{key}]"));
+            }
+            _ => rec_status.set(format!("no saved state under {key}")),
+        }
+    };
+
     view! {
         <p class="sub">
             "Pixel surface: a DSL seed loaded from /api/examples → cell → drawing primitives + "
@@ -293,6 +428,15 @@ pub fn DrawPoc(#[prop(default = "buddha")] example: &'static str) -> impl IntoVi
             <span class="draw-status" class:ok=move || ok.get() class:bad=move || !ok.get()>
                 {move || status.get()}
             </span>
+        </div>
+        <div class="rec-bar">
+            "determinism · "
+            <button class="rec-start" on:click=start_rec>"⏺ Record"</button>
+            <button class="rec-stop" on:click=stop_rec>"⏹ Stop"</button>
+            <button class="rec-replay" on:click=replay>"▶ Replay (bit-identity check)"</button>
+            <button class="rec-save" on:click=save_state>"Save world state"</button>
+            <button class="rec-restore" on:click=restore_state>"Restore world state"</button>
+            <span class="rec-status">{move || rec_status.get()}</span>
         </div>
         <textarea class="draw-src" rows="14" spellcheck="false"
             prop:value=move || script.get()

@@ -85,6 +85,22 @@ async fn layout_schema() -> impl IntoResponse {
     }
 }
 
+/// LiveUI schema: cells + tree + patches + wires, read from disk per request.
+async fn live_schema() -> impl IntoResponse {
+    match tokio::fs::read_to_string("api-server/live-schema.json").await {
+        Ok(s) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            s,
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(header::CONTENT_TYPE, "text/plain")],
+            format!("live-schema.json unreadable: {e}"),
+        ),
+    }
+}
+
 /// Drawing example seeds (examples/*.dsl), restricted to a whitelist.
 async fn example(Path(name): Path<String>) -> impl IntoResponse {
     if !matches!(name.as_str(), "buddha" | "guanyin" | "minecraft" | "mc3p") {
@@ -141,6 +157,7 @@ async fn main() {
         .route("/api/members/{dept}", get(members))
         .route("/api/form-schema", get(form_schema))
         .route("/api/layout-schema", get(layout_schema))
+        .route("/api/live-schema", get(live_schema))
         .route("/api/examples/{name}", get(example))
         .route("/api/as/{name}", get(as_wasm))
         .route("/api/as-src/{name}", get(as_src))
