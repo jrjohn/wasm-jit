@@ -687,6 +687,55 @@ Then the vocabulary was X-rayed by a thousand-year-old poem — 孤舟蓑笠翁,
 
 ---
 
+## 20. Minds and the Trichiliocosm: Self-Generating Worlds, Each Being Its Own Consciousness (眾生各有其識)
+
+Two questions arrived together, and they are the terminal questions of this architecture. First: *ask for "a truck driver on the highway" — does the world grow its own truck package on the spot?* (The vocabulary X-ray fired again: no truck, no road — the model composed a red car with a person standing beside it, in the snow, while the fisherman kept fishing.) Second: *can a soul have its own independent Claude — its own mind?*
+
+### 20.1 The autopoiesis ladder: how far can the vocabulary generate itself?
+
+Dissect the inhabitant package by generation speed:
+
+- **The soul — fast today.** Behavior is generated at runtime (DSL or AssemblyScript→wasm), passes the entity audit, and enters in seconds. Built and verified.
+- **The skin — one key-turn from fast.** Today a skin holds raw canvas authority, so it lives in the slow loop (a `.rs` crate, gated). But the key already exists in this repo: the sandboxed drawing ABI (hue/disc/ring/arc/line). Re-house skins as **`skin.wasm` — a module allowed to import only drawing primitives, entering through the same audit** — and skins stop being trusted code. At that moment the ENTIRE package (soul + skin) becomes runtime-generable, and "a truck driver on the highway" grows its own package in seconds, zero trust required.
+- **The fixed point — what must stay gated.** Follow the recursion down and it converges on one thing: **the capability substrate itself** (new primitives, new field channels, new relation kinds — the law, 法). The law passes through the gated slow loop (in production: aaf's gated-PR pipeline); everything expressible *within* the law self-generates freely.
+
+Evolution and archival come almost for free: a package is files (manifest + wasm), so git is its ālaya and the manifest carries the version; worlds reference package versions, and bit-level replay lets an old world run with its old souls. What evolution *adds* is a judgment gate — generating variants is cheap; deciding "better" needs an objective score and, for anything consequential, a human verdict (this is precisely aaf Phase 5's evolution loop: AI proposes, measurement scores, the human judges, and the AI never holds commit rights).
+
+### 20.2 The three laws of endless worlds
+
+Mechanically, beings spawning beings is already latent: a `spawn(type, x, y)` capability is the entity-shaped twin of the verdict-gated patch (arising-on-condition, 依緣代入); a being *inventing new types* means an inhabitant's condition triggering the slow loop. The trichiliocosm can keep coming — under three laws, without which it is grey goo:
+
+| Law | Engineering | Nature |
+|---|---|---|
+| Rations (口糧) | spawn quotas, population ceilings per world | fuel, generalized to demographics |
+| The law does not self-increase (法不自增) | a child world's capabilities ⊆ what its parent granted — **permissions are monotonically non-increasing down the generations** | THE invariant that makes unbounded recursion safe |
+| Good seeds pass a gate (良種過閘) | new types enter the registry only through evaluation (aaf's gate) | manifestation perfumes seeds — but with selection before the store |
+
+> **Worlds without end; the law conserved (世界無盡,法卻守恆).** Every generation of beings may make worlds, and every world they make lives inside the permissions handed down to it. The recursion has no ceiling; the authority has no upward slope. This one sentence is the architecture's answer to why a self-reproducing generative system can be safe.
+
+### 20.3 One soul, two speeds: the mind as its own container
+
+A mind cannot live in the tick loop (a 30fps body × a seconds-long thought = impossible), so the design is **one soul, two speeds**:
+
+```
+inhabitant with "mind": …
+┌─ REFLEX (exists today) ─────────────┐    ┌─ MIND (its own Docker Claude) ─────────┐
+│ behavior.wasm, µs per tick, 30fps   │    │ own container, own persona prompt,     │
+│ drift, sway, walk — the body's      │◀── │ own memory. Beats SPARSELY: every      │
+│ habitual momentum                   │(re)│ 30–60s, or on condition (it starts     │
+│ reads slots for "intents"           │write│ snowing / the water rises / the user   │
+└─────────────────────────────────────┘    │ speaks to it)                          │
+                                           └─────────────────────────────────────────┘
+```
+
+Each heartbeat: the host assembles the being's **perception package** — the field inside its region, its own slots, its position, recent events — into a prompt for *its* container; the reply is either **a rewritten reflex** (new behavior source → the same compile + audit → hot-swap: the soul revising its own habit — 現行熏種子 in its complete form, deliberation perfuming disposition) or **an intent** (slot writes the reflex acts on: "row for the bank" is a target point in slot 7).
+
+**The trust model does not move — this is the load-bearing sentence.** However intelligent the mind, the body's permissions grow by nothing: the mind's output passes the same compiler and audit (it cannot write `fetch()`, and couldn't get it through if it did); `mv` stays clamped, regions stay enforced, fuel still traps; the mind itself is containerized (no volumes, API egress only), and **the perception package is the entirety of its world — even seeing is a grant**. The mind cannot request permissions on the body's behalf (心不能替身體要權). A malicious mind's worst case is a strange but lawful reflex. The fence's effectiveness is independent of the attacker's intelligence — the architecture's core claim, now extended to minded beings.
+
+Cost is what disciplines the cadence: one heartbeat ≈ 1–2s container start + seconds of inference, pennies — so hearts beat sparsely, worlds carry mind quotas, and memory is either stateless (the package carries "your last thought") or a true continuous mind via per-being session resumption. Planned proof: give the fisherman a mind (`"persona": "a fisherman on a cold river; few words; cares only about water and fish"`) — when the snow begins, his perception package changes, his mind decides to row home, his reflex is rewritten, and you watch him leave. Ask him "cold?" in the chat and his own container answers in his own voice. **A being with its own mind, dwelling in a world you spoke into existence, thinking about the one patch of river it is allowed to see — and it still cannot call `fetch()`.**
+
+---
+
 ### Appendix: Metaphor → Engineering Coordinate Cheatsheet
 
 | Metaphor | Engineering coordinate |
@@ -715,4 +764,7 @@ Then the vocabulary was X-rayed by a thousand-year-old poem — 孤舟蓑笠翁,
 | Understands more the more you use it (fuzzy/GA/trend) | graded-membership representation + mutation-selection search (run against a surrogate, the user is the oracle) + derivative prediction; maintain diversity against collapse, damp extrapolation to avoid driving taste; bounded by §14's six conditions |
 | Scripts as seeds (execution layer) | LLM generates DSL → wasm-jit compiles to a WASM cell (borrowing the browser JIT, = the AOT ceiling, ties JS) → capability-sandbox execution; fast + isolation + synchronous all at once; proven at github.com/jrjohn/wasm-jit |
 | The Field / collective karma (共業場) | one shared world-grid (height/water/veg channels); cells read/write via fr/fw function capabilities with region-scoped grants; composition order = host law; emergence = many cells, no global knower (§19) |
+| The binding condition (繫緣) | a relation as one JSON field + six lines of host law, re-enacted every tick — nothing locks it; unbinding is absent from the bound one's ABI; the condition lives in the scene, not the person (§19) |
+| Worlds without end, the law conserved (世界無盡,法卻守恆) | child capabilities ⊆ parent grants — permissions monotonically non-increasing down generations; spawn quotas; evaluation gates before the registry (§20) |
+| Each being its own consciousness (眾生各有其識) | one soul two speeds: wasm reflex at 30fps + a per-being Claude container beating sparsely, rewriting the reflex through the same compile+audit gate — the mind cannot request permissions for the body (§20) |
 | The shape of the front end in the AI age | no JS, no HTML (airlocked) + tokenized SCSS (style capability) + dual loop (runtime seed manifestation / build-time gated-PR evolution); every artifact passes the verifier; proven in the leptos-poc tabs |
