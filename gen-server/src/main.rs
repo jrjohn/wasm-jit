@@ -307,6 +307,11 @@ fn validate(obj: &Value) -> Result<(), String> {
             if !(16..=160).contains(&grid) {
                 return Err(format!("world grid {grid} out of range 16..=160"));
             }
+            if let Some(view) = world.get("view").and_then(|v| v.as_str()) {
+                if !matches!(view, "top" | "first_person") {
+                    return Err("world view must be \"top\" or \"first_person\"".into());
+                }
+            }
             let cells = world
                 .get("cells")
                 .and_then(|c| c.as_array())
@@ -572,6 +577,16 @@ mod tests {
             }
         });
         assert!(validate(&obj).is_ok(), "{:?}", validate(&obj));
+    }
+
+    #[test]
+    fn field_view_enum_validated() {
+        let ok = serde_json::json!({
+            "surface":"field","world":{"view":"first_person","cells":[{"id":"a","script":"1.0"}]}});
+        assert!(validate(&ok).is_ok());
+        let bad = serde_json::json!({
+            "surface":"field","world":{"view":"drone","cells":[{"id":"a","script":"1.0"}]}});
+        assert!(validate(&bad).unwrap_err().contains("view"));
     }
 
     #[test]

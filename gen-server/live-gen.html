@@ -64,7 +64,8 @@ Generation is seconds; every interaction after is µs.
 - change the slider range to 0–100 (iterates on the current UI)
 - draw a smiling sun (switches to the drawing surface)
 - 一座山 (a living world rises on the field)
-- 下一場雨 (…and then, let it rain)</div>
+- 下一場雨 (…and then, let it rain)
+- 讓我走進這個世界 (first person — walk in the rain)</div>
     </div>
     <div class="chatbar">
       <input type="text" id="prompt" placeholder="describe a UI… (Enter to send)">
@@ -84,6 +85,7 @@ Generation is seconds; every interaction after is µs.
   <div class="stage-wrap">
     <div class="stage-head">
       <span id="stage-status">nothing manifested yet</span>
+      <button id="view-toggle" style="display:none; margin-left:auto; font-size:.75rem; padding:.25rem .7rem"></button>
     </div>
     <div id="stage"></div>
     <canvas id="cv" width="1200" height="700"></canvas>
@@ -369,6 +371,111 @@ let fieldWorld = null;   // {grid, cells:[{id,mode,order,region,run,fails,quaran
 let FIELD = null;        // Float64Array(grid*grid*3)
 let fieldCanvas = null;  // offscreen grid-sized canvas
 let lastTick = 0;
+let lastRaf = 0;
+
+// ---- first-person view: the same field, seen from inside ----
+// Perspective is the HOST's eye, never a property of the world — the AI can
+// only declare "view":"first_person"; rendering and movement stay vocabulary.
+let fieldView = 'top';   // 'top' | 'fp'
+const cam = { px: 48, pz: 78, yaw: 0, yoff: 0, vy: 0 };
+const FKEYS = { left: 0, right: 0, fwd: 0, back: 0, jump: 0 };
+const KEYMAP = {
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+  ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back', Space: 'jump',
+};
+window.addEventListener('keydown', e => {
+  const k = KEYMAP[e.code];
+  if (!k || fieldView !== 'fp' || !fieldWorld) return;
+  if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) return; // chat keeps its keys
+  e.preventDefault();
+  FKEYS[k] = 1;
+});
+window.addEventListener('keyup', e => {
+  const k = KEYMAP[e.code];
+  if (k) FKEYS[k] = 0;
+});
+
+function terrainH(x, z) {
+  const g = fieldWorld.grid;
+  const xi = Math.min(Math.max(x | 0, 0), g - 1), zi = Math.min(Math.max(z | 0, 0), g - 1);
+  return FIELD[zi * g + xi];
+}
+
+function updateCam(dt) {
+  const g = fieldWorld.grid;
+  cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
+  const mv = (FKEYS.fwd - FKEYS.back) * 11 * dt;
+  cam.px = Math.min(Math.max(cam.px + Math.sin(cam.yaw) * mv, 1), g - 2);
+  cam.pz = Math.min(Math.max(cam.pz + Math.cos(cam.yaw) * mv, 1), g - 2);
+  if (cam.yoff <= 0 && FKEYS.jump) cam.vy = 10;
+  cam.vy -= 26 * dt;
+  cam.yoff = Math.max(0, cam.yoff + cam.vy * dt);
+  if (cam.yoff === 0) cam.vy = 0;
+}
+
+// Voxel-space column renderer: per screen column, march the ray far→near is
+// inverted here (near→far with a rising horizon clip) — classic heightmap FP.
+function renderFieldFP() {
+  const g = fieldWorld.grid, W = cv.width, H = cv.height;
+  const K = 0.55;                                  // field height → world units
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+  sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  const horizon = H * 0.42, focal = H * 0.95, fov = 1.0, step = 3;
+  const maxD = g * 1.15;
+  const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
+  for (let sx = 0; sx < W; sx += step) {
+    const off = (sx / W - 0.5) * fov;
+    const dx = sinY + off * cosY, dz = cosY - off * sinY;
+    let minY = H;
+    for (let d = 1.6; d < maxD; d += 0.35 + d * 0.014) {
+      const wx = cam.px + dx * d, wz = cam.pz + dz * d;
+      const xi = wx | 0, zi = wz | 0;
+      let h = 0, w = 2.5, v = 0;                    // beyond the field: the sea
+      if (xi >= 0 && xi < g && zi >= 0 && zi < g) {
+        h = FIELD[zi * g + xi];
+        w = FIELD[(g + zi) * g + xi];
+        v = FIELD[(2 * g + zi) * g + xi];
+      }
+      const surf = (h + Math.min(w, 3) * 0.6) * K;
+      const sy = horizon + ((eye - surf) * focal) / d;
+      if (sy < minY) {
+        let [r, gg, b] = terrainColor(h, w, v);
+        const fog = Math.min(d / maxD, 1) ** 1.35 * 0.8;
+        r = r * (1 - fog) + 58 * fog; gg = gg * (1 - fog) + 93 * fog; b = b * (1 - fog) + 132 * fog;
+        ctx.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
+        ctx.fillRect(sx, Math.max(sy, 0), step, minY - Math.max(sy, 0));
+        minY = sy;
+        if (minY <= 0) break;
+      }
+    }
+  }
+  ctx.fillStyle = 'rgba(230,237,243,.55)';
+  ctx.font = '13px ui-monospace';
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+}
+
+function setFieldView(view) {
+  fieldView = view;
+  const btn = $('view-toggle');
+  if (btn) {
+    btn.style.display = fieldWorld ? 'inline-block' : 'none';
+    btn.textContent = view === 'fp' ? '🗺 top view' : '⛰ walk into it (first person)';
+  }
+  if (fieldWorld && view === 'fp') {
+    const g = fieldWorld.grid;
+    cam.px = g / 2; cam.pz = g - 8; cam.yaw = Math.PI; cam.yoff = 0; cam.vy = 0; // enter from the south, facing the peak
+    // the walker needs the keys — take them back from the chat box
+    if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) document.activeElement.blur();
+  }
+  if (fieldWorld && view === 'top') renderField();
+}
+
+// e2e / debugging: honest state, no pixel guessing
+window.__fieldState = () => fieldWorld
+  ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length }
+  : null;
 
 const DEFAULT_WORLD = {
   grid: 96,
@@ -471,6 +578,7 @@ function manifestField(world) {
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
+  setFieldView(world.view === 'first_person' ? 'fp' : 'top');
   $('stage-status').textContent =
     `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living) on a ${compiled.grid}×${compiled.grid} field — ${(performance.now() - t0).toFixed(1)}ms`;
   $('seed-box').style.display = 'block';
@@ -519,12 +627,20 @@ function manifestDraw(seed) {
     ctx.lineWidth = 6; ctx.lineCap = 'round';
     try { drawRun(now / 1000, cv.width, cv.height); }
     catch (e) { drawRun = null; $('stage-status').textContent = 'draw cell trapped: ' + e; }
-  } else if (fieldWorld && now - lastTick > 33) { // the world breathes at ~30fps
-    lastTick = now;
-    const t = now / 1000;
-    for (const c of fieldWorld.cells) if (c.mode === 'frame') callWorldCell(c, t, fieldWorld.grid);
-    renderField();
+  } else if (fieldWorld) {
+    const dt = Math.min((now - lastRaf) / 1000, 0.05);
+    if (now - lastTick > 33) { // the world breathes at ~30fps
+      lastTick = now;
+      const t = now / 1000;
+      for (const c of fieldWorld.cells) if (c.mode === 'frame') callWorldCell(c, t, fieldWorld.grid);
+      if (fieldView === 'top') renderField();
+    }
+    if (fieldView === 'fp') { // the walker moves every frame — smooth inside a living world
+      updateCam(dt);
+      renderFieldFP();
+    }
   }
+  lastRaf = now;
   requestAnimationFrame(loop);
 })(0);
 
@@ -559,12 +675,15 @@ async function send() {
     say('err', 'request failed: ' + e);
   } finally {
     clearInterval(tick); $('timer').textContent = '';
-    busy = false; $('send').disabled = false; $('prompt').disabled = false; $('prompt').focus();
+    busy = false; $('send').disabled = false; $('prompt').disabled = false;
+    if (fieldView !== 'fp') $('prompt').focus(); // in first person, the keys belong to the walker
   }
 }
 $('send').onclick = send;
 $('prompt').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
 $('prompt').focus();
+
+$('view-toggle').onclick = () => setFieldView(fieldView === 'fp' ? 'top' : 'fp');
 
 // The world is there before the first word: gentle plains, waiting for a mountain.
 manifestField(DEFAULT_WORLD);

@@ -116,7 +116,12 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
 }}
 
 === surface "field" — a living world ===
-"world" = {"grid":96,"cells":[...]}
+"world" = {"grid":96,"view":"top"|"first_person","cells":[...]}
+- "view" (optional, default "top"): the host's camera. "top" = looking straight down;
+  "first_person" = standing INSIDE the world (arrow keys walk, Space jumps — the host
+  handles all rendering and movement). When the user asks to "walk into the world",
+  "enter it", "first person" / 「走進去」「第一人稱」: return the SAME world with
+  "view":"first_person" — do not change the cells.
 Many WORLD CELLS share one grid-shaped field and co-create a landscape. Channels:
   channel 0 = height (0..~100)   channel 1 = water depth (0..~6)   channel 2 = vegetation (0..1)
 World-cell capabilities: sin cos get set (private slots) + the FIELD pair:
