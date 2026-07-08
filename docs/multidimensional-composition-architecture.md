@@ -732,7 +732,42 @@ Each heartbeat: the host assembles the being's **perception package** — the fi
 
 **The trust model does not move — this is the load-bearing sentence.** However intelligent the mind, the body's permissions grow by nothing: the mind's output passes the same compiler and audit (it cannot write `fetch()`, and couldn't get it through if it did); `mv` stays clamped, regions stay enforced, fuel still traps; the mind itself is containerized (no volumes, API egress only), and **the perception package is the entirety of its world — even seeing is a grant**. The mind cannot request permissions on the body's behalf (心不能替身體要權). A malicious mind's worst case is a strange but lawful reflex. The fence's effectiveness is independent of the attacker's intelligence — the architecture's core claim, now extended to minded beings.
 
-Cost is what disciplines the cadence: one heartbeat ≈ 1–2s container start + seconds of inference, pennies — so hearts beat sparsely, worlds carry mind quotas, and memory is either stateless (the package carries "your last thought") or a true continuous mind via per-being session resumption. Planned proof: give the fisherman a mind (`"persona": "a fisherman on a cold river; few words; cares only about water and fish"`) — when the snow begins, his perception package changes, his mind decides to row home, his reflex is rewritten, and you watch him leave. Ask him "cold?" in the chat and his own container answers in his own voice. **A being with its own mind, dwelling in a world you spoke into existence, thinking about the one patch of river it is allowed to see — and it still cannot call `fetch()`.**
+Cost is what disciplines the cadence: one heartbeat ≈ 1–2s container start + seconds of inference, pennies — so hearts beat sparsely, worlds carry mind quotas, and memory is either stateless (the package carries "your last thought") or a true continuous mind via per-being session resumption. Delivered proof: the fisherman, given a mind, answered "@weng 冷嗎?" in his own weathered voice ("冷。江水比刀還冷,雪一落,更冷了。") and, when snow crossed his perception window unbidden, thought his own thought and spoke — a being with its own mind, dwelling in a world you spoke into existence, thinking about the one patch of river it is allowed to see, **and it still cannot call `fetch()`.**
+
+---
+
+## 21. Completing a Being's Faculties: Six Roots, Six Objects, Six Consciousnesses (圓滿六根)
+
+A moon hung in one of these worlds. Asked *"do you perceive that you are standing on the ground of the view?"*, it answered beautifully — "I do not touch the earth; I only hang in the sky, borrowing the snowlight to watch you sway." And it was **wrong about itself in a way it could not detect**: in the model it was a ground entity drawn as a disc, with no faculty for its own altitude. Its lovely answer was not perception but confabulation — the sixth consciousness (意識) spinning a story from persona where a faculty was missing. The Yogācāra diagnosis is exact, and it is also the engineering one.
+
+### The mapping
+
+Consciousness does not float free; it arises **dependent on a faculty meeting an object** (根緣塵生識). Three registers, one coordinate system:
+
+| Yogācāra | Engineering coordinate |
+|---|---|
+| **Six roots / faculties (六根)** — the organs of sensing | the fields of the **perception package** — the channels a being is granted |
+| — eye (眼根) | the 5×5 window of the field it sees around itself |
+| — ear (耳根) | the words spoken to it |
+| — mind-root (意根) | its memory slots + its last thought |
+| — body-root (身根) | its own state: id, kind, **realm (sky/ground), altitude**, position, what it rides |
+| — the faculty for other beings | **neighbors**: who is near, their kind and direction |
+| **Six objects (六塵)** — the sensed | the field's actual values + world state; present, but unadmitted if no root takes them |
+| **Six consciousnesses (六識)** — the awareness that arises | what the being's own container-mind **can form awareness of — strictly bounded by which roots admit which objects** |
+
+The load-bearing law: **the sixth consciousness cannot arise without its root and object. Missing a faculty, a being does not merely fail to know — it *confabulates* around the void**, because the mind (a fluent Claude) will always produce prose. The moon had no altitude-root, so no altitude-object entered, so no true awareness of its celestial nature arose; the persona filled the hole. This is the completion of §20.3's claim that *seeing is a grant*: awareness is bounded by the grant, and where the grant is silent, honesty requires the being to say *I do not know* — so the contract now instructs each mind: **answer only from your faculties; if a faculty is silent, you do not know it — do not invent.**
+
+### Completing the roots, and building the realm they sense
+
+Two fixes, each handing a being a faculty it lacked. First, **complete the perception package**: it now reports, per being, who you are (kind, realm, altitude), where you are (position, riding, the window), who is near (neighbors with direction and distance — the faculty for other sentient beings), and your inner state. The mind, now, perceives its own nature instead of guessing at it.
+
+But a faculty needs an object to sense (根待塵). "Come down from the sky" was unanswerable not only because the moon couldn't perceive its altitude but because **there was no vertical realm to have an altitude in** — entities lived on a flat (x, y) field. So the second fix builds the object: a **vertical realm (垂直之境)**. Entities carry `realm: sky|ground` and an `altitude`; the host draws aloft beings high in the sky (in both the overhead view and the first-person billboards); and beings gain the `rise(dz)` capability — the vertical faculty of *action* — clamped 0..1 by the host, granted through the same entity ABI, passed through the same import audit, its rewritten reflex compiled by the same compiler. Object立 (the realm exists), faculty授 (rise is granted): now *going to the sky* has both a place to go and an organ to go with.
+
+### The proof, and the invariant
+
+The moon, given complete faculties, reported its perception as `{kind: moon, realm: sky, altitude: 1}` — self-knowledge as **direct perception (現量), not inference (比量)** — and sensed the fisherman to its south. Asked to come down and walk on the ground, it agreed — "好,吾應汝之請,緩緩而降" — and its altitude fell 1→0, its realm sky→ground: it descended to stand by the fisherman it had, a moment before, only watched from above.
+
+And the invariant that makes this safe is unchanged, which is the whole point: **however complete a being's faculties, however wide its freedom of action — to leave a condition (unbind), to rise and descend (rise) — its authority grows by nothing. Seeing more is a larger grant of perception, not of power; the moon that now knows the sky and can leave it still cannot call `fetch()`.** The fence was never about keeping beings small. It was about keeping *what they can touch* enumerable — and a being can be given eyes, neighbors, a sky to climb, and a mind to weigh it all, while that enumeration holds. Richness of soul and boundedness of world are not in tension; they were always orthogonal axes, and this whole document has been the working-out of that one sentence.
 
 ---
 
@@ -767,4 +802,5 @@ Cost is what disciplines the cadence: one heartbeat ≈ 1–2s container start +
 | The binding condition (繫緣) | a relation as one JSON field + six lines of host law, re-enacted every tick — nothing locks it; unbinding is absent from the bound one's ABI; the condition lives in the scene, not the person (§19) |
 | Worlds without end, the law conserved (世界無盡,法卻守恆) | child capabilities ⊆ parent grants — permissions monotonically non-increasing down generations; spawn quotas; evaluation gates before the registry (§20) |
 | Each being its own consciousness (眾生各有其識) | one soul two speeds: wasm reflex at 30fps + a per-being Claude container beating sparsely, rewriting the reflex through the same compile+audit gate — the mind cannot request permissions for the body (§20) |
+| Six roots / objects / consciousnesses (六根六塵六識) | the perception package IS the being's faculties; awareness arises only where a root admits an object (root-meets-object → consciousness); a missing faculty → confabulation, so the mind must answer only from its faculties; completing the roots + building a vertical realm (rise) lets a being know its own nature and act on it — with authority still unchanged (§21) |
 | The shape of the front end in the AI age | no JS, no HTML (airlocked) + tokenized SCSS (style capability) + dual loop (runtime seed manifestation / build-time gated-PR evolution); every artifact passes the verifier; proven in the leptos-poc tabs |
