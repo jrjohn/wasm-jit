@@ -87,6 +87,113 @@ pub fn compile_ui_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// World cell for the Field (docs §19): `run(t, gw, gh) -> f64`, capabilities
+/// env.{sin, cos, get, set, fr, fw} — fr/fw are the shared-field (collective
+/// karma) read/write pair; region scoping happens in the host closures.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 3] = ["t", "gw", "gh"];
+    const IMPORTS: [HostFn; 6] = [
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+        HostFn { name: "get", n_args: 1, returns: true },
+        HostFn { name: "set", n_args: 2, returns: false },
+        HostFn { name: "fr", n_args: 3, returns: true },
+        HostFn { name: "fw", n_args: 4, returns: false },
+    ];
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &IMPORTS,
+        codegen::CompileOpts { fuel: Some(2_000_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// Inhabitant (entity) behavior for the Field: `run(t, ex, ey) -> f64`.
+/// Capabilities env.{sin, cos, get, set, fr, mv, unbind} — fr reads the shared
+/// field, mv REQUESTS movement (host clamps speed/bounds; position is
+/// host-owned), unbind() releases the being from whatever it rides (§19: the
+/// freedom to leave a condition, now in the being's own ABI).
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 3] = ["t", "ex", "ey"];
+    const IMPORTS: [HostFn; 8] = [
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+        HostFn { name: "get", n_args: 1, returns: true },
+        HostFn { name: "set", n_args: 2, returns: false },
+        HostFn { name: "fr", n_args: 3, returns: true },
+        HostFn { name: "mv", n_args: 2, returns: false },
+        HostFn { name: "unbind", n_args: 0, returns: false },
+        HostFn { name: "rise", n_args: 1, returns: false }, // the vertical faculty: request a change in altitude (host clamps)
+    ];
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &IMPORTS,
+        codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// Runtime-generated SKIN: `run(px, py, s, t)`, capabilities = the 2D drawing
+/// primitives only (env.{sin, cos, hue, disc, ring, arc, line}). Turns the key
+/// of docs §20.1 — a skin no longer needs raw canvas authority, so a novel
+/// inhabitant's *look* (a lotus, a deer, a tent) can be generated at runtime
+/// and enter through the same drawing-primitive fence as everything else.
+/// px,py = the entity's canvas center; s = canvas px per grid unit; t = seconds.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 4] = ["px", "py", "s", "t"];
+    const IMPORTS: [HostFn; 7] = [
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+        HostFn { name: "hue", n_args: 1, returns: false },
+        HostFn { name: "disc", n_args: 3, returns: false },
+        HostFn { name: "ring", n_args: 3, returns: false },
+        HostFn { name: "arc", n_args: 5, returns: false },
+        HostFn { name: "line", n_args: 4, returns: false },
+    ];
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &IMPORTS,
+        codegen::CompileOpts { fuel: Some(300_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// Browser-side Tier-2 fence for inhabitant souls: audit that an externally
+/// compiled behavior module's imports ⊆ the entity grant list (env.{sin, cos,
+/// get, set, fr, mv}) BEFORE instantiating it. The soul of a packaged
+/// inhabitant enters through this gate — plugin without trust.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
+    use audit::Grant;
+    const GRANTS: [Grant; 8] = [
+        Grant { module: "env", name: "sin" },
+        Grant { module: "env", name: "cos" },
+        Grant { module: "env", name: "get" },
+        Grant { module: "env", name: "set" },
+        Grant { module: "env", name: "fr" },
+        Grant { module: "env", name: "mv" },
+        Grant { module: "env", name: "unbind" },
+        Grant { module: "env", name: "rise" },
+    ];
+    audit::audit(bytes, &GRANTS).map_err(|e| JsError::new(&e))
+}
+
 /// Benchmark lane with fuel metering on: same `run(n)->f64` ABI plus an
 /// exported "fuel" gauge. Used to measure the back-edge-counter tax.
 #[cfg(feature = "js-api")]

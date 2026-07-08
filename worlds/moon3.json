@@ -1,0 +1,202 @@
+{
+  "chat": [
+    {
+      "cls": "user",
+      "text": "孤舟蓑笠翁 獨釣寒江雪"
+    },
+    {
+      "cls": "thought",
+      "text": "(weng thinks: 雪落江面，魚不来也不惊。)"
+    },
+    {
+      "cls": "user",
+      "text": "@weng 冷嗎?"
+    },
+    {
+      "cls": "thought",
+      "text": "(weng thinks: 雪落無聲，魚線亦靜。)"
+    },
+    {
+      "cls": "being",
+      "text": "weng: 寒意入骨，心自暖。"
+    },
+    {
+      "cls": "user",
+      "text": "在河上放些蓮花吧"
+    },
+    {
+      "cls": "user",
+      "text": "在天上放個月亮吧"
+    },
+    {
+      "cls": "user",
+      "text": "@moon 您在那，我怎看不到你?"
+    },
+    {
+      "cls": "thought",
+      "text": "(a mind stirs in moon…)"
+    },
+    {
+      "cls": "thought",
+      "text": "(moon thinks: 低语传来——雪落无声,月光洒下。)"
+    },
+    {
+      "cls": "being",
+      "text": "moon: 我照亮夜路,你抬头即见我。"
+    },
+    {
+      "cls": "thought",
+      "text": "(moon thinks: 寂静的夜,唯我高悬。)"
+    },
+    {
+      "cls": "being",
+      "text": "moon: 雪落满地,月照无声。"
+    },
+    {
+      "cls": "user",
+      "text": "@moon 看見您了，你可以到我身邊讓我摸摸你嗎?"
+    },
+    {
+      "cls": "thought",
+      "text": "(moon thinks: 访客欲近，然月悬天心，不可轻离其位。)"
+    },
+    {
+      "cls": "being",
+      "text": "moon: 雪落无声，我照旧照着你。留在此处，光才不散。"
+    },
+    {
+      "cls": "user",
+      "text": "@moon 你左右擺動一下，讓我確認你有意識"
+    },
+    {
+      "cls": "thought",
+      "text": "(moon thinks: 访客欲验吾之意识，姑且轻晃以证。)"
+    },
+    {
+      "cls": "being",
+      "text": "moon: 吾在，且以微光颤之为应。"
+    },
+    {
+      "cls": "user",
+      "text": "@moon 那你上下擺動一下，我看到您左右擺動了"
+    },
+    {
+      "cls": "thought",
+      "text": "(moon thinks: 访客所求乃纵向之动，遂改反射为竖摆。)"
+    },
+    {
+      "cls": "being",
+      "text": "moon: 好，吾易其姿，今上下而摆。"
+    }
+  ],
+  "name": "moon3",
+  "payload": {
+    "cells": [
+      {
+        "id": "plains",
+        "mode": "once",
+        "order": 1,
+        "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  fw(0.0, x, y, 12.0 + 6.0 * sin(x * 0.13) * cos(y * 0.11) + 3.0 * sin((x + y) * 0.07));\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "river",
+        "mode": "once",
+        "order": 2,
+        "script": "let x = 0.0;\nwhile x < gw {\n let cy = gh * 0.5 + sin(x * 0.05) * 10.0;\n let dy = -4.0;\n while dy <= 4.0 {\n  let y = cy + dy;\n  let inb = (y >= 0.0) * (y < gh);\n  if inb > 0.5 {\n   let w = max(0.0, 1.0 - abs(dy) / 4.0);\n   fw(0.0, x, y, fr(0.0, x, y) - w * 8.0);\n   fw(1.0, x, y, max(fr(1.0, x, y), w * 4.0));\n  }\n  dy = dy + 1.0;\n }\n x = x + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "snowfall",
+        "mode": "frame",
+        "order": 3,
+        "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 { fw(3.0, x, y, min(fr(3.0, x, y) + 0.002, 1.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      }
+    ],
+    "entities": [
+      {
+        "at": [
+          48,
+          55
+        ],
+        "id": "boat",
+        "type": "boat"
+      },
+      {
+        "at": [
+          48,
+          55
+        ],
+        "behavior": "0.0",
+        "id": "weng",
+        "mind": {
+          "persona": "孤舟蓑笠翁，獨釣寒江雪 — a solitary old man in a straw cloak and bamboo hat, fishing alone on a frozen river under falling snow. He speaks rarely, in short quiet lines, at peace with the silence and cold."
+        },
+        "on": "boat",
+        "type": "fisherman"
+      },
+      {
+        "at": [
+          15,
+          53
+        ],
+        "behavior": "mv(sin(t*0.2)*0.01, cos(t*0.17)*0.01);\n0.0",
+        "id": "lotus1",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          30,
+          59
+        ],
+        "behavior": "mv(sin(t*0.23+1.0)*0.01, cos(t*0.19+1.0)*0.01);\n0.0",
+        "id": "lotus2",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          65,
+          45
+        ],
+        "behavior": "mv(sin(t*0.19+2.0)*0.01, cos(t*0.21+2.0)*0.01);\n0.0",
+        "id": "lotus3",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          75,
+          44
+        ],
+        "behavior": "mv(sin(t*0.25+3.0)*0.01, cos(t*0.16+3.0)*0.01);\n0.0",
+        "id": "lotus4",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          85,
+          40
+        ],
+        "behavior": "mv(sin(t*0.21+4.0)*0.01, cos(t*0.24+4.0)*0.01);\n0.0",
+        "id": "lotus5",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          48,
+          20
+        ],
+        "behavior": "0.0",
+        "id": "moon",
+        "realm": "sky",
+        "skin_seed": "hue(0.15);\ndisc(px, py, s * 0.42);\nhue(0.13);\nring(px, py, s * 0.58);\nring(px, py, s * 0.7);\n0.0",
+        "type": "moon"
+      }
+    ],
+    "grid": 96,
+    "view": "top"
+  },
+  "surface": "field"
+}

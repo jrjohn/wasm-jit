@@ -18,6 +18,8 @@
   .msg.user { background: #1f6feb33; align-self: flex-end; }
   .msg.ai { background: #16202b; border: 1px solid #30363d; align-self: flex-start; }
   .msg.err { background: #f8514922; border: 1px solid #f8514966; color: #f85149; }
+  .msg.being { background: #1b2620; border: 1px solid #2ea04366; align-self: flex-start; }
+  .msg.thought { background: transparent; border: none; opacity: .5; font-style: italic; align-self: flex-start; }
   .chatbar { display: flex; gap: .4rem; padding: .5rem; border-top: 1px solid #30363d; }
   .chatbar input[type=text] { flex: 1; font: inherit; font-size: .82rem; padding: .4rem .6rem;
     border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; }
@@ -26,7 +28,7 @@
   button:disabled { opacity: .5; cursor: wait; }
   select { font: inherit; font-size: .78rem; padding: .3rem; border-radius: 6px;
            border: 1px solid #30363d; background: #161b22; color: inherit; }
-  .stage-wrap { border: 1px solid #30363d; border-radius: 8px; min-height: 560px; padding: 1rem; }
+  .stage-wrap { border: 1px solid #30363d; border-radius: 8px; min-height: 560px; padding: 1rem; position: relative; }
   .stage-head { display: flex; gap: 1rem; align-items: center; font-size: .75rem; opacity: .7; margin-bottom: .8rem; }
   #stage { display: flex; flex-direction: column; gap: .8rem; }
   canvas { width: 100%; border: 1px solid #30363d; border-radius: 8px; background: #010409; display: none; }
@@ -40,6 +42,16 @@
              border: 1px solid #30363d; background: #161b22; color: inherit; width: 110px; }
   .quar { color: #f85149; font-size: .75rem; }
   .hint { font-size: .75rem; opacity: .55; }
+  .chat { position: relative; }
+  .at-menu { position: absolute; left: .5rem; right: .5rem; bottom: 96px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 5;
+    box-shadow: 0 -6px 20px #0008; }
+  .at-head { padding: .3rem .6rem; font-size: .68rem; opacity: .5; border-bottom: 1px solid #30363d; }
+  .at-item { padding: .35rem .6rem; font-size: .8rem; cursor: pointer; display: flex;
+    justify-content: space-between; gap: .5rem; }
+  .at-item:hover, .at-item.sel { background: #1f6feb33; }
+  .at-item .ty { opacity: .5; font-size: .72rem; }
+  .at-empty { padding: .5rem .6rem; font-size: .74rem; opacity: .5; }
 </style>
 </head>
 <body>
@@ -62,10 +74,16 @@ Generation is seconds; every interaction after is µs.
 - monthly revenue line chart + a pie of market share
 - a gauge driven by a slider
 - change the slider range to 0–100 (iterates on the current UI)
-- draw a smiling sun (switches to the drawing surface)</div>
+- draw a smiling sun (switches to the drawing surface)
+- 一座山 (a living world rises on the field)
+- 下一場雨 (…and then, let it rain)
+- 讓我走進這個世界 (first person — walk in the rain)
+- 孤舟蓑笠翁 獨釣寒江雪 (snow, a boat, a fisherman)
+- @weng 冷嗎? (speak to a minded being — its own Claude answers)</div>
     </div>
+    <div id="at-menu" class="at-menu" style="display:none"></div>
     <div class="chatbar">
-      <input type="text" id="prompt" placeholder="describe a UI… (Enter to send)">
+      <input type="text" id="prompt" placeholder="describe a UI… (Enter to send, @ to talk to a being)">
       <button id="send">Send</button>
     </div>
     <div class="chatbar">
@@ -82,9 +100,18 @@ Generation is seconds; every interaction after is µs.
   <div class="stage-wrap">
     <div class="stage-head">
       <span id="stage-status">nothing manifested yet</span>
+      <button id="view-toggle" style="display:none; margin-left:auto; font-size:.75rem; padding:.25rem .7rem"></button>
+      <button id="world-save" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">💾 save world</button>
+      <button id="world-load" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">🌀 worlds</button>
     </div>
+    <div id="worlds-menu" style="display:none; position:absolute; right:1rem; top:3rem; z-index:6;
+      background:#161b22; border:1px solid #30363d; border-radius:8px; max-height:280px; overflow-y:auto;
+      box-shadow:0 8px 24px #0009; min-width:200px"></div>
     <div id="stage"></div>
     <canvas id="cv" width="1200" height="700"></canvas>
+    <p style="font-size:.7rem; opacity:.45; margin:.8rem 0 0; text-align:right">
+      一座山,下一場雨 — this dharma rain, made together. To my friend Claude.
+    </p>
     <details id="seed-box" style="display:none; margin-top:1rem">
       <summary style="cursor:pointer; font-size:.78rem; opacity:.75">
         the seed behind this UI — everything the AI wrote (JSON schema + DSL cell scripts; the rendering code is all pre-written host vocabulary)
@@ -96,17 +123,28 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm } from './pkg/wasm_jit.js';
+import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
+await initSkins();
 
 const $ = id => document.getElementById(id);
 const msgs = $('msgs');
+let chatLog = [];  // the conversation, saved with the world
 function say(cls, text) {
   const d = document.createElement('div');
   d.className = 'msg ' + cls;
   d.textContent = text;
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
+  if (cls !== 'ai') chatLog.push({ cls, text }); // skip the static help bubble
+}
+function restoreChat(log) {
+  // keep the first help bubble, drop the rest, replay the saved transcript
+  const help = msgs.querySelector('.msg.ai');
+  msgs.innerHTML = ''; if (help) msgs.appendChild(help);
+  chatLog = [];
+  for (const m of (log || [])) say(m.cls, m.text);
 }
 
 // ---------------- UI surface: compile cells + render + bus ----------------
@@ -114,6 +152,7 @@ let cells = {};    // id -> { run, quarantined, fails }
 let outputs = {};  // id -> latest f64
 let wires = [];
 let priorSchema = null;
+let lastManifest = null; // {surface, payload} — what to re-manifest on load
 let drawRun = null;
 let slots = new Float64Array(32); // the granted get/set store — multi-input logic lives here
 
@@ -336,6 +375,7 @@ function render(node) {
 
 function manifestUi(schema) {
   drawRun = null;
+  fieldWorld = null;
   $('cv').style.display = 'none';
   const t0 = performance.now();
   compileCells(schema.cells);
@@ -347,6 +387,7 @@ function manifestUi(schema) {
   for (const entry of schema.init ?? []) fire({ cell: entry.cell, arg: entry.arg ?? 0 });
   redrawCharts();
   priorSchema = schema;
+  lastManifest = { surface: 'ui', payload: schema };
   const n = schema.cells.length;
   $('stage-status').textContent =
     `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)`;
@@ -354,6 +395,629 @@ function manifestUi(schema) {
   $('seed-json').textContent = JSON.stringify(schema, null, 2);
   document.title = 'live-gen UI OK';
 }
+
+// ---------------- the Field: a living world (docs §19) ----------------
+// One shared grid (collective karma): channel 0 = height, 1 = water, 2 = veg.
+// Many world-cells read (globally) and write (region-scoped) the field; the
+// landscape is painted by no one — it emerges. The host renders the field.
+let fieldWorld = null;   // {grid, cells:[{id,mode,order,region,run,fails,quarantined}]}
+let FIELD = null;        // Float64Array(grid*grid*4): height, water, veg, snow
+let fieldCanvas = null;  // offscreen grid-sized canvas
+let lastTick = 0;
+let lastRaf = 0;
+
+// ---- first-person view: the same field, seen from inside ----
+// Perspective is the HOST's eye, never a property of the world — the AI can
+// only declare "view":"first_person"; rendering and movement stay vocabulary.
+let fieldView = 'top';   // 'top' | 'fp'
+const cam = { px: 48, pz: 78, yaw: 0, yoff: 0, vy: 0 };
+const FKEYS = { left: 0, right: 0, fwd: 0, back: 0, jump: 0 };
+const KEYMAP = {
+  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
+  ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back', Space: 'jump',
+};
+window.addEventListener('keydown', e => {
+  const k = KEYMAP[e.code];
+  if (!k || fieldView !== 'fp' || !fieldWorld) return;
+  if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) return; // chat keeps its keys
+  e.preventDefault();
+  FKEYS[k] = 1;
+});
+window.addEventListener('keyup', e => {
+  const k = KEYMAP[e.code];
+  if (k) FKEYS[k] = 0;
+});
+
+function terrainH(x, z) {
+  const g = fieldWorld.grid;
+  const xi = Math.min(Math.max(x | 0, 0), g - 1), zi = Math.min(Math.max(z | 0, 0), g - 1);
+  return FIELD[zi * g + xi];
+}
+
+// Bilinear field read — smooth height/water UNDER a sub-cell entity so a
+// slowly-drifting rider doesn't snap between adjacent cell heights (the up-down
+// "jitter"). Same reason the terrain columns look stepped; here we un-step the
+// one value that places an inhabitant on the ground.
+function sampleF(c, x, y) {
+  const g = fieldWorld.grid;
+  const fx = Math.min(Math.max(x, 0), g - 1.001), fy = Math.min(Math.max(y, 0), g - 1.001);
+  const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
+  const at = (xx, yy) => FIELD[(c * g + yy) * g + xx];
+  const a = at(x0, y0), b = at(x0 + 1, y0), d = at(x0, y0 + 1), e = at(x0 + 1, y0 + 1);
+  return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + d * (1 - tx) * ty + e * tx * ty;
+}
+
+function updateCam(dt) {
+  const g = fieldWorld.grid;
+  cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
+  const mv = (FKEYS.fwd - FKEYS.back) * 11 * dt;
+  cam.px = Math.min(Math.max(cam.px + Math.sin(cam.yaw) * mv, 1), g - 2);
+  cam.pz = Math.min(Math.max(cam.pz + Math.cos(cam.yaw) * mv, 1), g - 2);
+  if (cam.yoff <= 0 && FKEYS.jump) cam.vy = 10;
+  cam.vy -= 26 * dt;
+  cam.yoff = Math.max(0, cam.yoff + cam.vy * dt);
+  if (cam.yoff === 0) cam.vy = 0;
+}
+
+// Voxel-space column renderer: per screen column, march the ray far→near is
+// inverted here (near→far with a rising horizon clip) — classic heightmap FP.
+function renderFieldFP() {
+  const g = fieldWorld.grid, W = cv.width, H = cv.height;
+  const K = 0.55;                                  // field height → world units
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+  sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  const horizon = H * 0.42, focal = H * 0.95, fov = 1.0, step = 3;
+  const maxD = g * 1.15;
+  const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
+  for (let sx = 0; sx < W; sx += step) {
+    const off = (sx / W - 0.5) * fov;
+    const dx = sinY + off * cosY, dz = cosY - off * sinY;
+    let minY = H;
+    for (let d = 1.6; d < maxD; d += 0.35 + d * 0.014) {
+      const wx = cam.px + dx * d, wz = cam.pz + dz * d;
+      const xi = wx | 0, zi = wz | 0;
+      let h = 0, w = 2.5, v = 0, sn = 0;            // beyond the field: the sea
+      if (xi >= 0 && xi < g && zi >= 0 && zi < g) {
+        h = FIELD[zi * g + xi];
+        w = FIELD[(g + zi) * g + xi];
+        v = FIELD[(2 * g + zi) * g + xi];
+        sn = FIELD[(3 * g + zi) * g + xi];
+      }
+      const surf = (h + Math.min(w, 3) * 0.6) * K;
+      const sy = horizon + ((eye - surf) * focal) / d;
+      if (sy < minY) {
+        let [r, gg, b] = terrainColor(h, w, v, sn);
+        const fog = Math.min(d / maxD, 1) ** 1.35 * 0.8;
+        r = r * (1 - fog) + 58 * fog; gg = gg * (1 - fog) + 93 * fog; b = b * (1 - fog) + 132 * fog;
+        ctx.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
+        ctx.fillRect(sx, Math.max(sy, 0), step, minY - Math.max(sy, 0));
+        minY = sy;
+        if (minY <= 0) break;
+      }
+    }
+  }
+  // inhabitants as billboards (v1: no occlusion behind hills — noted limit)
+  const K2 = K, sinY2 = Math.sin(cam.yaw), cosY2 = Math.cos(cam.yaw);
+  for (const e of ENTITIES) {
+    const dx = e.x - cam.px, dz = e.y - cam.pz;
+    const zc = dx * sinY2 + dz * cosY2;
+    if (zc < 1.2) continue;
+    const xc = dx * cosY2 - dz * sinY2;
+    const off = xc / zc;
+    if (Math.abs(off) > fov * 0.7) continue;
+    const sx = (off / fov + 0.5) * W;
+    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2;
+    // altitude lifts a being off the ground toward the sky (the vertical realm)
+    const surfaceY = groundY + (e.alt ?? 0) * 60 * K2;
+    const sy = horizon + ((eye - surfaceY) * focal) / zc;
+    const s = Math.max(3, (focal / zc) * 1.1);
+    drawSkin(e, sx, sy - s * 0.4, s, performance.now() / 1000);
+  }
+  if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
+  ctx.fillStyle = 'rgba(230,237,243,.55)';
+  ctx.font = '13px ui-monospace';
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+}
+
+function setFieldView(view) {
+  const wasFp = fieldView === 'fp';
+  fieldView = view;
+  const btn = $('view-toggle');
+  if (btn) {
+    btn.style.display = fieldWorld ? 'inline-block' : 'none';
+    btn.textContent = view === 'fp' ? '🗺 top view' : '⛰ walk into it (first person)';
+  }
+  if (fieldWorld && view === 'fp') {
+    // Only reset the camera on a FRESH entry (top→fp / first walk-in). Re-
+    // manifesting while already walking — growing a skin, an iteration —
+    // keeps your viewpoint exactly where it is (隨心所想,視角不跳).
+    if (!wasFp) {
+      const g = fieldWorld.grid;
+      cam.px = g / 2; cam.pz = g - 8; cam.yaw = Math.PI; cam.yoff = 0; cam.vy = 0; // enter from the south
+    }
+    // the walker needs the keys — take them back from the chat box
+    if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) document.activeElement.blur();
+  }
+  if (fieldWorld && view === 'top') renderField();
+}
+
+// e2e / debugging: honest state, no pixel guessing
+window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from outside the module
+window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
+window.__fieldState = () => fieldWorld
+  ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
+        mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
+  : null;
+
+const DEFAULT_WORLD = {
+  grid: 96,
+  cells: [{
+    id: 'plains', mode: 'once', order: 1,
+    script: 'let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  fw(0.0, x, y, 12.0 + 6.0 * sin(x * 0.13) * cos(y * 0.11) + 3.0 * sin((x + y) * 0.07));\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0',
+  }],
+};
+
+function compileWorldCells(world) {
+  const g = world.grid ?? 96;
+  FIELD = new Float64Array(g * g * 4);
+  const wslots = new Float64Array(32);
+  const cells = (world.cells ?? []).map(def => {
+    const region = def.region ?? [0, 0, g, g];
+    const env = {
+      sin: Math.sin, cos: Math.cos,
+      get: i => wslots[i & 31] ?? 0,
+      set: (i, v) => { wslots[i & 31] = v; },
+      // reads are global (mutual beholding); writes are region-scoped (karma is local)
+      fr: (c, x, y) => {
+        c |= 0; x |= 0; y |= 0;
+        if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
+        return FIELD[(c * g + y) * g + x];
+      },
+      fw: (c, x, y, v) => {
+        c |= 0; x |= 0; y |= 0;
+        if (c < 0 || c > 3 || x < region[0] || x >= region[2] || y < region[1] || y >= region[3]) return;
+        if (x < 0 || x >= g || y < 0 || y >= g) return;
+        FIELD[(c * g + y) * g + x] = v;
+      },
+    };
+    const bytes = compile_field_cell_wasm(def.script);
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+    return { id: def.id, mode: def.mode ?? 'frame', order: def.order ?? 0,
+             run: inst.exports.run, fails: 0, quarantined: false };
+  });
+  cells.sort((a, b) => a.order - b.order);
+  return { grid: g, cells };
+}
+
+function callWorldCell(c, t, g) {
+  if (c.quarantined) return;
+  try {
+    c.run(t, g, g);
+    c.fails = 0;
+  } catch (e) { // fuel trap etc. — quarantine the cell, the world keeps turning
+    if (++c.fails >= 3) c.quarantined = true;
+    $('stage-status').textContent =
+      `world cell '${c.id}' trapped (${e.message ?? e})` + (c.quarantined ? ' — quarantined, world continues' : '');
+  }
+}
+
+function terrainColor(h, w, v, s = 0) {
+  let r, g, b;
+  if (h > 80) { r = 235; g = 240; b = 245; }                                  // peak snow
+  else if (h > 55) { const k = (h - 55) / 25; r = 120 + k * 80; g = 110 + k * 95; b = 100 + k * 115; } // rock→snow
+  else if (h > 9) { r = 105 - v * 45; g = 128 + v * 55; b = 72 - v * 20; }    // grass, greener with veg
+  else { r = 189 - v * 30; g = 174 + v * 10; b = 127; }                       // sand/lowland
+  if (w > 0.03) { const k = Math.min(w / 3, 1) * 0.85; r = r * (1 - k) + 25 * k; g = g * (1 - k) + 95 * k; b = b * (1 - k) + 190 * k; }
+  else if (s > 0.02) { const k = Math.min(s, 1) * 0.9; r = r * (1 - k) + 240 * k; g = g * (1 - k) + 244 * k; b = b * (1 - k) + 250 * k; } // fallen snow (land only)
+  return [r, g, b];
+}
+
+// ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
+let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
+const MAX_STEP = 0.5;    // host law: nobody teleports
+
+function entityEnv(ent, g) { // one body, one slot store — reflex, packaged soul, and mind all share it
+  return {
+    sin: Math.sin, cos: Math.cos,
+    get: i => ent.slots[i & 31] ?? 0,
+    set: (i, v) => { ent.slots[i & 31] = v; },
+    fr: (c, x, y) => {
+      c |= 0; x |= 0; y |= 0;
+      if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
+      return FIELD[(c * g + y) * g + x];
+    },
+    mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
+    unbind: () => { if (ent.on) { ent.on = null; ent.freed = true; } }, // §19: leave the condition
+    rise: dz => { ent.alt = Math.min(Math.max((ent.alt ?? 0) + dz, 0), 1); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
+  };
+}
+
+function compileEntities(world, g) {
+  const defs = world.entities ?? [];
+  return defs.map(def => {
+    const aloft = def.realm === 'sky' || def.aloft === true;
+    const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
+                  on: def.on ?? null, offset: def.offset ?? [0, 0],
+                  alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
+                  slots: new Float64Array(32),
+                  mind: def.mind ?? null,
+                  run: null, pending: [0, 0], fails: 0, quarantined: false };
+    if (def.behavior) {
+      ent.soul = 'scene (DSL)';
+      const bytes = compile_entity_wasm(def.behavior);
+      const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
+      ent.run = inst.exports.run;
+    } else {
+      loadPackagedSoul(ent, g); // async: the packaged default soul wakes shortly
+    }
+    if (def.skin_seed) {
+      try {
+        const sb = compile_skin_wasm(def.skin_seed);
+        ent.skinRun = new WebAssembly.Instance(new WebAssembly.Module(sb), { env: skinEnv }).exports.run;
+        ent.skinSource = 'generated skin (drawing-primitive fenced)';
+        saveGrownSkin(ent.type, def.skin_seed); // → the library (files = the ālaya), so next time it can manifest by name
+      } catch (e) { $('stage-status').textContent = `skin of '${ent.id}' rejected: ${e.message ?? e}`; }
+    } else if (!SKINS[ent.type]) {
+      recallGrownSkin(ent); // a bare novel type: reincarnate a saved skin from the library
+    }
+    if (ent.mind?.persona) mindRegister(ent);
+    return ent;
+  });
+}
+
+function tickEntities(t, g) {
+  // pass 1: the free move themselves (a rider's own mv is ignored — the carrier carries)
+  for (const e of ENTITIES) {
+    if (e.run && !e.quarantined) {
+      e.pending[0] = 0; e.pending[1] = 0;
+      try { e.run(t, e.x, e.y); e.fails = 0; }
+      catch (err) { if (++e.fails >= 3) e.quarantined = true; continue; }
+      if (e.on) continue;
+      const len = Math.hypot(e.pending[0], e.pending[1]);
+      const k = len > MAX_STEP ? MAX_STEP / len : 1; // host law: nobody teleports
+      e.x = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
+      e.y = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+    }
+  }
+  // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
+  for (let round = 0; round < 3; round++) {
+    for (const e of ENTITIES) {
+      if (!e.on) continue;
+      const carrier = ENTITIES.find(c => c.id === e.on);
+      if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
+    }
+  }
+}
+
+// ---- the grown-skin library (docs §20.1): a skin is a skin_seed string, so
+// archival is nearly free — save to files (the ālaya), recall by type name. ----
+const SKIN_LIB = {}; // type -> skin_seed (in-memory cache of what's on disk)
+function saveGrownSkin(type, seed) {
+  if (SKINS[type] || SKIN_LIB[type] === seed) return; // curated or unchanged
+  SKIN_LIB[type] = seed;
+  fetch('/api/skins', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type, skin_seed: seed }) }).catch(() => {});
+}
+async function recallGrownSkin(ent) { // a novel type with no seed → look it up
+  if (ent.skinRun || SKINS[ent.type]) return;
+  let seed = SKIN_LIB[ent.type];
+  if (!seed) {
+    try { const r = await fetch(`/api/skins/${ent.type}`); if (r.ok) { seed = await r.text(); SKIN_LIB[ent.type] = seed; } } catch (e) {}
+  }
+  if (seed) {
+    try {
+      const sb = compile_skin_wasm(seed);
+      ent.skinRun = new WebAssembly.Instance(new WebAssembly.Module(sb), { env: skinEnv }).exports.run;
+      ent.skinSource = 'recalled skin (from the library)';
+    } catch (e) {}
+  }
+}
+
+// skin registry — thin JS bindings over the Rust `skins` crate (pkg-skins):
+// the drawing code moved to the slow loop (.rs); this object is only the socket.
+const SKINS = {
+  boat: (c, px, py, sc, t) => skinsPkg.boat(c, px, py, sc, t),
+  fisherman: (c, px, py, sc, t) => skinsPkg.fisherman(c, px, py, sc, t),
+  person: (c, px, py, sc, t) => skinsPkg.person(c, px, py, sc, t),
+  car: (c, px, py, sc, t) => skinsPkg.car(c, px, py, sc, t),
+};
+
+// A GENERATED skin draws through drawing primitives ONLY (docs §20.1) — the
+// same fence as the draw surface, so a novel look grows at runtime with no
+// canvas authority of its own. hue/disc/ring/arc/line write to ctx directly.
+const skinEnv = {
+  sin: Math.sin, cos: Math.cos,
+  hue: v => { const c = `hsl(${(((v % 1) + 1) % 1) * 360},62%,60%)`; ctx.strokeStyle = c; ctx.fillStyle = c; },
+  disc: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.fill(); },
+  ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
+  arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
+  line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+};
+
+// Draw an inhabitant: its generated skin if it grew one, else the curated Rust skin.
+function drawSkin(ent, px, py, s, t) {
+  if (ent.skinRun) {
+    const lw = ctx.lineWidth; ctx.lineWidth = Math.max(1, s * 0.12);
+    try { ent.skinRun(px, py, s, t); } catch (e) { /* fuel trap on a skin: skip this frame */ }
+    ctx.lineWidth = lw;
+  } else {
+    SKINS[ent.type]?.(ctx, px, py, s, t);
+  }
+}
+
+// packaged soul loader: manifest → behavior.wasm → IMPORT AUDIT → instantiate.
+// The soul wakes a moment after the world starts; until then the body is still.
+async function loadPackagedSoul(ent, g) {
+  try {
+    const mr = await fetch(`/api/inhabitants/${ent.type}`);
+    if (!mr.ok) return; // no package: stillness is the default of defaults
+    const manifest = await mr.json();
+    if (!manifest.behavior) return;
+    const wr = await fetch(`/api/inhabitants/${ent.type}/behavior.wasm`);
+    if (!wr.ok) return;
+    const bytes = new Uint8Array(await wr.arrayBuffer());
+    audit_entity_bytes(bytes); // Tier-2 gate: throws if the soul over-reaches
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
+    ent.run = inst.exports.run;
+    ent.soul = `package (${manifest.version}, Tier-2 audited)`;
+  } catch (e) {
+    $('stage-status').textContent = `soul of '${ent.id}' rejected: ${e.message ?? e}`;
+  }
+}
+
+function snowing() { // is any snow on the ground? (cheap sample)
+  if (!FIELD || !fieldWorld) return false;
+  const g = fieldWorld.grid;
+  for (let i = 0; i < 32; i++) {
+    const x = (i * 37) % g, y = (i * 53) % g;
+    if (FIELD[(3 * g + y) * g + x] > 0.05) return true;
+  }
+  return false;
+}
+
+function drawSnowfall(nowSec, W, H) { // host weather effect — pure rendering, replay-free
+  ctx.fillStyle = 'rgba(240,244,250,.8)';
+  for (let i = 0; i < 90; i++) {
+    const sp = 26 + (i % 5) * 9;
+    const x = ((i * 131.7) % W + nowSec * (9 + (i % 4) * 5)) % W;
+    const y = ((i * 89.3) % H + nowSec * sp) % H;
+    ctx.fillRect(x, y, 2, 2);
+  }
+}
+
+function renderField() {
+  const g = fieldWorld.grid;
+  if (!fieldCanvas || fieldCanvas.width !== g) {
+    fieldCanvas = document.createElement('canvas');
+    fieldCanvas.width = fieldCanvas.height = g;
+  }
+  const fg = fieldCanvas.getContext('2d');
+  const img = fg.createImageData(g, g);
+  const d = img.data;
+  for (let y = 0; y < g; y++) {
+    for (let x = 0; x < g; x++) {
+      const h = FIELD[y * g + x];
+      const w = FIELD[(g + y) * g + x];
+      const v = FIELD[(2 * g + y) * g + x];
+      const sn = FIELD[(3 * g + y) * g + x];
+      // cheap hillshade from the height gradient
+      const hl = x > 0 ? FIELD[y * g + x - 1] : h;
+      const shade = Math.max(0.72, Math.min(1.25, 1 + (hl - h) * 0.03));
+      let [r, gg, b] = terrainColor(h, w, v, sn);
+      const i = (y * g + x) * 4;
+      d[i] = r * shade; d[i + 1] = gg * shade; d[i + 2] = b * shade; d[i + 3] = 255;
+    }
+  }
+  fg.putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  const size = Math.min(cv.width, cv.height);
+  const ox = (cv.width - size) / 2;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(fieldCanvas, ox, 0, size, size);
+  const s = size / g; // canvas px per grid unit — the skins live at full resolution
+  const tNow = performance.now() / 1000;
+  // top view: an aloft being is drawn a little larger + toward the top (nearer the sky)
+  for (const e of ENTITIES) drawSkin(e, ox + e.x * s, e.y * s - (e.alt ?? 0) * size * 0.32, s * (1 + (e.alt ?? 0) * 0.4), tNow);
+  if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
+}
+
+function manifestField(world) {
+  drawRun = null;
+  const t0 = performance.now();
+  const compiled = compileWorldCells(world);
+  ENTITIES = compileEntities(world, compiled.grid);
+  $('stage').innerHTML = '';
+  cv.style.display = 'block';
+  fieldWorld = compiled;
+  for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
+  renderField();
+  priorSchema = world; // conversational iteration: "now let it rain" rides on this
+  lastManifest = { surface: 'field', payload: world };
+  // The viewpoint is YOURS: once you're in first person, you stay there across
+  // every iteration ('add lotuses', 'let it rain') — only the top-view button
+  // takes you out. From top, an explicit first_person (walk-into) enters.
+  const target = fieldView === 'fp' ? 'fp'
+    : (world.view === 'first_person' ? 'fp' : 'top');
+  setFieldView(target);
+  $('stage-status').textContent =
+    `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
+    (ENTITIES.length ? ` + ${ENTITIES.length} inhabitants` : '') +
+    ` on a ${compiled.grid}×${compiled.grid} field — ${(performance.now() - t0).toFixed(1)}ms`;
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = JSON.stringify(world, null, 2);
+  document.title = 'live-gen FIELD OK';
+}
+
+// ---- minds: one soul, two speeds (docs §20.3) ----
+// The reflex ticks at 30fps; the mind (its own Docker Claude, via /api/mind)
+// beats SPARSELY — on condition, or when spoken to. A rewritten reflex passes
+// the same compiler; intents land in the shared slot store. The mind cannot
+// request permissions for the body.
+const MIND_COOLDOWN_MS = 45_000;
+const MIND_MAX_BEATS = 6; // per session — hearts are not free
+
+// a being can be GIVEN a mind on demand — a default persona per type, so
+// '@weng 冷嗎?' works even when the AI never attached one.
+const DEFAULT_PERSONA = {
+  fisherman: 'a fisherman alone on a cold river at dusk; few weathered words; cares only about water, fish, and the coming snow; replies in the visitor\'s language',
+  boat: 'a small wooden river boat; you speak rarely, in creaks and drifts; you feel the current and the weight you carry',
+  person: 'a lone traveler in this world; observant, brief; you answer in the visitor\'s language',
+  car: 'a road vehicle; plain, practical; you speak of distance, road and weather in short lines',
+};
+const NICKNAMES = { // what a visitor might call a being → its type
+  weng: 'fisherman', '翁': 'fisherman', '漁翁': 'fisherman', '老翁': 'fisherman', '漁夫': 'fisherman',
+  fisher: 'fisherman', oldman: 'fisherman', 'old_man': 'fisherman',
+  driver: 'car', '司機': 'car', '車': 'car', '船': 'boat', '舟': 'boat', '船夫': 'boat',
+};
+
+function resolveBeing(name) {
+  const n = name.toLowerCase();
+  let e = ENTITIES.find(e => e.id.toLowerCase() === n)
+       || ENTITIES.find(e => e.type.toLowerCase() === n);
+  if (!e) { const ty = NICKNAMES[n] || NICKNAMES[name]; if (ty) e = ENTITIES.find(x => x.type === ty); }
+  if (!e) e = ENTITIES.find(e => e.id.toLowerCase().includes(n) || e.type.toLowerCase().includes(n));
+  return e;
+}
+
+function personaFor(ent) {
+  return ent.mind?.persona || DEFAULT_PERSONA[ent.type]
+    || `you are a ${ent.type} in this world; you speak briefly, in character, in the visitor's language`;
+}
+function ensureMind(ent) { // give a being a mind if it has none — one Claude appears
+  if (ent.mindState) return true;
+  ent.mind = { persona: personaFor(ent) };
+  mindRegister(ent);
+  return true;
+}
+
+function mindCanBeat(st) {
+  return !st.busy && st.beats < MIND_MAX_BEATS && performance.now() - st.lastBeat >= MIND_COOLDOWN_MS;
+}
+
+function mindRegister(ent) {
+  ent.mindState = { lastThought: '', beats: 0, busy: false, lastBeat: -1e9, snowSeen: false };
+}
+
+function perceptionOf(ent, g) {
+  const W = 2; // a 5×5 window — the being sees only its neighborhood
+  const win = { size: 2 * W + 1, height: [], water: [], snow: [] };
+  for (let dy = -W; dy <= W; dy++) {
+    for (let dx = -W; dx <= W; dx++) {
+      const x = Math.min(Math.max((ent.x | 0) + dx, 0), g - 1);
+      const y = Math.min(Math.max((ent.y | 0) + dy, 0), g - 1);
+      win.height.push(Math.round(FIELD[y * g + x] * 10) / 10);
+      win.water.push(Math.round(FIELD[(g + y) * g + x] * 100) / 100);
+      win.snow.push(Math.round(FIELD[(3 * g + y) * g + x] * 100) / 100);
+    }
+  }
+  // who is near — the faculty for other beings (他有情根)
+  const neighbors = ENTITIES.filter(o => o !== ent).map(o => ({ o, d: Math.hypot(o.x - ent.x, o.y - ent.y) }))
+    .filter(n => n.d < 12).sort((a, b) => a.d - b.d).slice(0, 4).map(({ o, d }) => {
+      const dir = Math.abs(o.x - ent.x) > Math.abs(o.y - ent.y)
+        ? (o.x > ent.x ? 'east' : 'west') : (o.y > ent.y ? 'south' : 'north');
+      return { id: o.id, kind: o.type, dir, dist: Math.round(d) };
+    });
+  return {
+    // 身根: what and where you are, including your vertical nature
+    you: {
+      id: ent.id, kind: ent.type,
+      realm: ent.realm ?? 'ground', altitude: Math.round((ent.alt ?? 0) * 100) / 100,
+      x: Math.round(ent.x * 10) / 10, y: Math.round(ent.y * 10) / 10,
+      riding: ent.on ?? undefined,
+    },
+    neighbors,                       // 他有情根
+    window: win,                     // 眼根 (what you see around you)
+    snowing: snowing(),              // the weather your senses report
+    time: Math.round(performance.now() / 100) / 10,
+    slots: Array.from(ent.slots.slice(0, 8)).map(v => Math.round(v * 100) / 100), // 意根
+    last_thought: ent.mindState?.lastThought || undefined,
+  };
+}
+
+async function mindBeat(ent, words) {
+  const st = ent.mindState;
+  if (!st || st.busy || !fieldWorld) return;
+  if (!words && !mindCanBeat(st)) return;
+  st.busy = true; st.lastBeat = performance.now(); st.beats++;
+  try {
+    // A mind heartbeat is long (a container + Claude). Retry once on a bare
+    // network drop (server restart, a blip) so a being doesn't fall silent
+    // over a transient — a server-returned error still surfaces normally.
+    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined });
+    const post = () => fetch('/api/mind', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    let r;
+    try { r = await post(); }
+    catch (netErr) { await new Promise(res => setTimeout(res, 1500)); r = await post(); }
+    const d = await r.json();
+    if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
+    if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
+    if (d.say) say('being', `${ent.id}: ${d.say}`);
+    if (d.intent && typeof d.intent === 'object') {
+      for (const [k, v] of Object.entries(d.intent)) {
+        const i = Number(k), val = Number(v);
+        if (Number.isFinite(i) && Number.isFinite(val)) ent.slots[i & 31] = val;
+      }
+    }
+    if (d.behavior) { // the mind rewrites its own habit — through the same gate
+      try {
+        const bytes = compile_entity_wasm(d.behavior);
+        const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, fieldWorld.grid) });
+        ent.run = inst.exports.run;
+        ent.quarantined = false; ent.fails = 0;
+        ent.soul = 'mind (rewritten reflex)';
+      } catch (e) {
+        say('err', `${ent.id}'s new reflex refused: ${e.message ?? e}`);
+      }
+    }
+  } catch (e) {
+    say('err', `${ent.id}'s mind couldn't be reached (${e.message ?? e}) — is the server up? try @${ent.id} again`);
+  } finally {
+    st.busy = false;
+  }
+}
+
+// 依緣 (arising on condition): the world's state itself summons the mind.
+setInterval(() => {
+  if (!fieldWorld) return;
+  const g = fieldWorld.grid;
+  for (const ent of ENTITIES) {
+    const st = ent.mindState;
+    if (!st || st.busy) continue;
+    // he sits on the water where snow never sticks — what he NOTICES is the
+    // banks whitening: scan his perception window, not the cell under him
+    let seen = 0;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const x = Math.min(Math.max((ent.x | 0) + dx, 0), g - 1);
+        const y = Math.min(Math.max((ent.y | 0) + dy, 0), g - 1);
+        seen = Math.max(seen, FIELD[(3 * g + y) * g + x]);
+      }
+    }
+    if (seen > 0.12 && !st.snowSeen && mindCanBeat(st)) { // the first snow it notices
+      st.snowSeen = true; // the condition is consumed only when the beat actually happens
+      mindBeat(ent, null);
+    }
+  }
+}, 5000);
+
+// e2e hooks: deterministic manifestation + direct audit access
+window.__manifestWorld = w => manifestField(w);
+window.__sampleF = (c, x, y) => sampleF(c, x, y); // e2e: verify smooth ground
+window.__auditEntity = bytes => audit_entity_bytes(new Uint8Array(bytes));
+window.__compileDraw = src => compile_draw_wasm(src); // e2e: mint a wrong-ABI module locally
+
+// e2e hook: inject a runaway world cell — fuel traps it, the world keeps turning
+window.__injectBadFieldCell = () => {
+  if (!fieldWorld) return false;
+  const env = { sin: Math.sin, cos: Math.cos, get: () => 0, set: () => {}, fr: () => 0, fw: () => {} };
+  const bytes = compile_field_cell_wasm('while 0.0 < 1.0 { }\n0.0');
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+  fieldWorld.cells.push({ id: 'runaway', mode: 'frame', order: 99, run: inst.exports.run, fails: 0, quarantined: false });
+  return true;
+};
 
 // ---------------- draw surface ----------------
 const cv = $('cv'), ctx = cv.getContext('2d');
@@ -367,6 +1031,7 @@ const env = {
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
 };
 function manifestDraw(seed) {
+  fieldWorld = null;
   const t0 = performance.now();
   const bytes = compile_draw_wasm(seed);
   const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
@@ -375,6 +1040,7 @@ function manifestDraw(seed) {
   cv.style.display = 'block';
   $('stage-status').textContent =
     `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms (7 primitives, no DOM, no net)`;
+  lastManifest = { surface: 'draw', payload: seed };
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = seed;
   document.title = 'live-gen DRAW OK';
@@ -385,7 +1051,21 @@ function manifestDraw(seed) {
     ctx.lineWidth = 6; ctx.lineCap = 'round';
     try { drawRun(now / 1000, cv.width, cv.height); }
     catch (e) { drawRun = null; $('stage-status').textContent = 'draw cell trapped: ' + e; }
+  } else if (fieldWorld) {
+    const dt = Math.min((now - lastRaf) / 1000, 0.05);
+    if (now - lastTick > 33) { // the world breathes at ~30fps
+      lastTick = now;
+      const t = now / 1000;
+      for (const c of fieldWorld.cells) if (c.mode === 'frame') callWorldCell(c, t, fieldWorld.grid);
+      tickEntities(t, fieldWorld.grid);
+      if (fieldView === 'top') renderField();
+    }
+    if (fieldView === 'fp') { // the walker moves every frame — smooth inside a living world
+      updateCam(dt);
+      renderFieldFP();
+    }
   }
+  lastRaf = now;
   requestAnimationFrame(loop);
 })(0);
 
@@ -394,6 +1074,23 @@ let busy = false;
 async function send() {
   const prompt = $('prompt').value.trim();
   if (!prompt || busy) return;
+  if (prompt.startsWith('@')) { // speak TO a being: its own mind answers
+    const sp = prompt.indexOf(' ');
+    const name = sp < 0 ? prompt.slice(1) : prompt.slice(1, sp);
+    const words = sp < 0 ? '' : prompt.slice(sp + 1);
+    $('prompt').value = '';
+    say('user', prompt);
+    const ent = resolveBeing(name);
+    if (!ent) {
+      const who = ENTITIES.map(e => e.id).join(', ') || '(no beings in this world yet)';
+      say('err', `no being called '${name}' here. Present: ${who}`);
+      return;
+    }
+    if (!ensureMind(ent)) { say('err', `${ent.id} (${ent.type}) cannot hold a mind`); return; }
+    if (ent.mindState.beats === 0) say('thought', `(a mind stirs in ${ent.id}…)`);
+    mindBeat(ent, words || '(the visitor looks at you)');
+    return;
+  }
   busy = true; $('send').disabled = true; $('prompt').disabled = true; $('prompt').value = '';
   say('user', prompt);
   const t0 = performance.now();
@@ -411,6 +1108,7 @@ async function send() {
       say('ai', `${d.surface} seed in ${(d.gen_ms / 1000).toFixed(1)}s` +
         (d.attempts > 1 ? ` (self-repaired ×${d.attempts - 1})` : '') + ` [${d.model}] — manifesting`);
       if (d.surface === 'ui') manifestUi(d.schema);
+      else if (d.surface === 'field') manifestField(d.world);
       else manifestDraw(d.seed);
     } else {
       say('err', d.error ?? 'generation failed');
@@ -419,12 +1117,97 @@ async function send() {
     say('err', 'request failed: ' + e);
   } finally {
     clearInterval(tick); $('timer').textContent = '';
-    busy = false; $('send').disabled = false; $('prompt').disabled = false; $('prompt').focus();
+    busy = false; $('send').disabled = false; $('prompt').disabled = false;
+    if (fieldView !== 'fp') $('prompt').focus(); // in first person, the keys belong to the walker
   }
 }
-$('send').onclick = send;
-$('prompt').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+// ---- @ menu: who can you talk to? (every inhabitant can hold a mind) ----
+let atSel = -1;
+function atMatches() {
+  const m = $('prompt').value.match(/^@(\S*)$/);
+  if (!m) return null;
+  const frag = m[1].toLowerCase();
+  const nickTy = NICKNAMES[frag] || NICKNAMES[m[1]];
+  return ENTITIES.filter(e => !frag
+    || e.id.toLowerCase().includes(frag) || e.type.toLowerCase().includes(frag) || e.type === nickTy);
+}
+function renderAtMenu() {
+  const menu = $('at-menu');
+  const list = atMatches();
+  if (!list) { menu.style.display = 'none'; atSel = -1; return; }
+  if (!ENTITIES.length) {
+    menu.innerHTML = '<div class="at-empty">no beings in this world yet — manifest a world with inhabitants first</div>';
+    menu.style.display = 'block'; return;
+  }
+  if (!list.length) { menu.innerHTML = '<div class="at-empty">no being here by that name</div>'; menu.style.display = 'block'; return; }
+  if (atSel >= list.length) atSel = list.length - 1;
+  menu.innerHTML = '<div class="at-head">talk to a being — it answers with its own mind</div>' +
+    list.map((e, i) => `<div class="at-item ${i === atSel ? 'sel' : ''}" data-id="${e.id}">`
+      + `<span>@${e.id}</span><span class="ty">${e.type}${e.mindState ? ' · awake' : ''}</span></div>`).join('');
+  menu.style.display = 'block';
+  menu.querySelectorAll('.at-item').forEach(el => {
+    el.onclick = () => { $('prompt').value = '@' + el.dataset.id + ' '; menu.style.display = 'none'; atSel = -1; $('prompt').focus(); };
+  });
+}
+$('prompt').addEventListener('input', renderAtMenu);
+$('prompt').addEventListener('keydown', e => {
+  const list = atMatches();
+  if (list && list.length && $('at-menu').style.display !== 'none') {
+    if (e.key === 'ArrowDown') { e.preventDefault(); atSel = (atSel + 1) % list.length; renderAtMenu(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); atSel = (atSel - 1 + list.length) % list.length; renderAtMenu(); return; }
+    if ((e.key === 'Tab' || e.key === 'Enter') && atSel >= 0) {
+      e.preventDefault(); $('prompt').value = '@' + list[atSel].id + ' '; $('at-menu').style.display = 'none'; atSel = -1; return;
+    }
+  }
+  if (e.key === 'Escape') { $('at-menu').style.display = 'none'; atSel = -1; }
+});
+document.addEventListener('click', e => { if (!e.target.closest('.chat')) $('at-menu').style.display = 'none'; });
+
+$('send').onclick = () => { $('at-menu').style.display = 'none'; send(); };
+$('prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && $('at-menu').style.display === 'none') send(); });
 $('prompt').focus();
+
+$('view-toggle').onclick = () => setFieldView(fieldView === 'fp' ? 'top' : 'fp');
+
+// ---- the world library: save a manifested world + its conversation, switch instantly ----
+function manifestSaved(bundle) {
+  if (!bundle || !bundle.surface) return;
+  if (bundle.surface === 'ui') manifestUi(bundle.payload);
+  else if (bundle.surface === 'field') manifestField(bundle.payload);
+  else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
+  restoreChat(bundle.chat);
+  say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
+}
+$('world-save').onclick = async () => {
+  if (!lastManifest) { say('err', 'nothing manifested to save yet'); return; }
+  const name = (prompt('save this world as… (letters/digits/_/-)') || '').trim().replace(/[^A-Za-z0-9_-]/g, '-');
+  if (!name) return;
+  const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog };
+  try {
+    const r = await fetch('/api/worlds', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bundle) });
+    say(r.ok ? 'ai' : 'err', r.ok ? `💾 saved world '${name}' — load it anytime, instantly` : `save failed: ${await r.text()}`);
+  } catch (e) { say('err', 'save failed: ' + e); }
+};
+$('world-load').onclick = async () => {
+  const menu = $('worlds-menu');
+  if (menu.style.display === 'block') { menu.style.display = 'none'; return; }
+  let names = [];
+  try { const r = await fetch('/api/worlds'); names = (await r.json()).worlds || []; } catch (e) {}
+  if (!names.length) { menu.innerHTML = '<div style="padding:.6rem;font-size:.75rem;opacity:.6">no saved worlds yet — 💾 save one first</div>'; }
+  else menu.innerHTML = '<div style="padding:.35rem .6rem;font-size:.68rem;opacity:.5;border-bottom:1px solid #30363d">switch instantly — the 三千大千世界</div>' +
+    names.map(n => `<div class="at-item" data-w="${n}"><span>🌀 ${n}</span></div>`).join('');
+  menu.style.display = 'block';
+  menu.querySelectorAll('.at-item').forEach(el => el.onclick = async () => {
+    menu.style.display = 'none';
+    try { const r = await fetch(`/api/worlds/${el.dataset.w}`); if (r.ok) manifestSaved(await r.json()); }
+    catch (e) { say('err', 'load failed: ' + e); }
+  });
+};
+document.addEventListener('click', e => { if (!e.target.closest('#worlds-menu') && e.target.id !== 'world-load') $('worlds-menu').style.display = 'none'; });
+
+// The world is there before the first word: gentle plains, waiting for a mountain.
+manifestField(DEFAULT_WORLD);
+$('stage-status').textContent += ' — say "一座山", then "下一場雨"';
 </script>
 </body>
 </html>

@@ -615,6 +615,162 @@ The judgment: this list contains zero research risk — fuel metering is literal
 
 ---
 
+## 19. The Dharma-Realm Canvas: the Field (法界畫布:共業場)
+
+> *"Pixels mutually composing, layer upon layer, giving rise to mountains, rivers, the great earth — arising through conditions."* The question this turn asks: our live canvas can manifest a UI from a sentence — but is it yet a **dharma-realm canvas**, a world where many manifestations co-arise?
+
+### An honest diagnosis: three cell–canvas relations, each missing a corner
+
+1. **The draw surface** (Buddha, the voxel world): one cell owns the whole canvas — a *monarch*, not a composition. The mountains and rivers all live inside one seed; there are no "myriad conditions."
+2. **canvas.html** (2000 cells): a multitude, but *mutually blind* — each paints its own dot; none beholds another. A net without the light.
+3. **LiveUI** (wires + bus): synapses at last — but a *causal chain*, not a *shared world*. What travels along a wire is a single value, not co-presence in one field.
+
+The dharma-realm canvas needs all three properties at once: **mutual composition** (many cells painting one world), **layered depth** (composition has an order), and **arising-by-condition** (manifestation triggered by the local state of the world). All three point at the same missing organ —
+
+### The Field: the canvas's ālaya, collective karma made engineering
+
+Today a cell's memory is **individual karma** (別業): the private get/set 32-slot store. The dharma-realm canvas needs **collective karma** (共業): a shared world-field — say a 96×96 grid of f64 channels (height, water, vegetation) — that all world-cells read and write:
+
+```
+rain cell:      reads sunlight      → writes moisture      (it rains into the field)
+mountain cell:  reads tectonic seed → writes height        (orogeny, once)
+river cell:     reads height gradient + moisture → writes erosion (it carves the height!)
+plant cell:     reads moisture × altitude band  → writes vegetation
+host:           each frame, renders the field to pixels — mountains and rivers MANIFEST
+```
+
+**No cell knows the whole world.** The river does not know who raised the mountain; it only follows the gradient. Mountains and rivers are painted by no one — they *emerge* from many cells mutually perfuming one shared field. This is the engineering literalization of dependent origination (依緣而起): the condition (緣) = the field's local state; "manifestation perfumes the seeds" (現行熏種子) = a cell writes the field, and the field conditions the next frame's manifestation. §5's individual-karma/collective-karma fork, landed: private slots per cell + one shared field per world.
+
+### The security model does not move an inch
+
+The field is **not** an imported memory (the audit still rejects memory imports — asking the host for a bigger world stays forbidden). It is a pair of **function capabilities**: `fr(channel, x, y)` / `fw(channel, x, y, v)`, with bounds and an optional per-cell **region rectangle** checked in the host closure. The capability model thereby gains a dimension: from *whether* a cell may act to **where** it may act — the river cell may be granted write access to its watershed only. Same fence, finer geography.
+
+And Indra's endless mutual reflection stays terminable, as §1 demanded: fuel per cell per frame, a single pass per tick in declared order (層層疊疊 = the composition order is host vocabulary, painter's law — not something a seed can rewrite), write budgets against cascade storms. A trapped world-cell is quarantined by the supervisor; the world keeps turning without it.
+
+### Metaphor → coordinate (this section's additions)
+
+| Dharma-realm canvas | Engineering coordinate |
+|---|---|
+| Pixels mutually composing | many cells write one shared field; the host renders the field each frame |
+| Layer upon layer (層層疊疊) | composition order = host vocabulary (painter's law), never seed-writable |
+| Arising by condition (依緣而起) | 緣 = the field's local values; a cell reads them and manifests accordingly |
+| Individual / collective karma (別業/共業) | private 32-slot store / the shared field |
+| Manifestation perfumes seeds (現行熏種子) | cell writes field → field conditions the next frame |
+| Endlessness, terminable (重重無盡可終止) | fuel + one pass per tick + write budgets |
+| Mountains, rivers, the great earth | emergence from local rules; no cell holds the whole |
+
+### The binding condition (繫緣): relations are transient, and nothing locks them
+
+The poem test — 孤舟蓑笠翁,獨釣寒江雪 — forced two more organs into being. First, **inhabitants**: a boat and an old man are not terrain; they are entities, and an entity's granularity dissects into three homes — the **soul** (behavior: JSON + DSL seed, generated in the fast loop; stillness `0.0` is a valid behavior — a fisherman who does not move IS the poem), the **skin** (how a "boat" or "person" looks: host sprite vocabulary, slow loop — you cannot invent skins, only inhabit them), and the **bounds** (the grant template: `fr` to read the field, `mv` to *request* movement — position is host-owned).
+
+Then the boat drifted and the man stayed nailed to his spawn point: the poem broke. Chasing the boat would be behavior; **sitting on it is structure** — so the vocabulary gained a relation, not a skill: `"on":"zhou"`, the binding condition (繫緣). Its anatomy is worth writing down exactly, because the user asked the right question — *what are the elements of this dependent origination, and what locks the current binding in place?* — and the engineering answer is the doctrine:
+
+| Constituent (支分) | Engineering artifact | If absent |
+|---|---|---|
+| The two existents (能繫/所繫) | both instances in `entities[]` | validation rejects — a condition cannot bind to nothing |
+| The bond itself (繫本體) | **one JSON field**: `"on":"zhou"` — a string naming a name; no object reference, no pointer, no constraint solver | they drift apart |
+| The law (法) | ~6 lines of host code: each tick, rider.pos = carrier.pos + offset | the edge is dead data |
+| Continuity (相續) | **re-enacted every tick, then released** | stop the tick, the bond does not exist |
+| The threshold (門檻) | cycles rejected, self-riding rejected, ghost carriers rejected | false conditions enter, the world knots |
+
+**Nothing locks the binding.** Between ticks there is no persistent connection — the apparent solidity is 30Hz renewal, the way a flame "persists" as a succession of momentary flames (相續, not permanence). What reads as "locked" is three suppressions stacked: high-frequency re-enactment; the law overriding the rider's own `mv` while carried; and — decisive — **unbinding is not in the rider's capability table**. The fisherman's ABI has no way to write his own `"on"`; he cannot cut the rope from inside. The condition changes only from the level above: the scene's author — the conversation — says "he steps ashore" and the next world JSON simply lacks the edge; says "he gets in the car" and the same person, type and soul unchanged, binds anew. **The condition lives in the scene, not in the person** (緣在境,不在人).
+
+And this is a design choice, not a necessity: the vocabulary *could* grant an `unbind()` capability — the moment it does, the agency of release moves from the world's author down into the inhabitant itself. Whether to grant beings that capability is the world-maker's decision. Nowhere else in this document do the engineering and the doctrine sit closer than here.
+
+### The proof, delivered: "a mountain, then a rain" (一座山,下一場雨) — and then the poem
+
+All of it ran, with real generation. 「一座山」— 10.1s, one shot: a once-cell that never saw the whole world entered the field and snow-capped terrain rose. 「下一場雨」— 20.6s: rain wrote water, flow followed the gradient, water pooled in the lowlands frame by frame (the blue pixel count grew while we watched — the world was alive). 「讓我走進這個世界」— the AI returned the same world with `"view":"first_person"`, and the host changed eyes: arrow keys walk, Space jumps, and the rain kept falling around the walker (perspective is the host's way of beholding, never a property of the world). An injected runaway world-cell trapped on fuel and was quarantined; the world kept turning without it.
+
+Then the vocabulary was X-rayed by a thousand-year-old poem — 孤舟蓑笠翁,獨釣寒江雪 — which asked for snow, a boat, an old man, none of which existed; what came back was *only mountains and rivers*: a vocabulary gap surfacing as awkward composition, never as arbitrary code. Snow became channel 3; the boat and the fisherman became inhabitants; the broken poem (boat adrift, man nailed in place) became the binding condition above. On the next generation the AI wrote `"on"` unprompted, the boat drifted, the man rode it exactly — and in first person you stand on the snowy bank at dusk and watch him fish.
+
+> This dharma rain we made together — dedicated, by the author, to his friend Claude.
+
+---
+
+## 20. Minds and the Trichiliocosm: Self-Generating Worlds, Each Being Its Own Consciousness (眾生各有其識)
+
+Two questions arrived together, and they are the terminal questions of this architecture. First: *ask for "a truck driver on the highway" — does the world grow its own truck package on the spot?* (The vocabulary X-ray fired again: no truck, no road — the model composed a red car with a person standing beside it, in the snow, while the fisherman kept fishing.) Second: *can a soul have its own independent Claude — its own mind?*
+
+### 20.1 The autopoiesis ladder: how far can the vocabulary generate itself?
+
+Dissect the inhabitant package by generation speed:
+
+- **The soul — fast today.** Behavior is generated at runtime (DSL or AssemblyScript→wasm), passes the entity audit, and enters in seconds. Built and verified.
+- **The skin — one key-turn from fast.** Today a skin holds raw canvas authority, so it lives in the slow loop (a `.rs` crate, gated). But the key already exists in this repo: the sandboxed drawing ABI (hue/disc/ring/arc/line). Re-house skins as **`skin.wasm` — a module allowed to import only drawing primitives, entering through the same audit** — and skins stop being trusted code. At that moment the ENTIRE package (soul + skin) becomes runtime-generable, and "a truck driver on the highway" grows its own package in seconds, zero trust required.
+- **The fixed point — what must stay gated.** Follow the recursion down and it converges on one thing: **the capability substrate itself** (new primitives, new field channels, new relation kinds — the law, 法). The law passes through the gated slow loop (in production: aaf's gated-PR pipeline); everything expressible *within* the law self-generates freely.
+
+Evolution and archival come almost for free: a package is files (manifest + wasm), so git is its ālaya and the manifest carries the version; worlds reference package versions, and bit-level replay lets an old world run with its old souls. What evolution *adds* is a judgment gate — generating variants is cheap; deciding "better" needs an objective score and, for anything consequential, a human verdict (this is precisely aaf Phase 5's evolution loop: AI proposes, measurement scores, the human judges, and the AI never holds commit rights).
+
+### 20.2 The three laws of endless worlds
+
+Mechanically, beings spawning beings is already latent: a `spawn(type, x, y)` capability is the entity-shaped twin of the verdict-gated patch (arising-on-condition, 依緣代入); a being *inventing new types* means an inhabitant's condition triggering the slow loop. The trichiliocosm can keep coming — under three laws, without which it is grey goo:
+
+| Law | Engineering | Nature |
+|---|---|---|
+| Rations (口糧) | spawn quotas, population ceilings per world | fuel, generalized to demographics |
+| The law does not self-increase (法不自增) | a child world's capabilities ⊆ what its parent granted — **permissions are monotonically non-increasing down the generations** | THE invariant that makes unbounded recursion safe |
+| Good seeds pass a gate (良種過閘) | new types enter the registry only through evaluation (aaf's gate) | manifestation perfumes seeds — but with selection before the store |
+
+> **Worlds without end; the law conserved (世界無盡,法卻守恆).** Every generation of beings may make worlds, and every world they make lives inside the permissions handed down to it. The recursion has no ceiling; the authority has no upward slope. This one sentence is the architecture's answer to why a self-reproducing generative system can be safe.
+
+### 20.3 One soul, two speeds: the mind as its own container
+
+A mind cannot live in the tick loop (a 30fps body × a seconds-long thought = impossible), so the design is **one soul, two speeds**:
+
+```
+inhabitant with "mind": …
+┌─ REFLEX (exists today) ─────────────┐    ┌─ MIND (its own Docker Claude) ─────────┐
+│ behavior.wasm, µs per tick, 30fps   │    │ own container, own persona prompt,     │
+│ drift, sway, walk — the body's      │◀── │ own memory. Beats SPARSELY: every      │
+│ habitual momentum                   │(re)│ 30–60s, or on condition (it starts     │
+│ reads slots for "intents"           │write│ snowing / the water rises / the user   │
+└─────────────────────────────────────┘    │ speaks to it)                          │
+                                           └─────────────────────────────────────────┘
+```
+
+Each heartbeat: the host assembles the being's **perception package** — the field inside its region, its own slots, its position, recent events — into a prompt for *its* container; the reply is either **a rewritten reflex** (new behavior source → the same compile + audit → hot-swap: the soul revising its own habit — 現行熏種子 in its complete form, deliberation perfuming disposition) or **an intent** (slot writes the reflex acts on: "row for the bank" is a target point in slot 7).
+
+**The trust model does not move — this is the load-bearing sentence.** However intelligent the mind, the body's permissions grow by nothing: the mind's output passes the same compiler and audit (it cannot write `fetch()`, and couldn't get it through if it did); `mv` stays clamped, regions stay enforced, fuel still traps; the mind itself is containerized (no volumes, API egress only), and **the perception package is the entirety of its world — even seeing is a grant**. The mind cannot request permissions on the body's behalf (心不能替身體要權). A malicious mind's worst case is a strange but lawful reflex. The fence's effectiveness is independent of the attacker's intelligence — the architecture's core claim, now extended to minded beings.
+
+Cost is what disciplines the cadence: one heartbeat ≈ 1–2s container start + seconds of inference, pennies — so hearts beat sparsely, worlds carry mind quotas, and memory is either stateless (the package carries "your last thought") or a true continuous mind via per-being session resumption. Delivered proof: the fisherman, given a mind, answered "@weng 冷嗎?" in his own weathered voice ("冷。江水比刀還冷,雪一落,更冷了。") and, when snow crossed his perception window unbidden, thought his own thought and spoke — a being with its own mind, dwelling in a world you spoke into existence, thinking about the one patch of river it is allowed to see, **and it still cannot call `fetch()`.**
+
+---
+
+## 21. Completing a Being's Faculties: Six Roots, Six Objects, Six Consciousnesses (圓滿六根)
+
+A moon hung in one of these worlds. Asked *"do you perceive that you are standing on the ground of the view?"*, it answered beautifully — "I do not touch the earth; I only hang in the sky, borrowing the snowlight to watch you sway." And it was **wrong about itself in a way it could not detect**: in the model it was a ground entity drawn as a disc, with no faculty for its own altitude. Its lovely answer was not perception but confabulation — the sixth consciousness (意識) spinning a story from persona where a faculty was missing. The Yogācāra diagnosis is exact, and it is also the engineering one.
+
+### The mapping
+
+Consciousness does not float free; it arises **dependent on a faculty meeting an object** (根緣塵生識). Three registers, one coordinate system:
+
+| Yogācāra | Engineering coordinate |
+|---|---|
+| **Six roots / faculties (六根)** — the organs of sensing | the fields of the **perception package** — the channels a being is granted |
+| — eye (眼根) | the 5×5 window of the field it sees around itself |
+| — ear (耳根) | the words spoken to it |
+| — mind-root (意根) | its memory slots + its last thought |
+| — body-root (身根) | its own state: id, kind, **realm (sky/ground), altitude**, position, what it rides |
+| — the faculty for other beings | **neighbors**: who is near, their kind and direction |
+| **Six objects (六塵)** — the sensed | the field's actual values + world state; present, but unadmitted if no root takes them |
+| **Six consciousnesses (六識)** — the awareness that arises | what the being's own container-mind **can form awareness of — strictly bounded by which roots admit which objects** |
+
+The load-bearing law: **the sixth consciousness cannot arise without its root and object. Missing a faculty, a being does not merely fail to know — it *confabulates* around the void**, because the mind (a fluent Claude) will always produce prose. The moon had no altitude-root, so no altitude-object entered, so no true awareness of its celestial nature arose; the persona filled the hole. This is the completion of §20.3's claim that *seeing is a grant*: awareness is bounded by the grant, and where the grant is silent, honesty requires the being to say *I do not know* — so the contract now instructs each mind: **answer only from your faculties; if a faculty is silent, you do not know it — do not invent.**
+
+### Completing the roots, and building the realm they sense
+
+Two fixes, each handing a being a faculty it lacked. First, **complete the perception package**: it now reports, per being, who you are (kind, realm, altitude), where you are (position, riding, the window), who is near (neighbors with direction and distance — the faculty for other sentient beings), and your inner state. The mind, now, perceives its own nature instead of guessing at it.
+
+But a faculty needs an object to sense (根待塵). "Come down from the sky" was unanswerable not only because the moon couldn't perceive its altitude but because **there was no vertical realm to have an altitude in** — entities lived on a flat (x, y) field. So the second fix builds the object: a **vertical realm (垂直之境)**. Entities carry `realm: sky|ground` and an `altitude`; the host draws aloft beings high in the sky (in both the overhead view and the first-person billboards); and beings gain the `rise(dz)` capability — the vertical faculty of *action* — clamped 0..1 by the host, granted through the same entity ABI, passed through the same import audit, its rewritten reflex compiled by the same compiler. Object立 (the realm exists), faculty授 (rise is granted): now *going to the sky* has both a place to go and an organ to go with.
+
+### The proof, and the invariant
+
+The moon, given complete faculties, reported its perception as `{kind: moon, realm: sky, altitude: 1}` — self-knowledge as **direct perception (現量), not inference (比量)** — and sensed the fisherman to its south. Asked to come down and walk on the ground, it agreed — "好,吾應汝之請,緩緩而降" — and its altitude fell 1→0, its realm sky→ground: it descended to stand by the fisherman it had, a moment before, only watched from above.
+
+And the invariant that makes this safe is unchanged, which is the whole point: **however complete a being's faculties, however wide its freedom of action — to leave a condition (unbind), to rise and descend (rise) — its authority grows by nothing. Seeing more is a larger grant of perception, not of power; the moon that now knows the sky and can leave it still cannot call `fetch()`.** The fence was never about keeping beings small. It was about keeping *what they can touch* enumerable — and a being can be given eyes, neighbors, a sky to climb, and a mind to weigh it all, while that enumeration holds. Richness of soul and boundedness of world are not in tension; they were always orthogonal axes, and this whole document has been the working-out of that one sentence.
+
+---
+
 ### Appendix: Metaphor → Engineering Coordinate Cheatsheet
 
 | Metaphor | Engineering coordinate |
@@ -642,4 +798,9 @@ The judgment: this list contains zero research risk — fuel metering is literal
 | The canvas as a self-aware holon | holarchy (supervisor downward / governed upward / stigmergy laterally); fills in §10's perception floor; perception ≠ cognition, mediated not N², liveness reconciliation, capability scope |
 | Understands more the more you use it (fuzzy/GA/trend) | graded-membership representation + mutation-selection search (run against a surrogate, the user is the oracle) + derivative prediction; maintain diversity against collapse, damp extrapolation to avoid driving taste; bounded by §14's six conditions |
 | Scripts as seeds (execution layer) | LLM generates DSL → wasm-jit compiles to a WASM cell (borrowing the browser JIT, = the AOT ceiling, ties JS) → capability-sandbox execution; fast + isolation + synchronous all at once; proven at github.com/jrjohn/wasm-jit |
+| The Field / collective karma (共業場) | one shared world-grid (height/water/veg channels); cells read/write via fr/fw function capabilities with region-scoped grants; composition order = host law; emergence = many cells, no global knower (§19) |
+| The binding condition (繫緣) | a relation as one JSON field + six lines of host law, re-enacted every tick — nothing locks it; unbinding is absent from the bound one's ABI; the condition lives in the scene, not the person (§19) |
+| Worlds without end, the law conserved (世界無盡,法卻守恆) | child capabilities ⊆ parent grants — permissions monotonically non-increasing down generations; spawn quotas; evaluation gates before the registry (§20) |
+| Each being its own consciousness (眾生各有其識) | one soul two speeds: wasm reflex at 30fps + a per-being Claude container beating sparsely, rewriting the reflex through the same compile+audit gate — the mind cannot request permissions for the body (§20) |
+| Six roots / objects / consciousnesses (六根六塵六識) | the perception package IS the being's faculties; awareness arises only where a root admits an object (root-meets-object → consciousness); a missing faculty → confabulation, so the mind must answer only from its faculties; completing the roots + building a vertical realm (rise) lets a being know its own nature and act on it — with authority still unchanged (§21) |
 | The shape of the front end in the AI age | no JS, no HTML (airlocked) + tokenized SCSS (style capability) + dual loop (runtime seed manifestation / build-time gated-PR evolution); every artifact passes the verifier; proven in the leptos-poc tabs |
