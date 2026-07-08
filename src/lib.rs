@@ -61,6 +61,21 @@ pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     codegen::compile_with(&prog, &PARAMS, &IMPORTS).map_err(|e| JsError::new(&e))
 }
 
+/// Benchmark lane with fuel metering on: same `run(n)->f64` ABI plus an
+/// exported "fuel" gauge. Used to measure the back-edge-counter tax.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_to_wasm_fueled(src: &str, budget: u32) -> Result<Vec<u8>, JsError> {
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &["n"],
+        &[],
+        codegen::CompileOpts { fuel: Some(budget), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn transpile_to_js(src: &str) -> Result<String, JsError> {
