@@ -47,6 +47,20 @@ const UI_VOCAB: [&str; 11] = [
     "barchart", "linechart", "piechart", "gauge",
 ];
 
+/// World-cell ABI (the Field, docs §19): run(t, gw, gh) -> f64.
+/// fr/fw are the collective-karma field capabilities (reads are global —
+/// mutual beholding; writes are region-scoped in the host closure).
+const FIELD_PARAMS: [&str; 3] = ["t", "gw", "gh"];
+const FIELD_IMPORTS: [HostFn; 6] = [
+    HostFn { name: "sin", n_args: 1, returns: true },
+    HostFn { name: "cos", n_args: 1, returns: true },
+    HostFn { name: "get", n_args: 1, returns: true },
+    HostFn { name: "set", n_args: 2, returns: false },
+    HostFn { name: "fr", n_args: 3, returns: true },
+    HostFn { name: "fw", n_args: 4, returns: false },
+];
+const FIELD_FUEL: u32 = 2_000_000;
+
 #[derive(Deserialize)]
 struct GenReq {
     prompt: String,
@@ -287,7 +301,62 @@ fn validate(obj: &Value) -> Result<(), String> {
             compile_check(seed, &["t", "w", "h"], &DRAW_IMPORTS, 5_000_000)
                 .map_err(|e| format!("draw seed failed to compile: {e}"))
         }
-        _ => Err("\"surface\" must be \"ui\" or \"draw\"".into()),
+        Some("field") => {
+            let world = obj.get("world").ok_or("surface \"field\" lacks \"world\"")?;
+            let grid = world.get("grid").and_then(|g| g.as_u64()).unwrap_or(96);
+            if !(16..=160).contains(&grid) {
+                return Err(format!("world grid {grid} out of range 16..=160"));
+            }
+            let cells = world
+                .get("cells")
+                .and_then(|c| c.as_array())
+                .ok_or("world lacks \"cells\" []")?;
+            if cells.is_empty() {
+                return Err("world has zero cells".into());
+            }
+            for c in cells {
+                let id = c
+                    .get("id")
+                    .and_then(|i| i.as_str())
+                    .ok_or("a world cell lacks \"id\"")?;
+                let script = c
+                    .get("script")
+                    .and_then(|s| s.as_str())
+                    .ok_or_else(|| format!("world cell '{id}' lacks \"script\""))?;
+                compile_check(script, &FIELD_PARAMS, &FIELD_IMPORTS, FIELD_FUEL)
+                    .map_err(|e| format!("world cell '{id}' failed to compile: {e}"))?;
+                if let Some(mode) = c.get("mode").and_then(|m| m.as_str()) {
+                    if !matches!(mode, "once" | "frame") {
+                        return Err(format!("world cell '{id}': mode must be \"once\" or \"frame\""));
+                    }
+                }
+                if let Some(region) = c.get("region") {
+                    let r: Vec<f64> = region
+                        .as_array()
+                        .filter(|a| a.len() == 4)
+                        .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
+                        .ok_or_else(|| format!("world cell '{id}': region must be [x0,y0,x1,y1]"))?;
+                    if r.len() != 4
+                        || r[0] < 0.0
+                        || r[1] < 0.0
+                        || r[0] >= r[2]
+                        || r[1] >= r[3]
+                        || r[2] > grid as f64
+                        || r[3] > grid as f64
+                    {
+                        return Err(format!(
+                            "world cell '{id}': region [{},{},{},{}] out of bounds for grid {grid}",
+                            r.first().copied().unwrap_or(-1.0),
+                            r.get(1).copied().unwrap_or(-1.0),
+                            r.get(2).copied().unwrap_or(-1.0),
+                            r.get(3).copied().unwrap_or(-1.0)
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+        _ => Err("\"surface\" must be \"ui\", \"draw\", or \"field\"".into()),
     }
 }
 
@@ -301,7 +370,7 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
 
     let mut prompt = String::from(CONTRACT);
     if let Some(prior) = &req.prior {
-        prompt.push_str("\n\nCURRENT UI (the user wants to modify this — return the FULL updated schema):\n");
+        prompt.push_str("\n\nCURRENT STATE (the user wants to modify this — return the FULL updated JSON for the same surface):\n");
         prompt.push_str(&prior.to_string());
     }
     prompt.push_str("\n\nUser request: ");
@@ -337,6 +406,9 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
                         }
                         if let Some(s) = obj.get("seed") {
                             resp["seed"] = s.clone();
+                        }
+                        if let Some(w) = obj.get("world") {
+                            resp["world"] = w.clone();
                         }
                         return (StatusCode::OK, Json(resp));
                     }
@@ -482,6 +554,39 @@ mod tests {
         )
         .unwrap();
         assert!(validate(&ghost).unwrap_err().contains("unknown cell"));
+    }
+
+    const MOUNTAIN: &str = "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  let dx = (x - gw * 0.5) / gw;\n  let dy = (y - gh * 0.5) / gh;\n  let d = sqrt(dx * dx + dy * dy);\n  let h = max(0.0, 1.0 - d * 3.0);\n  fw(0.0, x, y, fr(0.0, x, y) + h * h * 90.0);\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0";
+
+    #[test]
+    fn field_world_validates() {
+        let obj = serde_json::json!({
+            "surface": "field",
+            "world": {
+                "grid": 96,
+                "cells": [
+                    {"id":"mountain","mode":"once","order":1,"script": MOUNTAIN},
+                    {"id":"rain","mode":"frame","order":2,"region":[10,10,80,80],
+                     "script":"let y = 10.0;\nwhile y < 80.0 {\n let x = 10.0;\n while x < 80.0 {\n  if sin(x * 0.3 + t) > 0.7 { fw(1.0, x, y, min(fr(1.0, x, y) + 0.1, 5.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"}
+                ]
+            }
+        });
+        assert!(validate(&obj).is_ok(), "{:?}", validate(&obj));
+    }
+
+    #[test]
+    fn field_rejects_bad_mode_region_and_script() {
+        let bad_mode = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","mode":"forever","script":"1.0"}]}});
+        assert!(validate(&bad_mode).unwrap_err().contains("mode"));
+
+        let bad_region = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","region":[0,0,200,50],"script":"1.0"}]}});
+        assert!(validate(&bad_region).unwrap_err().contains("out of bounds"));
+
+        let bad_script = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"fetch(t)"}]}});
+        assert!(validate(&bad_script).unwrap_err().contains("failed to compile"));
     }
 
     #[test]
