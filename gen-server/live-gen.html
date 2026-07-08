@@ -829,12 +829,11 @@ function manifestField(world) {
   renderField();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
   lastManifest = { surface: 'field', payload: world };
-  // The view is STICKY: an iteration ('add lotuses') that omits "view" must
-  // NOT throw you back to top — you stay where you were standing. Only an
-  // explicit view in the world JSON (walk-into → first_person, or top) moves it.
-  const target = world.view === 'first_person' ? 'fp'
-    : world.view === 'top' ? 'top'
-    : (fieldView === 'fp' ? 'fp' : 'top'); // no explicit view → keep the current one
+  // The viewpoint is YOURS: once you're in first person, you stay there across
+  // every iteration ('add lotuses', 'let it rain') — only the top-view button
+  // takes you out. From top, an explicit first_person (walk-into) enters.
+  const target = fieldView === 'fp' ? 'fp'
+    : (world.view === 'first_person' ? 'fp' : 'top');
   setFieldView(target);
   $('stage-status').textContent =
     `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
@@ -923,10 +922,14 @@ async function mindBeat(ent, words) {
   if (!words && !mindCanBeat(st)) return;
   st.busy = true; st.lastBeat = performance.now(); st.beats++;
   try {
-    const r = await fetch('/api/mind', {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined }),
-    });
+    // A mind heartbeat is long (a container + Claude). Retry once on a bare
+    // network drop (server restart, a blip) so a being doesn't fall silent
+    // over a transient — a server-returned error still surfaces normally.
+    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined });
+    const post = () => fetch('/api/mind', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    let r;
+    try { r = await post(); }
+    catch (netErr) { await new Promise(res => setTimeout(res, 1500)); r = await post(); }
     const d = await r.json();
     if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
     if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
@@ -949,7 +952,7 @@ async function mindBeat(ent, words) {
       }
     }
   } catch (e) {
-    say('err', `mind request failed: ${e}`);
+    say('err', `${ent.id}'s mind couldn't be reached (${e.message ?? e}) — is the server up? try @${ent.id} again`);
   } finally {
     st.busy = false;
   }

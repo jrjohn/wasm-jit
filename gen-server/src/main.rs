@@ -17,7 +17,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use wasm_jit::codegen::{self, CompileOpts, HostFn};
 use wasm_jit::parser;
 
@@ -601,6 +601,25 @@ struct SkinSave {
     skin_seed: String,
 }
 
+/// The demo page, served with no-store so an edit to live-gen.html (where all
+/// the module JS lives) reaches the browser on a normal reload — no more stale
+/// cached JS after a change.
+async fn index() -> impl IntoResponse {
+    use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
+    match tokio::fs::read_to_string("gen-server/live-gen.html").await {
+        Ok(s) => (
+            StatusCode::OK,
+            [(CONTENT_TYPE, "text/html; charset=utf-8"), (CACHE_CONTROL, "no-store")],
+            s,
+        ),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            [(CONTENT_TYPE, "text/plain"), (CACHE_CONTROL, "no-store")],
+            format!("live-gen.html unreadable: {e}"),
+        ),
+    }
+}
+
 fn slug_ok(name: &str) -> bool {
     !name.is_empty() && name.len() <= 64
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
@@ -817,7 +836,7 @@ async fn main() {
         .route("/api/worlds/{name}", get(world_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
-        .route_service("/", ServeFile::new("gen-server/live-gen.html"))
+        .route("/", get(index))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .nest_service("/pkg-skins", ServeDir::new("pkg-skins"));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8646").await.unwrap();
