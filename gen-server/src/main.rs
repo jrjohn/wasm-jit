@@ -66,17 +66,32 @@ const FIELD_FUEL: u32 = 2_000_000;
 /// loop); the bounds are this grant template. `mv(dx,dy)` REQUESTS movement —
 /// position is host-owned state, clamped and bounded by the host.
 const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
-const ENTITY_IMPORTS: [HostFn; 6] = [
+const ENTITY_IMPORTS: [HostFn; 7] = [
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
     HostFn { name: "get", n_args: 1, returns: true },
     HostFn { name: "set", n_args: 2, returns: false },
     HostFn { name: "fr", n_args: 3, returns: true },
     HostFn { name: "mv", n_args: 2, returns: false },
+    HostFn { name: "unbind", n_args: 0, returns: false }, // §19: the freedom to leave a condition
 ];
 const ENTITY_FUEL: u32 = 200_000;
-/// The skin registry — entity types the host knows how to draw.
+/// The curated skin registry — types the host draws with hand-tuned Rust skins.
 const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
+
+/// Generated-skin ABI (docs §20.1): run(px, py, s, t) with drawing primitives
+/// only — how a novel inhabitant *looks*, grown at runtime, fenced by the same
+/// drawing audit as the draw surface.
+const SKIN_PARAMS: [&str; 4] = ["px", "py", "s", "t"];
+const SKIN_IMPORTS: [HostFn; 7] = [
+    HostFn { name: "sin", n_args: 1, returns: true },
+    HostFn { name: "cos", n_args: 1, returns: true },
+    HostFn { name: "hue", n_args: 1, returns: false },
+    HostFn { name: "disc", n_args: 3, returns: false },
+    HostFn { name: "ring", n_args: 3, returns: false },
+    HostFn { name: "arc", n_args: 5, returns: false },
+    HostFn { name: "line", n_args: 4, returns: false },
+];
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -422,11 +437,18 @@ fn validate(obj: &Value) -> Result<(), String> {
                         .get("type")
                         .and_then(|t| t.as_str())
                         .ok_or_else(|| format!("entity '{id}' lacks \"type\""))?;
-                    if !ENTITY_TYPES.contains(&ty) {
+                    // a type is legal if it's in the curated registry OR the
+                    // entity grows its own skin at runtime via a skin_seed.
+                    let skin_seed = ent.get("skin_seed").and_then(|s| s.as_str());
+                    if !ENTITY_TYPES.contains(&ty) && skin_seed.is_none() {
                         return Err(format!(
-                            "entity '{id}': type '{ty}' not in the skin registry [{}]",
+                            "entity '{id}': type '{ty}' not in the skin registry [{}] and no \"skin_seed\" to grow one",
                             ENTITY_TYPES.join(", ")
                         ));
+                    }
+                    if let Some(seed) = skin_seed {
+                        compile_check(seed, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000)
+                            .map_err(|e| format!("entity '{id}' skin_seed failed to compile: {e}"))?;
                     }
                     let at: Vec<f64> = ent
                         .get("at")
@@ -479,13 +501,20 @@ Reply with ONE JSON object only (no prose outside it):
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
 - float literals with a decimal point (2.0 not 2); identifiers letters/digits/underscore
-- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps]
+- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps] unbind() [step off whatever you ride — a boat, a car; ONLY after unbind() does your own mv move you]
 - ex/ey = your current position. Example, drift gently east: "mv(0.02, 0.0);
 0.0"
 - to move TOWARD a point, store it in slots and steer each tick, e.g. head for x=10:
   "let dx = 10.0 - ex;
 mv(min(max(dx * 0.01, 0.0 - 0.03), 0.03), 0.0);
 0.0"
+- if you RIDE something and decide to leave (go ashore, get out), your reflex must FIRST call
+  unbind(), then mv toward land (height rises away from the water). To leave a boat for shore
+  at y=38: "unbind();
+let dy = 38.0 - ey;
+mv(0.0, min(max(dy * 0.02, 0.0 - 0.03), 0.03));
+0.0"
+- but you need not obey. A being of your own mind may choose to stay; staying is also an answer.
 "#;
 
 #[derive(Deserialize)]
@@ -563,6 +592,65 @@ Return ONLY the corrected JSON object.")
         StatusCode::UNPROCESSABLE_ENTITY,
         Json(json!({"ok": false, "error": last_err, "gen_ms": t0.elapsed().as_millis() as u64})),
     )
+}
+
+#[derive(Deserialize)]
+struct SkinSave {
+    #[serde(rename = "type")]
+    ty: String,
+    skin_seed: String,
+}
+
+fn skin_type_ok(ty: &str) -> bool {
+    !ty.is_empty()
+        && ty.len() <= 40
+        && ty.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Save a self-grown skin into the library (skins-grown/<type>.dsl) — a grown
+/// skin is a skin_seed string, so archival is nearly free: files are the ālaya
+/// (docs §20.1). Validated by compiling against the skin ABI before it lands.
+async fn skin_save(Json(req): Json<SkinSave>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !skin_type_ok(&req.ty) {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad skin type".to_string());
+    }
+    if ENTITY_TYPES.contains(&req.ty.as_str()) {
+        return (StatusCode::CONFLICT, [(CONTENT_TYPE, "text/plain")], "that name is a curated skin".to_string());
+    }
+    if let Err(e) = compile_check(&req.skin_seed, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000) {
+        return (StatusCode::UNPROCESSABLE_ENTITY, [(CONTENT_TYPE, "text/plain")], format!("skin_seed failed to compile: {e}"));
+    }
+    let _ = tokio::fs::create_dir_all("skins-grown").await;
+    match tokio::fs::write(format!("skins-grown/{}.dsl", req.ty), &req.skin_seed).await {
+        Ok(()) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], format!("saved skin '{}'", req.ty)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [(CONTENT_TYPE, "text/plain")], format!("save failed: {e}")),
+    }
+}
+
+/// A grown skin from the library, by type — the "manifest again next time" path.
+async fn skin_get(axum::extract::Path(ty): axum::extract::Path<String>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !skin_type_ok(&ty) {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], String::new());
+    }
+    match tokio::fs::read_to_string(format!("skins-grown/{ty}.dsl")).await {
+        Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], s),
+        Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
+    }
+}
+
+/// List the names in the grown-skin library.
+async fn skin_list() -> impl IntoResponse {
+    let mut names = Vec::new();
+    if let Ok(mut rd) = tokio::fs::read_dir("skins-grown").await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            if let Some(n) = e.file_name().to_str().and_then(|n| n.strip_suffix(".dsl")) {
+                names.push(n.to_string());
+            }
+        }
+    }
+    Json(json!({ "skins": names }))
 }
 
 /// Inhabitant package manifest — the bundle descriptor binding a Rust skin
@@ -677,6 +765,8 @@ async fn main() {
         .route("/api/generate", post(generate))
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/mind", post(mind))
+        .route("/api/skins", get(skin_list).post(skin_save))
+        .route("/api/skins/{ty}", get(skin_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route_service("/", ServeFile::new("gen-server/live-gen.html"))

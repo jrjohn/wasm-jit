@@ -42,6 +42,16 @@
              border: 1px solid #30363d; background: #161b22; color: inherit; width: 110px; }
   .quar { color: #f85149; font-size: .75rem; }
   .hint { font-size: .75rem; opacity: .55; }
+  .chat { position: relative; }
+  .at-menu { position: absolute; left: .5rem; right: .5rem; bottom: 96px; background: #161b22;
+    border: 1px solid #30363d; border-radius: 8px; max-height: 200px; overflow-y: auto; z-index: 5;
+    box-shadow: 0 -6px 20px #0008; }
+  .at-head { padding: .3rem .6rem; font-size: .68rem; opacity: .5; border-bottom: 1px solid #30363d; }
+  .at-item { padding: .35rem .6rem; font-size: .8rem; cursor: pointer; display: flex;
+    justify-content: space-between; gap: .5rem; }
+  .at-item:hover, .at-item.sel { background: #1f6feb33; }
+  .at-item .ty { opacity: .5; font-size: .72rem; }
+  .at-empty { padding: .5rem .6rem; font-size: .74rem; opacity: .5; }
 </style>
 </head>
 <body>
@@ -71,8 +81,9 @@ Generation is seconds; every interaction after is µs.
 - 孤舟蓑笠翁 獨釣寒江雪 (snow, a boat, a fisherman)
 - @weng 冷嗎? (speak to a minded being — its own Claude answers)</div>
     </div>
+    <div id="at-menu" class="at-menu" style="display:none"></div>
     <div class="chatbar">
-      <input type="text" id="prompt" placeholder="describe a UI… (Enter to send)">
+      <input type="text" id="prompt" placeholder="describe a UI… (Enter to send, @ to talk to a being)">
       <button id="send">Send</button>
     </div>
     <div class="chatbar">
@@ -107,7 +118,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
 await initSkins();
@@ -471,7 +482,7 @@ function renderFieldFP() {
     const groundY = terrainH(e.x, e.y) * K2 + Math.min(FIELD[(fieldWorld.grid + (e.y | 0)) * fieldWorld.grid + (e.x | 0)], 3) * 0.6 * K2;
     const sy = horizon + ((eye - groundY) * focal) / zc;
     const s = Math.max(3, (focal / zc) * 1.1);
-    SKINS[e.type]?.(ctx, sx, sy - s * 0.4, s, performance.now() / 1000);
+    drawSkin(e, sx, sy - s * 0.4, s, performance.now() / 1000);
   }
   if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
@@ -580,6 +591,7 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
       return FIELD[(c * g + y) * g + x];
     },
     mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
+    unbind: () => { if (ent.on) { ent.on = null; ent.freed = true; } }, // §19: leave the condition
   };
 }
 
@@ -598,6 +610,16 @@ function compileEntities(world, g) {
       ent.run = inst.exports.run;
     } else {
       loadPackagedSoul(ent, g); // async: the packaged default soul wakes shortly
+    }
+    if (def.skin_seed) {
+      try {
+        const sb = compile_skin_wasm(def.skin_seed);
+        ent.skinRun = new WebAssembly.Instance(new WebAssembly.Module(sb), { env: skinEnv }).exports.run;
+        ent.skinSource = 'generated skin (drawing-primitive fenced)';
+        saveGrownSkin(ent.type, def.skin_seed); // → the library (files = the ālaya), so next time it can manifest by name
+      } catch (e) { $('stage-status').textContent = `skin of '${ent.id}' rejected: ${e.message ?? e}`; }
+    } else if (!SKINS[ent.type]) {
+      recallGrownSkin(ent); // a bare novel type: reincarnate a saved skin from the library
     }
     if (ent.mind?.persona) mindRegister(ent);
     return ent;
@@ -628,6 +650,30 @@ function tickEntities(t, g) {
   }
 }
 
+// ---- the grown-skin library (docs §20.1): a skin is a skin_seed string, so
+// archival is nearly free — save to files (the ālaya), recall by type name. ----
+const SKIN_LIB = {}; // type -> skin_seed (in-memory cache of what's on disk)
+function saveGrownSkin(type, seed) {
+  if (SKINS[type] || SKIN_LIB[type] === seed) return; // curated or unchanged
+  SKIN_LIB[type] = seed;
+  fetch('/api/skins', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type, skin_seed: seed }) }).catch(() => {});
+}
+async function recallGrownSkin(ent) { // a novel type with no seed → look it up
+  if (ent.skinRun || SKINS[ent.type]) return;
+  let seed = SKIN_LIB[ent.type];
+  if (!seed) {
+    try { const r = await fetch(`/api/skins/${ent.type}`); if (r.ok) { seed = await r.text(); SKIN_LIB[ent.type] = seed; } } catch (e) {}
+  }
+  if (seed) {
+    try {
+      const sb = compile_skin_wasm(seed);
+      ent.skinRun = new WebAssembly.Instance(new WebAssembly.Module(sb), { env: skinEnv }).exports.run;
+      ent.skinSource = 'recalled skin (from the library)';
+    } catch (e) {}
+  }
+}
+
 // skin registry — thin JS bindings over the Rust `skins` crate (pkg-skins):
 // the drawing code moved to the slow loop (.rs); this object is only the socket.
 const SKINS = {
@@ -636,6 +682,29 @@ const SKINS = {
   person: (c, px, py, sc, t) => skinsPkg.person(c, px, py, sc, t),
   car: (c, px, py, sc, t) => skinsPkg.car(c, px, py, sc, t),
 };
+
+// A GENERATED skin draws through drawing primitives ONLY (docs §20.1) — the
+// same fence as the draw surface, so a novel look grows at runtime with no
+// canvas authority of its own. hue/disc/ring/arc/line write to ctx directly.
+const skinEnv = {
+  sin: Math.sin, cos: Math.cos,
+  hue: v => { const c = `hsl(${(((v % 1) + 1) % 1) * 360},62%,60%)`; ctx.strokeStyle = c; ctx.fillStyle = c; },
+  disc: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.fill(); },
+  ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
+  arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
+  line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+};
+
+// Draw an inhabitant: its generated skin if it grew one, else the curated Rust skin.
+function drawSkin(ent, px, py, s, t) {
+  if (ent.skinRun) {
+    const lw = ctx.lineWidth; ctx.lineWidth = Math.max(1, s * 0.12);
+    try { ent.skinRun(px, py, s, t); } catch (e) { /* fuel trap on a skin: skip this frame */ }
+    ctx.lineWidth = lw;
+  } else {
+    SKINS[ent.type]?.(ctx, px, py, s, t);
+  }
+}
 
 // packaged soul loader: manifest → behavior.wasm → IMPORT AUDIT → instantiate.
 // The soul wakes a moment after the world starts; until then the body is still.
@@ -708,7 +777,7 @@ function renderField() {
   ctx.drawImage(fieldCanvas, ox, 0, size, size);
   const s = size / g; // canvas px per grid unit — the skins live at full resolution
   const tNow = performance.now() / 1000;
-  for (const e of ENTITIES) SKINS[e.type]?.(ctx, ox + e.x * s, e.y * s, s, tNow);
+  for (const e of ENTITIES) drawSkin(e, ox + e.x * s, e.y * s, s, tNow);
   if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
 }
 
@@ -740,6 +809,40 @@ function manifestField(world) {
 // request permissions for the body.
 const MIND_COOLDOWN_MS = 45_000;
 const MIND_MAX_BEATS = 6; // per session — hearts are not free
+
+// a being can be GIVEN a mind on demand — a default persona per type, so
+// '@weng 冷嗎?' works even when the AI never attached one.
+const DEFAULT_PERSONA = {
+  fisherman: 'a fisherman alone on a cold river at dusk; few weathered words; cares only about water, fish, and the coming snow; replies in the visitor\'s language',
+  boat: 'a small wooden river boat; you speak rarely, in creaks and drifts; you feel the current and the weight you carry',
+  person: 'a lone traveler in this world; observant, brief; you answer in the visitor\'s language',
+  car: 'a road vehicle; plain, practical; you speak of distance, road and weather in short lines',
+};
+const NICKNAMES = { // what a visitor might call a being → its type
+  weng: 'fisherman', '翁': 'fisherman', '漁翁': 'fisherman', '老翁': 'fisherman', '漁夫': 'fisherman',
+  fisher: 'fisherman', oldman: 'fisherman', 'old_man': 'fisherman',
+  driver: 'car', '司機': 'car', '車': 'car', '船': 'boat', '舟': 'boat', '船夫': 'boat',
+};
+
+function resolveBeing(name) {
+  const n = name.toLowerCase();
+  let e = ENTITIES.find(e => e.id.toLowerCase() === n)
+       || ENTITIES.find(e => e.type.toLowerCase() === n);
+  if (!e) { const ty = NICKNAMES[n] || NICKNAMES[name]; if (ty) e = ENTITIES.find(x => x.type === ty); }
+  if (!e) e = ENTITIES.find(e => e.id.toLowerCase().includes(n) || e.type.toLowerCase().includes(n));
+  return e;
+}
+
+function personaFor(ent) {
+  return ent.mind?.persona || DEFAULT_PERSONA[ent.type]
+    || `you are a ${ent.type} in this world; you speak briefly, in character, in the visitor's language`;
+}
+function ensureMind(ent) { // give a being a mind if it has none — one Claude appears
+  if (ent.mindState) return true;
+  ent.mind = { persona: personaFor(ent) };
+  mindRegister(ent);
+  return true;
+}
 
 function mindCanBeat(st) {
   return !st.busy && st.beats < MIND_MAX_BEATS && performance.now() - st.lastBeat >= MIND_COOLDOWN_MS;
@@ -779,7 +882,7 @@ async function mindBeat(ent, words) {
   try {
     const r = await fetch('/api/mind', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ persona: ent.mind.persona, perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined }),
+      body: JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined }),
     });
     const d = await r.json();
     if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
@@ -904,13 +1007,18 @@ async function send() {
   if (!prompt || busy) return;
   if (prompt.startsWith('@')) { // speak TO a being: its own mind answers
     const sp = prompt.indexOf(' ');
-    const name = (sp < 0 ? prompt.slice(1) : prompt.slice(1, sp)).toLowerCase();
+    const name = sp < 0 ? prompt.slice(1) : prompt.slice(1, sp);
     const words = sp < 0 ? '' : prompt.slice(sp + 1);
-    const ent = ENTITIES.find(e => e.id.toLowerCase() === name || e.type.toLowerCase() === name);
     $('prompt').value = '';
     say('user', prompt);
-    if (!ent) { say('err', `no being called '${name}' here`); return; }
-    if (!ent.mindState) { say('err', `${ent.id} has no mind (add "mind":{"persona":...} to it)`); return; }
+    const ent = resolveBeing(name);
+    if (!ent) {
+      const who = ENTITIES.map(e => e.id).join(', ') || '(no beings in this world yet)';
+      say('err', `no being called '${name}' here. Present: ${who}`);
+      return;
+    }
+    if (!ensureMind(ent)) { say('err', `${ent.id} (${ent.type}) cannot hold a mind`); return; }
+    if (ent.mindState.beats === 0) say('thought', `(a mind stirs in ${ent.id}…)`);
     mindBeat(ent, words || '(the visitor looks at you)');
     return;
   }
@@ -944,8 +1052,50 @@ async function send() {
     if (fieldView !== 'fp') $('prompt').focus(); // in first person, the keys belong to the walker
   }
 }
-$('send').onclick = send;
-$('prompt').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+// ---- @ menu: who can you talk to? (every inhabitant can hold a mind) ----
+let atSel = -1;
+function atMatches() {
+  const m = $('prompt').value.match(/^@(\S*)$/);
+  if (!m) return null;
+  const frag = m[1].toLowerCase();
+  const nickTy = NICKNAMES[frag] || NICKNAMES[m[1]];
+  return ENTITIES.filter(e => !frag
+    || e.id.toLowerCase().includes(frag) || e.type.toLowerCase().includes(frag) || e.type === nickTy);
+}
+function renderAtMenu() {
+  const menu = $('at-menu');
+  const list = atMatches();
+  if (!list) { menu.style.display = 'none'; atSel = -1; return; }
+  if (!ENTITIES.length) {
+    menu.innerHTML = '<div class="at-empty">no beings in this world yet — manifest a world with inhabitants first</div>';
+    menu.style.display = 'block'; return;
+  }
+  if (!list.length) { menu.innerHTML = '<div class="at-empty">no being here by that name</div>'; menu.style.display = 'block'; return; }
+  if (atSel >= list.length) atSel = list.length - 1;
+  menu.innerHTML = '<div class="at-head">talk to a being — it answers with its own mind</div>' +
+    list.map((e, i) => `<div class="at-item ${i === atSel ? 'sel' : ''}" data-id="${e.id}">`
+      + `<span>@${e.id}</span><span class="ty">${e.type}${e.mindState ? ' · awake' : ''}</span></div>`).join('');
+  menu.style.display = 'block';
+  menu.querySelectorAll('.at-item').forEach(el => {
+    el.onclick = () => { $('prompt').value = '@' + el.dataset.id + ' '; menu.style.display = 'none'; atSel = -1; $('prompt').focus(); };
+  });
+}
+$('prompt').addEventListener('input', renderAtMenu);
+$('prompt').addEventListener('keydown', e => {
+  const list = atMatches();
+  if (list && list.length && $('at-menu').style.display !== 'none') {
+    if (e.key === 'ArrowDown') { e.preventDefault(); atSel = (atSel + 1) % list.length; renderAtMenu(); return; }
+    if (e.key === 'ArrowUp') { e.preventDefault(); atSel = (atSel - 1 + list.length) % list.length; renderAtMenu(); return; }
+    if ((e.key === 'Tab' || e.key === 'Enter') && atSel >= 0) {
+      e.preventDefault(); $('prompt').value = '@' + list[atSel].id + ' '; $('at-menu').style.display = 'none'; atSel = -1; return;
+    }
+  }
+  if (e.key === 'Escape') { $('at-menu').style.display = 'none'; atSel = -1; }
+});
+document.addEventListener('click', e => { if (!e.target.closest('.chat')) $('at-menu').style.display = 'none'; });
+
+$('send').onclick = () => { $('at-menu').style.display = 'none'; send(); };
+$('prompt').addEventListener('keydown', e => { if (e.key === 'Enter' && $('at-menu').style.display === 'none') send(); });
 $('prompt').focus();
 
 $('view-toggle').onclick = () => setFieldView(fieldView === 'fp' ? 'top' : 'fp');

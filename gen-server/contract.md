@@ -146,7 +146,15 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
 
 === inhabitants (entities) — people/boats/cars are NOT terrain ===
 "world" may also carry "entities": [{"id":"name","type":"...","at":[x,y],"behavior":"<DSL>"}]
-- type must be one of the skin registry: "boat", "fisherman", "person", "car" (the host draws them; you cannot invent skins)
+- type "boat"/"fisherman"/"person"/"car" are drawn by curated host skins. For ANY OTHER thing
+  (a lotus, a lantern, a deer, a tent…), invent a "type" name AND give a "skin_seed": a tiny
+  drawing script that renders it. skin_seed = DSL run(px, py, s, t) -> f64 where px,py is the
+  thing's screen center, s is its size in px, t is seconds; capabilities: sin cos + drawing
+  primitives hue(v) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2); end with 0.0.
+  Example — a lotus flower: "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0"
+  Many identical things (5 lotuses) = 5 entities of the same new type sharing one skin_seed.
+  Grown skins are remembered: once a "lotus" skin exists, you may later place more by giving
+  entities {"type":"lotus"} with NO skin_seed — the host recalls the saved look by name.
 - at: [x,y] grid position; behavior (optional): DSL run(t, ex, ey) -> f64, runs every tick.
   Capabilities: sin cos get set (private slots) + fr(c,x,y) (read the field) + mv(dx,dy)
   (REQUEST movement — the host clamps speed and bounds; position is host-owned).
@@ -157,6 +165,10 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
 - "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
   every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
+- "mind":{"persona":"<one line of character>"} gives a being its OWN live mind (a separate
+  Claude) that reacts to world events and answers when the user writes "@<id> ...". When a
+  scene has a named or human character (a fisherman, a driver, a traveler), give that entity a
+  memorable "id" (e.g. "weng") AND a mind, so the user can speak to it.
 - A snow scene example: a "frame" cell writing channel 3 on land:
   "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 { fw(3.0, x, y, min(fr(3.0, x, y) + 0.002, 1.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
 - Poetry/scenes: compose terrain cells + weather cells + entities. 孤舟蓑笠翁,獨釣寒江雪 =

@@ -114,20 +114,23 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 }
 
 /// Inhabitant (entity) behavior for the Field: `run(t, ex, ey) -> f64`.
-/// Capabilities env.{sin, cos, get, set, fr, mv} — fr reads the shared field,
-/// mv REQUESTS movement (host clamps speed/bounds; position is host-owned).
+/// Capabilities env.{sin, cos, get, set, fr, mv, unbind} — fr reads the shared
+/// field, mv REQUESTS movement (host clamps speed/bounds; position is
+/// host-owned), unbind() releases the being from whatever it rides (§19: the
+/// freedom to leave a condition, now in the being's own ABI).
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "ex", "ey"];
-    const IMPORTS: [HostFn; 6] = [
+    const IMPORTS: [HostFn; 7] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "get", n_args: 1, returns: true },
         HostFn { name: "set", n_args: 2, returns: false },
         HostFn { name: "fr", n_args: 3, returns: true },
         HostFn { name: "mv", n_args: 2, returns: false },
+        HostFn { name: "unbind", n_args: 0, returns: false },
     ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
@@ -135,6 +138,36 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
         &PARAMS,
         &IMPORTS,
         codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// Runtime-generated SKIN: `run(px, py, s, t)`, capabilities = the 2D drawing
+/// primitives only (env.{sin, cos, hue, disc, ring, arc, line}). Turns the key
+/// of docs §20.1 — a skin no longer needs raw canvas authority, so a novel
+/// inhabitant's *look* (a lotus, a deer, a tent) can be generated at runtime
+/// and enter through the same drawing-primitive fence as everything else.
+/// px,py = the entity's canvas center; s = canvas px per grid unit; t = seconds.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 4] = ["px", "py", "s", "t"];
+    const IMPORTS: [HostFn; 7] = [
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+        HostFn { name: "hue", n_args: 1, returns: false },
+        HostFn { name: "disc", n_args: 3, returns: false },
+        HostFn { name: "ring", n_args: 3, returns: false },
+        HostFn { name: "arc", n_args: 5, returns: false },
+        HostFn { name: "line", n_args: 4, returns: false },
+    ];
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &IMPORTS,
+        codegen::CompileOpts { fuel: Some(300_000), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))
 }
@@ -147,13 +180,14 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
     use audit::Grant;
-    const GRANTS: [Grant; 6] = [
+    const GRANTS: [Grant; 7] = [
         Grant { module: "env", name: "sin" },
         Grant { module: "env", name: "cos" },
         Grant { module: "env", name: "get" },
         Grant { module: "env", name: "set" },
         Grant { module: "env", name: "fr" },
         Grant { module: "env", name: "mv" },
+        Grant { module: "env", name: "unbind" },
     ];
     audit::audit(bytes, &GRANTS).map_err(|e| JsError::new(&e))
 }
