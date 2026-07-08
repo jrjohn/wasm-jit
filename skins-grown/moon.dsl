@@ -1,6 +1,6 @@
-hue(0.14);
-disc(px,py,s*0.6);
-hue(0.14);
-ring(px,py,s*1.0);
-ring(px,py,s*1.4);
+hue(0.15);
+disc(px, py, s * 0.42);
+hue(0.13);
+ring(px, py, s * 0.58);
+ring(px, py, s * 0.7);
 0.0
