@@ -61,6 +61,23 @@ const FIELD_IMPORTS: [HostFn; 6] = [
 ];
 const FIELD_FUEL: u32 = 2_000_000;
 
+/// Inhabitant (entity) ABI: run(t, ex, ey) -> f64, once per tick. The soul is
+/// a seed (JSON+DSL, fast loop); the skin is host sprite vocabulary (slow
+/// loop); the bounds are this grant template. `mv(dx,dy)` REQUESTS movement —
+/// position is host-owned state, clamped and bounded by the host.
+const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
+const ENTITY_IMPORTS: [HostFn; 6] = [
+    HostFn { name: "sin", n_args: 1, returns: true },
+    HostFn { name: "cos", n_args: 1, returns: true },
+    HostFn { name: "get", n_args: 1, returns: true },
+    HostFn { name: "set", n_args: 2, returns: false },
+    HostFn { name: "fr", n_args: 3, returns: true },
+    HostFn { name: "mv", n_args: 2, returns: false },
+];
+const ENTITY_FUEL: u32 = 200_000;
+/// The skin registry — entity types the host knows how to draw.
+const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
+
 #[derive(Deserialize)]
 struct GenReq {
     prompt: String,
@@ -234,6 +251,31 @@ fn validate_tree(node: &Value, cell_ids: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_region(region: &Value, grid: u64, id: &str) -> Result<(), String> {
+    let r: Vec<f64> = region
+        .as_array()
+        .filter(|a| a.len() == 4)
+        .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
+        .ok_or_else(|| format!("world cell '{id}': region must be [x0,y0,x1,y1]"))?;
+    if r.len() != 4
+        || r[0] < 0.0
+        || r[1] < 0.0
+        || r[0] >= r[2]
+        || r[1] >= r[3]
+        || r[2] > grid as f64
+        || r[3] > grid as f64
+    {
+        return Err(format!(
+            "world cell '{id}': region [{},{},{},{}] out of bounds for grid {grid}",
+            r.first().copied().unwrap_or(-1.0),
+            r.get(1).copied().unwrap_or(-1.0),
+            r.get(2).copied().unwrap_or(-1.0),
+            r.get(3).copied().unwrap_or(-1.0)
+        ));
+    }
+    Ok(())
+}
+
 /// The server-side fence: a generated seed is COMPILED here, natively, before
 /// the browser ever sees it. Same compiler, same grants, same fuel as the
 /// browser side — the validation cannot drift from reality.
@@ -336,26 +378,42 @@ fn validate(obj: &Value) -> Result<(), String> {
                     }
                 }
                 if let Some(region) = c.get("region") {
-                    let r: Vec<f64> = region
-                        .as_array()
-                        .filter(|a| a.len() == 4)
-                        .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
-                        .ok_or_else(|| format!("world cell '{id}': region must be [x0,y0,x1,y1]"))?;
-                    if r.len() != 4
-                        || r[0] < 0.0
-                        || r[1] < 0.0
-                        || r[0] >= r[2]
-                        || r[1] >= r[3]
-                        || r[2] > grid as f64
-                        || r[3] > grid as f64
-                    {
+                    validate_region(region, grid, id)?;
+                }
+            }
+            if let Some(entities) = world.get("entities").and_then(|e| e.as_array()) {
+                for ent in entities {
+                    let id = ent
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .ok_or("an entity lacks \"id\"")?;
+                    let ty = ent
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .ok_or_else(|| format!("entity '{id}' lacks \"type\""))?;
+                    if !ENTITY_TYPES.contains(&ty) {
                         return Err(format!(
-                            "world cell '{id}': region [{},{},{},{}] out of bounds for grid {grid}",
-                            r.first().copied().unwrap_or(-1.0),
-                            r.get(1).copied().unwrap_or(-1.0),
-                            r.get(2).copied().unwrap_or(-1.0),
-                            r.get(3).copied().unwrap_or(-1.0)
+                            "entity '{id}': type '{ty}' not in the skin registry [{}]",
+                            ENTITY_TYPES.join(", ")
                         ));
+                    }
+                    let at: Vec<f64> = ent
+                        .get("at")
+                        .and_then(|a| a.as_array())
+                        .filter(|a| a.len() == 2)
+                        .map(|a| a.iter().filter_map(|v| v.as_f64()).collect())
+                        .ok_or_else(|| format!("entity '{id}' needs \"at\":[x,y]"))?;
+                    if at.len() != 2
+                        || at[0] < 0.0
+                        || at[1] < 0.0
+                        || at[0] >= grid as f64
+                        || at[1] >= grid as f64
+                    {
+                        return Err(format!("entity '{id}': at out of the {grid}×{grid} field"));
+                    }
+                    if let Some(behavior) = ent.get("behavior").and_then(|b| b.as_str()) {
+                        compile_check(behavior, &ENTITY_PARAMS, &ENTITY_IMPORTS, ENTITY_FUEL)
+                            .map_err(|e| format!("entity '{id}' behavior failed to compile: {e}"))?;
                     }
                 }
             }
@@ -577,6 +635,34 @@ mod tests {
             }
         });
         assert!(validate(&obj).is_ok(), "{:?}", validate(&obj));
+    }
+
+    #[test]
+    fn entities_validate_and_reject_unknown_skin() {
+        let ok = serde_json::json!({
+            "surface":"field","world":{"grid":96,
+                "cells":[{"id":"terrain","mode":"once","script":"1.0"}],
+                "entities":[
+                    {"id":"zhou","type":"boat","at":[50,40],
+                     "behavior":"mv(sin(t * 0.4) * 0.03, cos(t * 0.3) * 0.02);\n0.0"},
+                    {"id":"weng","type":"fisherman","at":[50,39],"behavior":"0.0"}
+                ]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+
+        let ghost_type = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"x","type":"dragon","at":[5,5]}]}});
+        assert!(validate(&ghost_type).unwrap_err().contains("skin registry"));
+
+        let out_of_field = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"x","type":"boat","at":[500,5]}]}});
+        assert!(validate(&out_of_field).unwrap_err().contains("out of the"));
+
+        let bad_behavior = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"x","type":"boat","at":[5,5],"behavior":"fetch(t)"}]}});
+        assert!(validate(&bad_behavior).unwrap_err().contains("failed to compile"));
     }
 
     #[test]

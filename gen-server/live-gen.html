@@ -65,7 +65,8 @@ Generation is seconds; every interaction after is µs.
 - draw a smiling sun (switches to the drawing surface)
 - 一座山 (a living world rises on the field)
 - 下一場雨 (…and then, let it rain)
-- 讓我走進這個世界 (first person — walk in the rain)</div>
+- 讓我走進這個世界 (first person — walk in the rain)
+- 孤舟蓑笠翁 獨釣寒江雪 (snow, a boat, a fisherman)</div>
     </div>
     <div class="chatbar">
       <input type="text" id="prompt" placeholder="describe a UI… (Enter to send)">
@@ -103,7 +104,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm } from './pkg/wasm_jit.js';
 await init();
 
 const $ = id => document.getElementById(id);
@@ -368,7 +369,7 @@ function manifestUi(schema) {
 // Many world-cells read (globally) and write (region-scoped) the field; the
 // landscape is painted by no one — it emerges. The host renders the field.
 let fieldWorld = null;   // {grid, cells:[{id,mode,order,region,run,fails,quarantined}]}
-let FIELD = null;        // Float64Array(grid*grid*3)
+let FIELD = null;        // Float64Array(grid*grid*4): height, water, veg, snow
 let fieldCanvas = null;  // offscreen grid-sized canvas
 let lastTick = 0;
 let lastRaf = 0;
@@ -432,16 +433,17 @@ function renderFieldFP() {
     for (let d = 1.6; d < maxD; d += 0.35 + d * 0.014) {
       const wx = cam.px + dx * d, wz = cam.pz + dz * d;
       const xi = wx | 0, zi = wz | 0;
-      let h = 0, w = 2.5, v = 0;                    // beyond the field: the sea
+      let h = 0, w = 2.5, v = 0, sn = 0;            // beyond the field: the sea
       if (xi >= 0 && xi < g && zi >= 0 && zi < g) {
         h = FIELD[zi * g + xi];
         w = FIELD[(g + zi) * g + xi];
         v = FIELD[(2 * g + zi) * g + xi];
+        sn = FIELD[(3 * g + zi) * g + xi];
       }
       const surf = (h + Math.min(w, 3) * 0.6) * K;
       const sy = horizon + ((eye - surf) * focal) / d;
       if (sy < minY) {
-        let [r, gg, b] = terrainColor(h, w, v);
+        let [r, gg, b] = terrainColor(h, w, v, sn);
         const fog = Math.min(d / maxD, 1) ** 1.35 * 0.8;
         r = r * (1 - fog) + 58 * fog; gg = gg * (1 - fog) + 93 * fog; b = b * (1 - fog) + 132 * fog;
         ctx.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
@@ -451,6 +453,22 @@ function renderFieldFP() {
       }
     }
   }
+  // inhabitants as billboards (v1: no occlusion behind hills — noted limit)
+  const K2 = K, sinY2 = Math.sin(cam.yaw), cosY2 = Math.cos(cam.yaw);
+  for (const e of ENTITIES) {
+    const dx = e.x - cam.px, dz = e.y - cam.pz;
+    const zc = dx * sinY2 + dz * cosY2;
+    if (zc < 1.2) continue;
+    const xc = dx * cosY2 - dz * sinY2;
+    const off = xc / zc;
+    if (Math.abs(off) > fov * 0.7) continue;
+    const sx = (off / fov + 0.5) * W;
+    const groundY = terrainH(e.x, e.y) * K2 + Math.min(FIELD[(fieldWorld.grid + (e.y | 0)) * fieldWorld.grid + (e.x | 0)], 3) * 0.6 * K2;
+    const sy = horizon + ((eye - groundY) * focal) / zc;
+    const s = Math.max(3, (focal / zc) * 1.1);
+    SKINS[e.type]?.(ctx, sx, sy - s * 0.4, s);
+  }
+  if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
   ctx.font = '13px ui-monospace';
   ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
@@ -474,7 +492,8 @@ function setFieldView(view) {
 
 // e2e / debugging: honest state, no pixel guessing
 window.__fieldState = () => fieldWorld
-  ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length }
+  ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y })) }
   : null;
 
 const DEFAULT_WORLD = {
@@ -487,7 +506,7 @@ const DEFAULT_WORLD = {
 
 function compileWorldCells(world) {
   const g = world.grid ?? 96;
-  FIELD = new Float64Array(g * g * 3);
+  FIELD = new Float64Array(g * g * 4);
   const wslots = new Float64Array(32);
   const cells = (world.cells ?? []).map(def => {
     const region = def.region ?? [0, 0, g, g];
@@ -498,12 +517,12 @@ function compileWorldCells(world) {
       // reads are global (mutual beholding); writes are region-scoped (karma is local)
       fr: (c, x, y) => {
         c |= 0; x |= 0; y |= 0;
-        if (c < 0 || c > 2 || x < 0 || x >= g || y < 0 || y >= g) return 0;
+        if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
         return FIELD[(c * g + y) * g + x];
       },
       fw: (c, x, y, v) => {
         c |= 0; x |= 0; y |= 0;
-        if (c < 0 || c > 2 || x < region[0] || x >= region[2] || y < region[1] || y >= region[3]) return;
+        if (c < 0 || c > 3 || x < region[0] || x >= region[2] || y < region[1] || y >= region[3]) return;
         if (x < 0 || x >= g || y < 0 || y >= g) return;
         FIELD[(c * g + y) * g + x] = v;
       },
@@ -529,14 +548,110 @@ function callWorldCell(c, t, g) {
   }
 }
 
-function terrainColor(h, w, v) {
+function terrainColor(h, w, v, s = 0) {
   let r, g, b;
-  if (h > 80) { r = 235; g = 240; b = 245; }                                  // snow
+  if (h > 80) { r = 235; g = 240; b = 245; }                                  // peak snow
   else if (h > 55) { const k = (h - 55) / 25; r = 120 + k * 80; g = 110 + k * 95; b = 100 + k * 115; } // rock→snow
   else if (h > 9) { r = 105 - v * 45; g = 128 + v * 55; b = 72 - v * 20; }    // grass, greener with veg
   else { r = 189 - v * 30; g = 174 + v * 10; b = 127; }                       // sand/lowland
   if (w > 0.03) { const k = Math.min(w / 3, 1) * 0.85; r = r * (1 - k) + 25 * k; g = g * (1 - k) + 95 * k; b = b * (1 - k) + 190 * k; }
+  else if (s > 0.02) { const k = Math.min(s, 1) * 0.9; r = r * (1 - k) + 240 * k; g = g * (1 - k) + 244 * k; b = b * (1 - k) + 250 * k; } // fallen snow (land only)
   return [r, g, b];
+}
+
+// ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
+let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
+const MAX_STEP = 0.5;    // host law: nobody teleports
+
+function compileEntities(world, g) {
+  const defs = world.entities ?? [];
+  return defs.map(def => {
+    const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
+                  run: null, pending: [0, 0], fails: 0, quarantined: false };
+    if (def.behavior) {
+      const eslots = new Float64Array(32);
+      const env = {
+        sin: Math.sin, cos: Math.cos,
+        get: i => eslots[i & 31] ?? 0,
+        set: (i, v) => { eslots[i & 31] = v; },
+        fr: (c, x, y) => {
+          c |= 0; x |= 0; y |= 0;
+          if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
+          return FIELD[(c * g + y) * g + x];
+        },
+        mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
+      };
+      const bytes = compile_entity_wasm(def.behavior);
+      const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+      ent.run = inst.exports.run;
+    }
+    return ent;
+  });
+}
+
+function tickEntities(t, g) {
+  for (const e of ENTITIES) {
+    if (e.run && !e.quarantined) {
+      e.pending[0] = 0; e.pending[1] = 0;
+      try { e.run(t, e.x, e.y); e.fails = 0; }
+      catch (err) { if (++e.fails >= 3) e.quarantined = true; continue; }
+      const len = Math.hypot(e.pending[0], e.pending[1]);
+      const k = len > MAX_STEP ? MAX_STEP / len : 1; // host law: clamp the step
+      e.x = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
+      e.y = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+    }
+  }
+}
+
+// skin registry (top view): px = canvas x, py = canvas y, s = canvas px per grid unit
+const SKINS = {
+  boat(c, px, py, s) {
+    c.fillStyle = '#6d4c2f';
+    c.beginPath(); c.ellipse(px, py, s * 1.5, s * 0.62, 0, 0, 6.2832); c.fill();
+    c.strokeStyle = '#4a331f'; c.lineWidth = Math.max(1, s * 0.16);
+    c.beginPath(); c.ellipse(px, py, s * 1.5, s * 0.62, 0, 3.3, 6.1); c.stroke();
+  },
+  fisherman(c, px, py, s) {
+    c.strokeStyle = '#20242c'; c.lineWidth = Math.max(1, s * 0.22);
+    c.beginPath(); c.arc(px, py, s * 0.42, 0, 6.2832); c.stroke();       // cloaked body
+    c.fillStyle = '#c9b87a';
+    c.beginPath(); c.moveTo(px - s * 0.55, py - s * 0.1);                 // straw hat
+    c.lineTo(px + s * 0.55, py - s * 0.1); c.lineTo(px, py - s * 0.75); c.closePath(); c.fill();
+    c.strokeStyle = '#8b949e'; c.lineWidth = 1;                            // the line into the water
+    c.beginPath(); c.moveTo(px + s * 0.3, py); c.lineTo(px + s * 1.7, py + s * 0.7); c.stroke();
+  },
+  person(c, px, py, s) {
+    c.fillStyle = '#20242c';
+    c.beginPath(); c.arc(px, py - s * 0.25, s * 0.28, 0, 6.2832); c.fill();
+    c.fillRect(px - s * 0.2, py - s * 0.05, s * 0.4, s * 0.7);
+  },
+  car(c, px, py, s) {
+    c.fillStyle = '#a33c3c';
+    c.fillRect(px - s * 0.9, py - s * 0.5, s * 1.8, s);
+    c.fillStyle = '#14171d';
+    c.beginPath(); c.arc(px - s * 0.55, py + s * 0.5, s * 0.22, 0, 6.2832); c.fill();
+    c.beginPath(); c.arc(px + s * 0.55, py + s * 0.5, s * 0.22, 0, 6.2832); c.fill();
+  },
+};
+
+function snowing() { // is any snow on the ground? (cheap sample)
+  if (!FIELD || !fieldWorld) return false;
+  const g = fieldWorld.grid;
+  for (let i = 0; i < 32; i++) {
+    const x = (i * 37) % g, y = (i * 53) % g;
+    if (FIELD[(3 * g + y) * g + x] > 0.05) return true;
+  }
+  return false;
+}
+
+function drawSnowfall(nowSec, W, H) { // host weather effect — pure rendering, replay-free
+  ctx.fillStyle = 'rgba(240,244,250,.8)';
+  for (let i = 0; i < 90; i++) {
+    const sp = 26 + (i % 5) * 9;
+    const x = ((i * 131.7) % W + nowSec * (9 + (i % 4) * 5)) % W;
+    const y = ((i * 89.3) % H + nowSec * sp) % H;
+    ctx.fillRect(x, y, 2, 2);
+  }
 }
 
 function renderField() {
@@ -553,10 +668,11 @@ function renderField() {
       const h = FIELD[y * g + x];
       const w = FIELD[(g + y) * g + x];
       const v = FIELD[(2 * g + y) * g + x];
+      const sn = FIELD[(3 * g + y) * g + x];
       // cheap hillshade from the height gradient
       const hl = x > 0 ? FIELD[y * g + x - 1] : h;
       const shade = Math.max(0.72, Math.min(1.25, 1 + (hl - h) * 0.03));
-      let [r, gg, b] = terrainColor(h, w, v);
+      let [r, gg, b] = terrainColor(h, w, v, sn);
       const i = (y * g + x) * 4;
       d[i] = r * shade; d[i + 1] = gg * shade; d[i + 2] = b * shade; d[i + 3] = 255;
     }
@@ -564,14 +680,19 @@ function renderField() {
   fg.putImageData(img, 0, 0);
   ctx.imageSmoothingEnabled = false;
   const size = Math.min(cv.width, cv.height);
+  const ox = (cv.width - size) / 2;
   ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.drawImage(fieldCanvas, (cv.width - size) / 2, 0, size, size);
+  ctx.drawImage(fieldCanvas, ox, 0, size, size);
+  const s = size / g; // canvas px per grid unit — the skins live at full resolution
+  for (const e of ENTITIES) SKINS[e.type]?.(ctx, ox + e.x * s, e.y * s, s);
+  if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
 }
 
 function manifestField(world) {
   drawRun = null;
   const t0 = performance.now();
   const compiled = compileWorldCells(world);
+  ENTITIES = compileEntities(world, compiled.grid);
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   fieldWorld = compiled;
@@ -580,7 +701,9 @@ function manifestField(world) {
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
   setFieldView(world.view === 'first_person' ? 'fp' : 'top');
   $('stage-status').textContent =
-    `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living) on a ${compiled.grid}×${compiled.grid} field — ${(performance.now() - t0).toFixed(1)}ms`;
+    `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
+    (ENTITIES.length ? ` + ${ENTITIES.length} inhabitants` : '') +
+    ` on a ${compiled.grid}×${compiled.grid} field — ${(performance.now() - t0).toFixed(1)}ms`;
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = JSON.stringify(world, null, 2);
   document.title = 'live-gen FIELD OK';
@@ -633,6 +756,7 @@ function manifestDraw(seed) {
       lastTick = now;
       const t = now / 1000;
       for (const c of fieldWorld.cells) if (c.mode === 'frame') callWorldCell(c, t, fieldWorld.grid);
+      tickEntities(t, fieldWorld.grid);
       if (fieldView === 'top') renderField();
     }
     if (fieldView === 'fp') { // the walker moves every frame — smooth inside a living world

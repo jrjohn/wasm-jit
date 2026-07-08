@@ -113,6 +113,32 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// Inhabitant (entity) behavior for the Field: `run(t, ex, ey) -> f64`.
+/// Capabilities env.{sin, cos, get, set, fr, mv} — fr reads the shared field,
+/// mv REQUESTS movement (host clamps speed/bounds; position is host-owned).
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 3] = ["t", "ex", "ey"];
+    const IMPORTS: [HostFn; 6] = [
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+        HostFn { name: "get", n_args: 1, returns: true },
+        HostFn { name: "set", n_args: 2, returns: false },
+        HostFn { name: "fr", n_args: 3, returns: true },
+        HostFn { name: "mv", n_args: 2, returns: false },
+    ];
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &IMPORTS,
+        codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
 /// Benchmark lane with fuel metering on: same `run(n)->f64` ABI plus an
 /// exported "fuel" gauge. Used to measure the back-edge-counter tax.
 #[cfg(feature = "js-api")]

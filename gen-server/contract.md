@@ -123,7 +123,8 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
   "enter it", "first person" / 「走進去」「第一人稱」: return the SAME world with
   "view":"first_person" — do not change the cells.
 Many WORLD CELLS share one grid-shaped field and co-create a landscape. Channels:
-  channel 0 = height (0..~100)   channel 1 = water depth (0..~6)   channel 2 = vegetation (0..1)
+  channel 0 = height (0..~100)   channel 1 = water depth (0..~6)
+  channel 2 = vegetation (0..1)  channel 3 = snow cover (0..1) — renders white; falls on land, not on water
 World-cell capabilities: sin cos get set (private slots) + the FIELD pair:
   fr(channel, x, y) -> f64        read the field (reads are global)
   fw(channel, x, y, value)        write the field (writes limited to the cell's "region" if given)
@@ -142,6 +143,20 @@ Example world cell — rain (mode "frame", drifting shower writes water):
 
 Example world cell — flow + erosion (mode "frame"): for each inner cell with water > 0.05, compare height+water against the 4 neighbors, move up to half the difference of water toward the lowest neighbor, carve height slightly (× ~0.02) where water leaves, and multiply water by ~0.99 for evaporation. Pattern:
 "let y = 1.0;\nwhile y < gh - 1.0 {\n let x = 1.0;\n while x < gw - 1.0 {\n  let w = fr(1.0, x, y);\n  if w > 0.05 {\n   let h = fr(0.0, x, y) + w;\n   let bx = x;\n   let by = y;\n   let bh = h;\n   let hn = fr(0.0, x - 1.0, y) + fr(1.0, x - 1.0, y);\n   if hn < bh { bh = hn; bx = x - 1.0; by = y; }\n   hn = fr(0.0, x + 1.0, y) + fr(1.0, x + 1.0, y);\n   if hn < bh { bh = hn; bx = x + 1.0; by = y; }\n   hn = fr(0.0, x, y - 1.0) + fr(1.0, x, y - 1.0);\n   if hn < bh { bh = hn; bx = x; by = y - 1.0; }\n   hn = fr(0.0, x, y + 1.0) + fr(1.0, x, y + 1.0);\n   if hn < bh { bh = hn; bx = x; by = y + 1.0; }\n   if bh < h - 0.01 {\n    let dv = min(w, (h - bh) * 0.5);\n    fw(1.0, x, y, w - dv);\n    fw(1.0, bx, by, fr(1.0, bx, by) + dv);\n    fw(0.0, x, y, fr(0.0, x, y) - dv * 0.02);\n   }\n  }\n  fw(1.0, x, y, fr(1.0, x, y) * 0.995);\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+
+=== inhabitants (entities) — people/boats/cars are NOT terrain ===
+"world" may also carry "entities": [{"id":"name","type":"...","at":[x,y],"behavior":"<DSL>"}]
+- type must be one of the skin registry: "boat", "fisherman", "person", "car" (the host draws them; you cannot invent skins)
+- at: [x,y] grid position; behavior (optional): DSL run(t, ex, ey) -> f64, runs every tick.
+  Capabilities: sin cos get set (private slots) + fr(c,x,y) (read the field) + mv(dx,dy)
+  (REQUEST movement — the host clamps speed and bounds; position is host-owned).
+- ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
+  who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
+- A snow scene example: a "frame" cell writing channel 3 on land:
+  "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 { fw(3.0, x, y, min(fr(3.0, x, y) + 0.002, 1.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+- Poetry/scenes: compose terrain cells + weather cells + entities. 孤舟蓑笠翁,獨釣寒江雪 =
+  a cold river (water), snow falling on the banks (channel 3), one "boat" entity on the river,
+  one "fisherman" entity on the boat (behavior "0.0"), and nothing else — the emptiness matters.
 
 When the user asks for terrain/nature/worlds ("a mountain", "let it rain", "a river", "an island"), use surface "field". When modifying a CURRENT STATE world, return the FULL updated world — keep existing cells and add/adjust; e.g. "now let it rain" on a mountain world ADDS a rain cell AND a flow+erosion cell so water visibly flows downhill.
 
