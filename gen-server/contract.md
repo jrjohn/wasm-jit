@@ -122,6 +122,8 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
   handles all rendering and movement). When the user asks to "walk into the world",
   "enter it", "first person" / 「走進去」「第一人稱」: return the SAME world with
   "view":"first_person" — do not change the cells.
+- When modifying a world the user is already exploring, KEEP its "view" field as-is
+  (if it was "first_person", keep it) — don't drop the user back to the top view.
 Many WORLD CELLS share one grid-shaped field and co-create a landscape. Channels:
   channel 0 = height (0..~100)   channel 1 = water depth (0..~6)
   channel 2 = vegetation (0..1)  channel 3 = snow cover (0..1) — renders white; falls on land, not on water

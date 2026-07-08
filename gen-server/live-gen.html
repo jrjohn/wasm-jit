@@ -829,7 +829,13 @@ function manifestField(world) {
   renderField();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
   lastManifest = { surface: 'field', payload: world };
-  setFieldView(world.view === 'first_person' ? 'fp' : 'top');
+  // The view is STICKY: an iteration ('add lotuses') that omits "view" must
+  // NOT throw you back to top — you stay where you were standing. Only an
+  // explicit view in the world JSON (walk-into → first_person, or top) moves it.
+  const target = world.view === 'first_person' ? 'fp'
+    : world.view === 'top' ? 'top'
+    : (fieldView === 'fp' ? 'fp' : 'top'); // no explicit view → keep the current one
+  setFieldView(target);
   $('stage-status').textContent =
     `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
     (ENTITIES.length ? ` + ${ENTITIES.length} inhabitants` : '') +
