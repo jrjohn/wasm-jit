@@ -27,6 +27,9 @@ Theory: `docs/multidimensional-composition-architecture.md` (§16 execution laye
 
 **Three surfaces, three complete vocabularies**: pixels (7 primitives), forms (9 widgets), layout (9 layout cells) — generation never creates vocabulary, it only composes it.
 
+**`gen-server/` — the LIVE generation demo (chat → real Claude → UI manifests)**, fully separate from the demos above (:8646):
+a chat box drives **Claude CLI running sandboxed in a Docker container** (no volumes, API egress only) → the returned seed is validated by **natively compiling it with wasm-jit on the server** (self-repair retries feed the compiler error back) → only a seed that compiles reaches the browser, where it manifests as fuel-metered capability cells. Two sandboxes, one thesis: **the generator is contained by the container; the generated is contained by the cell — nobody in the chain needs to be trusted.** Conversational iteration works (the prior schema rides along: "add a people count and show the per-person share" grew a 4-cell tip calculator to 6 cells in 10.8s, one attempt). UI logic cells get `sin/cos/get/set` (a 32-slot store makes multi-input math work); the widget vocabulary includes a **host-rendered chart set** (barchart/linechart/piechart/gauge — zero external deps; static data rides in the schema, live values bind to cells, and `init` fires cells at manifest so nothing shows "—"); a "draw a smiling sun" prompt switches to the 7-primitive pixel surface. Measured: UI one-shot in ~8–22s, manifestation ~7ms for 4 cells — **generate slowly, manifest fast**, live.
+
 **Seed-language spectrum** (§16): the fence is in the import table, not the grammar — so one sandbox holds many seed languages:
 | Tier | Language | Fence entry | Proof |
 |---|---|---|---|
@@ -102,6 +105,12 @@ cd leptos-poc && trunk build --release && cd ..
 cargo run --release -p api-server -- leptos-poc/dist
 # → http://127.0.0.1:8645 (same-origin: serves dist + /api/*; edit a schema/seed file on disk and reload — zero rebuild)
 
+# C) live-generation demo (chat → Claude in Docker → UI manifests) — separate, :8646
+#    needs: a docker image with the Claude CLI (default agent-task-node:local, override GEN_IMAGE)
+#    and a long-lived token (claude setup-token) as CLAUDE_CODE_OAUTH_TOKEN
+gen-server/run.sh [path/to/.env-with-token]
+# → http://127.0.0.1:8646
+
 cargo test                          # native tests
 cargo run --example audit_as --no-default-features   # dogfood: audit a real asc output with our own tool
 ```
@@ -136,5 +145,6 @@ The six gaps named in docs §18 ("from PoC to live UI manifestation") are now bu
 - `leptos-poc/` — the eight-tab app; `src/cell.rs` = the only module that touches js-sys (CellBuilder: the grant list generates both the codegen import table and the JS env, so they can't drift; closure lifetimes encoded in the type; module cache + fuel gauge + write/read_mem live here too)
 - `leptos-poc/src/{patch,bus,supervisor,live_tab}.rs` — the §18 substrate: patch grammar, budgeted event bus, per-cell supervision, and the LiveUI tab assembling them
 - `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,live-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
+- `gen-server/` — the live-generation demo (:8646): `contract.md` (the whole seed contract in one prompt — Tier 1's design point), `src/main.rs` (Docker-sandboxed Claude CLI + native compile-validation with self-repair), `live-gen.html` (chat + instant manifestation)
 - `examples/*.dsl` — buddha / guanyin / minecraft (isometric) / mc3p (playable third-person)
 - `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§17, in Chinese)

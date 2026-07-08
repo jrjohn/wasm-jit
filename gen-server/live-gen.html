@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live generation — chat → sandboxed UI</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 1100px;
+         margin: 1.2rem auto; padding: 0 1rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  h1 { font-size: 1.02rem; }
+  .sub { font-size: .8rem; opacity: .72; }
+  .cols { display: grid; grid-template-columns: 340px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .chat { border: 1px solid #30363d; border-radius: 8px; display: flex; flex-direction: column; height: 560px; }
+  .msgs { flex: 1; overflow-y: auto; padding: .6rem; display: flex; flex-direction: column; gap: .5rem; }
+  .msg { font-size: .8rem; padding: .4rem .6rem; border-radius: 8px; max-width: 95%; white-space: pre-wrap; }
+  .msg.user { background: #1f6feb33; align-self: flex-end; }
+  .msg.ai { background: #16202b; border: 1px solid #30363d; align-self: flex-start; }
+  .msg.err { background: #f8514922; border: 1px solid #f8514966; color: #f85149; }
+  .chatbar { display: flex; gap: .4rem; padding: .5rem; border-top: 1px solid #30363d; }
+  .chatbar input[type=text] { flex: 1; font: inherit; font-size: .82rem; padding: .4rem .6rem;
+    border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; }
+  button { font: inherit; font-size: .82rem; padding: .4rem .8rem; border-radius: 6px; border: none;
+           background: #1f6feb; color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  select { font: inherit; font-size: .78rem; padding: .3rem; border-radius: 6px;
+           border: 1px solid #30363d; background: #161b22; color: inherit; }
+  .stage-wrap { border: 1px solid #30363d; border-radius: 8px; min-height: 560px; padding: 1rem; }
+  .stage-head { display: flex; gap: 1rem; align-items: center; font-size: .75rem; opacity: .7; margin-bottom: .8rem; }
+  #stage { display: flex; flex-direction: column; gap: .8rem; }
+  canvas { width: 100%; border: 1px solid #30363d; border-radius: 8px; background: #010409; display: none; }
+  /* manifested widget styles */
+  .w-stack { display: flex; flex-direction: column; gap: .7rem; }
+  .w-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .w-label { margin: 0; font-size: .9rem; }
+  .w-value { font-size: .9rem; opacity: .85; } .w-value b { color: #58a6ff; }
+  .w-slider { width: 200px; }
+  .w-input { font: inherit; font-size: .82rem; padding: .3rem .5rem; border-radius: 6px;
+             border: 1px solid #30363d; background: #161b22; color: inherit; width: 110px; }
+  .quar { color: #f85149; font-size: .75rem; }
+  .hint { font-size: .75rem; opacity: .55; }
+</style>
+</head>
+<body>
+<h1>Live generation — chat with Claude (in Docker) → UI manifests instantly
+  <span style="float:right;font-weight:400;font-size:.8rem"><a href="http://127.0.0.1:8645" style="color:#58a6ff">other demos →</a></span></h1>
+<p class="sub">
+The generator runs sandboxed in a container (no volumes, API egress only); the generated seed is validated by
+<b>natively compiling it on the server</b> (with self-repair retries), then manifested here as <b>fuel-metered,
+capability-sandboxed WASM cells</b> — code you watch being written that you never have to trust.
+Generation is seconds; every interaction after is µs.
+</p>
+
+<div class="cols">
+  <div class="chat">
+    <div class="msgs" id="msgs">
+      <div class="msg ai">Ask me for a UI. Try:
+- a temperature converter
+- a tip calculator with a % slider
+- a bar chart of Taiwan reservoir levels
+- monthly revenue line chart + a pie of market share
+- a gauge driven by a slider
+- change the slider range to 0–100 (iterates on the current UI)
+- draw a smiling sun (switches to the drawing surface)</div>
+    </div>
+    <div class="chatbar">
+      <input type="text" id="prompt" placeholder="describe a UI… (Enter to send)">
+      <button id="send">Send</button>
+    </div>
+    <div class="chatbar">
+      <span class="hint">model</span>
+      <select id="model">
+        <option value="claude-sonnet-5" selected>sonnet 5 (reliable)</option>
+        <option value="claude-haiku-4-5-20251001">haiku 4.5 (fast)</option>
+        <option value="claude-opus-4-8">opus 4.8</option>
+      </select>
+      <span class="hint" id="timer"></span>
+    </div>
+  </div>
+
+  <div class="stage-wrap">
+    <div class="stage-head">
+      <span id="stage-status">nothing manifested yet</span>
+    </div>
+    <div id="stage"></div>
+    <canvas id="cv" width="1200" height="700"></canvas>
+    <details id="seed-box" style="display:none; margin-top:1rem">
+      <summary style="cursor:pointer; font-size:.78rem; opacity:.75">
+        the seed behind this UI — everything the AI wrote (JSON schema + DSL cell scripts; the rendering code is all pre-written host vocabulary)
+      </summary>
+      <pre id="seed-json" style="font-size:.72rem; line-height:1.4; overflow-x:auto; background:#010409;
+        border:1px solid #30363d; border-radius:8px; padding:.7rem; max-height:420px; overflow-y:auto"></pre>
+    </details>
+  </div>
+</div>
+
+<script type="module">
+import init, { compile_ui_cell_wasm, compile_draw_wasm } from './pkg/wasm_jit.js';
+await init();
+
+const $ = id => document.getElementById(id);
+const msgs = $('msgs');
+function say(cls, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ---------------- UI surface: compile cells + render + bus ----------------
+let cells = {};    // id -> { run, quarantined, fails }
+let outputs = {};  // id -> latest f64
+let wires = [];
+let priorSchema = null;
+let drawRun = null;
+let slots = new Float64Array(32); // the granted get/set store — multi-input logic lives here
+
+function compileCells(defs) {
+  cells = {}; outputs = {}; slots = new Float64Array(32); // a new UI = a new world
+  const env = {
+    sin: Math.sin, cos: Math.cos,
+    get: i => slots[i & 31] ?? 0,
+    set: (i, v) => { slots[i & 31] = v; },
+  };
+  for (const c of defs) {
+    const bytes = compile_ui_cell_wasm(c.script); // throws on a bad seed (server already vetted)
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+    cells[c.id] = { run: inst.exports.run, fails: 0, quarantined: false };
+  }
+}
+
+function callCell(id, x) {
+  const c = cells[id];
+  if (!c || c.quarantined) return null;
+  try {
+    const v = c.run(x);
+    c.fails = 0;
+    return v;
+  } catch (e) { // fuel trap or bad math — supervise, never freeze
+    if (++c.fails >= 3) c.quarantined = true;
+    $('stage-status').textContent = `cell '${id}' trapped (${e.message ?? e})` + (c.quarantined ? ' — quarantined' : '');
+    return null;
+  }
+}
+
+function fire(spec, eventVal) {
+  if (!spec?.cell) return;
+  const arg = spec.arg_from != null ? (outputs[spec.arg_from] ?? 0)
+            : spec.arg != null ? spec.arg
+            : eventVal ?? 1;
+  const queue = [[spec.cell, arg]];
+  let budget = 64;
+  while (queue.length && budget-- > 0) {   // budgeted cascade: a cycle degrades, never hangs
+    const [id, x] = queue.shift();
+    const out = callCell(id, x);
+    if (out === null) continue;
+    outputs[id] = out;
+    for (const w of wires) if (w.from === id) queue.push([w.to, out]);
+  }
+  document.querySelectorAll('[data-bind]').forEach(el => {
+    const v = outputs[el.dataset.bind];
+    el.textContent = v === undefined ? '—' : (Math.round(v * 100) / 100).toString();
+  });
+  redrawCharts(); // live charts: bound values may have changed
+}
+
+// ---------------- chart vocabulary (host-rendered, zero dependencies) ----------------
+let charts = []; // {node, cvs}
+const TXT = '#e6edf3', DIM = '#8b949e', GRID = '#30363d';
+const palette = i => `hsl(${(210 + i * 67) % 360},62%,58%)`;
+const fmtN = v => (Math.round(v * 100) / 100).toString();
+
+function chartVals(node) {
+  return node.bind_values ? node.bind_values.map(id => outputs[id] ?? 0) : (node.values ?? []);
+}
+
+function drawBar(node, cvs) {
+  const g = cvs.getContext('2d'), W = cvs.width, labels = node.labels, vals = chartVals(node);
+  g.clearRect(0, 0, W, cvs.height);
+  g.font = '15px ui-monospace'; g.fillStyle = TXT;
+  if (node.title) g.fillText(node.title, 10, 20);
+  const maxv = Math.max(...vals, 1e-9), x0 = 170, bw = W - x0 - 90;
+  labels.forEach((lb, i) => {
+    const y = 40 + i * 30;
+    g.fillStyle = DIM; g.textAlign = 'right'; g.fillText(String(lb), x0 - 12, y + 14);
+    g.textAlign = 'left';
+    g.fillStyle = GRID; g.fillRect(x0, y, bw, 18);
+    g.fillStyle = palette(0); g.fillRect(x0, y, Math.max(bw * (vals[i] / maxv), 0), 18);
+    g.fillStyle = TXT; g.fillText(fmtN(vals[i]) + (node.unit ?? ''), x0 + bw + 8, y + 14);
+  });
+}
+
+function drawLine(node, cvs) {
+  const g = cvs.getContext('2d'), W = cvs.width, H = cvs.height, labels = node.labels;
+  g.clearRect(0, 0, W, H);
+  g.font = '14px ui-monospace'; g.fillStyle = TXT;
+  if (node.title) g.fillText(node.title, 10, 20);
+  const all = node.series.flatMap(s => s.values);
+  const lo = Math.min(...all, 0), hi = Math.max(...all, 1e-9);
+  const L = 55, R = W - 15, T = 34, B = H - 28;
+  g.strokeStyle = GRID; g.fillStyle = DIM; g.textAlign = 'right';
+  for (let k = 0; k <= 4; k++) {
+    const y = B - (B - T) * k / 4;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke();
+    g.fillText(fmtN(lo + (hi - lo) * k / 4), L - 6, y + 4);
+  }
+  g.textAlign = 'center';
+  labels.forEach((lb, i) => g.fillText(String(lb), L + (R - L) * i / Math.max(labels.length - 1, 1), B + 18));
+  node.series.forEach((s, si) => {
+    g.strokeStyle = g.fillStyle = palette(si); g.lineWidth = 2;
+    g.beginPath();
+    s.values.forEach((v, i) => {
+      const x = L + (R - L) * i / Math.max(labels.length - 1, 1);
+      const y = B - (B - T) * ((v - lo) / (hi - lo || 1));
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+    s.values.forEach((v, i) => {
+      const x = L + (R - L) * i / Math.max(labels.length - 1, 1);
+      const y = B - (B - T) * ((v - lo) / (hi - lo || 1));
+      g.beginPath(); g.arc(x, y, 3, 0, 6.2832); g.fill();
+    });
+    g.textAlign = 'left';
+    g.fillText(s.name ?? `s${si}`, L + 8 + si * 90, T - 6);
+  });
+}
+
+function drawPie(node, cvs) {
+  const g = cvs.getContext('2d'), H = cvs.height, vals = chartVals(node);
+  g.clearRect(0, 0, cvs.width, H);
+  g.font = '14px ui-monospace'; g.fillStyle = TXT; g.textAlign = 'left';
+  if (node.title) g.fillText(node.title, 10, 20);
+  const total = vals.reduce((a, b) => a + Math.max(b, 0), 0) || 1;
+  const cx = 130, cy = (H + 24) / 2, r = Math.min(H / 2 - 34, 95);
+  let a = -1.5708;
+  vals.forEach((v, i) => {
+    const da = Math.max(v, 0) / total * 6.2832;
+    g.fillStyle = palette(i);
+    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r, a, a + da); g.closePath(); g.fill();
+    a += da;
+    g.fillRect(260, 36 + i * 24, 12, 12);
+    g.fillStyle = TXT;
+    g.fillText(`${node.labels[i]}  ${fmtN(v)}${node.unit ?? ''}`, 280, 47 + i * 24);
+  });
+}
+
+function drawGauge(node, cvs) {
+  const g = cvs.getContext('2d'), W = cvs.width, H = cvs.height;
+  g.clearRect(0, 0, W, H);
+  const v = node.bind ? (outputs[node.bind] ?? 0) : (node.value ?? 0);
+  const min = node.min ?? 0, max = node.max ?? 100;
+  const frac = Math.min(Math.max((v - min) / (max - min || 1), 0), 1);
+  const cx = W / 2, cy = H - 24, r = Math.min(H - 46, W / 2 - 20);
+  g.lineWidth = 14; g.lineCap = 'round';
+  g.strokeStyle = GRID;
+  g.beginPath(); g.arc(cx, cy, r, Math.PI, 2 * Math.PI); g.stroke();
+  g.strokeStyle = palette(0);
+  g.beginPath(); g.arc(cx, cy, r, Math.PI, Math.PI * (1 + frac)); g.stroke();
+  g.fillStyle = TXT; g.textAlign = 'center'; g.font = 'bold 22px ui-monospace';
+  g.fillText(fmtN(v) + (node.unit ?? ''), cx, cy - 8);
+  g.font = '13px ui-monospace'; g.fillStyle = DIM;
+  if (node.title) g.fillText(node.title, cx, 16);
+}
+
+const CHART_DRAW = { barchart: drawBar, linechart: drawLine, piechart: drawPie, gauge: drawGauge };
+
+function makeChart(node) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 680;
+  cvs.height = node.type === 'barchart' ? 46 + node.labels.length * 30
+             : node.type === 'gauge' ? 150
+             : node.type === 'piechart' ? Math.max(220, 46 + node.labels.length * 24)
+             : 240;
+  cvs.style.cssText = 'width:100%;max-width:680px;display:block;background:transparent;border:none';
+  charts.push({ node, cvs });
+  CHART_DRAW[node.type](node, cvs);
+  return cvs;
+}
+
+function redrawCharts() {
+  for (const c of charts) CHART_DRAW[c.node.type](c.node, c.cvs);
+}
+
+function render(node) {
+  switch (node.type) {
+    case 'stack': case 'row': {
+      const d = document.createElement('div');
+      d.className = node.type === 'stack' ? 'w-stack' : 'w-row';
+      (node.children ?? []).forEach(k => d.appendChild(render(k)));
+      return d;
+    }
+    case 'label': {
+      const p = document.createElement('p');
+      p.className = 'w-label'; p.textContent = node.text ?? '';
+      return p;
+    }
+    case 'value': {
+      const s = document.createElement('span');
+      s.className = 'w-value';
+      s.append(node.prefix ?? '');
+      const b = document.createElement('b');
+      b.dataset.bind = node.bind ?? ''; b.textContent = '—';
+      s.appendChild(b);
+      return s;
+    }
+    case 'button': {
+      const b = document.createElement('button');
+      b.textContent = node.text ?? 'run';
+      b.onclick = () => fire(node.on_click);
+      return b;
+    }
+    case 'slider': {
+      const i = document.createElement('input');
+      i.type = 'range'; i.className = 'w-slider';
+      i.min = node.min ?? 0; i.max = node.max ?? 100; i.step = node.step ?? 1;
+      i.oninput = () => fire(node.on_input, Number(i.value));
+      return i;
+    }
+    case 'input': {
+      const i = document.createElement('input');
+      i.type = 'text'; i.className = 'w-input'; i.placeholder = node.placeholder ?? '';
+      i.oninput = () => { const v = Number(i.value); if (!Number.isNaN(v)) fire(node.on_input, v); };
+      return i;
+    }
+    case 'barchart': case 'linechart': case 'piechart': case 'gauge':
+      return makeChart(node);
+    default: {
+      const d = document.createElement('div');
+      d.className = 'quar'; d.textContent = `unknown node '${node.type}'`;
+      return d;
+    }
+  }
+}
+
+function manifestUi(schema) {
+  drawRun = null;
+  $('cv').style.display = 'none';
+  const t0 = performance.now();
+  compileCells(schema.cells);
+  wires = schema.wires ?? [];
+  charts = [];
+  const stage = $('stage');
+  stage.innerHTML = '';
+  stage.appendChild(render(schema.tree));
+  for (const entry of schema.init ?? []) fire({ cell: entry.cell, arg: entry.arg ?? 0 });
+  redrawCharts();
+  priorSchema = schema;
+  const n = schema.cells.length;
+  $('stage-status').textContent =
+    `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)`;
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = JSON.stringify(schema, null, 2);
+  document.title = 'live-gen UI OK';
+}
+
+// ---------------- draw surface ----------------
+const cv = $('cv'), ctx = cv.getContext('2d');
+const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
+const env = {
+  sin: Math.sin, cos: Math.cos,
+  hue: v => { const c = hueColor(v); ctx.strokeStyle = c; ctx.fillStyle = c; },
+  disc: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.fill(); },
+  ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
+  arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
+  line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+};
+function manifestDraw(seed) {
+  const t0 = performance.now();
+  const bytes = compile_draw_wasm(seed);
+  const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+  drawRun = inst.exports.run;
+  $('stage').innerHTML = '';
+  cv.style.display = 'block';
+  $('stage-status').textContent =
+    `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms (7 primitives, no DOM, no net)`;
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = seed;
+  document.title = 'live-gen DRAW OK';
+}
+(function loop(now) {
+  if (drawRun) {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.lineWidth = 6; ctx.lineCap = 'round';
+    try { drawRun(now / 1000, cv.width, cv.height); }
+    catch (e) { drawRun = null; $('stage-status').textContent = 'draw cell trapped: ' + e; }
+  }
+  requestAnimationFrame(loop);
+})(0);
+
+// ---------------- chat loop ----------------
+let busy = false;
+async function send() {
+  const prompt = $('prompt').value.trim();
+  if (!prompt || busy) return;
+  busy = true; $('send').disabled = true; $('prompt').disabled = true; $('prompt').value = '';
+  say('user', prompt);
+  const t0 = performance.now();
+  const tick = setInterval(() => {
+    $('timer').textContent = `generating… ${((performance.now() - t0) / 1000).toFixed(0)}s (container + Claude)`;
+  }, 250);
+  try {
+    const r = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      say('ai', `${d.surface} seed in ${(d.gen_ms / 1000).toFixed(1)}s` +
+        (d.attempts > 1 ? ` (self-repaired ×${d.attempts - 1})` : '') + ` [${d.model}] — manifesting`);
+      if (d.surface === 'ui') manifestUi(d.schema);
+      else manifestDraw(d.seed);
+    } else {
+      say('err', d.error ?? 'generation failed');
+    }
+  } catch (e) {
+    say('err', 'request failed: ' + e);
+  } finally {
+    clearInterval(tick); $('timer').textContent = '';
+    busy = false; $('send').disabled = false; $('prompt').disabled = false; $('prompt').focus();
+  }
+}
+$('send').onclick = send;
+$('prompt').addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+$('prompt').focus();
+</script>
+</body>
+</html>
