@@ -35,6 +35,19 @@ tree: nested widgets. Vocabulary (NOTHING else):
 - {"type":"slider","min":0,"max":100,"step":1,"on_input":{"cell":"id"}}
 - {"type":"input","placeholder":"...","on_input":{"cell":"id"}}   numeric input
 
+CHART widgets (DISPLAY only — they carry data, never events). For any data
+visualization use these; NEVER fake a chart out of sliders (sliders are inputs):
+- {"type":"barchart","title":"...","labels":["A","B"],"values":[40,73],"unit":"%"}
+  horizontal bars; static data goes in "values". For LIVE bars use
+  "bind_values":["cellA","cellB"] (cell ids, same length as labels) instead.
+- {"type":"linechart","title":"...","labels":["Mon","Tue"],"series":[{"name":"in","values":[1,2]},{"name":"out","values":[2,1]}]}
+- {"type":"piechart","title":"...","labels":["a","b"],"values":[30,70]}
+- {"type":"gauge","title":"...","bind":"cellId","min":0,"max":100,"unit":"%"}   (or static "value":42)
+
+optional "init": [{"cell":"id","arg":40}] — fired once right after the UI
+manifests (in order), so bound values/gauges/charts show numbers immediately
+instead of "—". Always init cells whose outputs are displayed at start.
+
 events: on_click/on_input run the named cell. The argument is the slider/input value (or "arg", or {"arg_from":"otherCellId"} to use another cell's latest output). The cell's return value becomes its bound output.
 
 wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed to cellB automatically (cascade). Use wires for derived values instead of duplicate events.
@@ -87,4 +100,18 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
 }}
 (note the wires: whenever an input cell fires, the computed cells re-run and their bound values refresh)
 
-Rules of thumb: prefer "ui" unless the user clearly asks for a picture/animation. Keep cell scripts short. Give the UI a one-line label headline. Wire every input cell to every computed cell that should refresh. If the user asks to MODIFY the current UI (provided below as CURRENT UI), return the FULL updated schema, not a diff.
+=== example 3: chart + live gauge (surface "ui") ===
+{"surface":"ui","schema":{
+ "cells":[{"id":"lvl","params":["x"],"script":"set(0.0, x);\nx"}],
+ "init":[{"cell":"lvl","arg":40}],
+ "tree":{"type":"stack","children":[
+  {"type":"label","text":"Reservoir levels"},
+  {"type":"barchart","title":"Storage rate","labels":["Feitsui","Shimen","Zengwen"],"values":[81,42,37],"unit":"%"},
+  {"type":"row","children":[
+   {"type":"slider","min":0,"max":100,"step":1,"on_input":{"cell":"lvl"}},
+   {"type":"gauge","title":"selected","bind":"lvl","min":0,"max":100,"unit":"%"}
+  ]}
+ ]}
+}}
+
+Rules of thumb: prefer "ui" unless the user clearly asks for a picture/animation. Keep cell scripts short. Give the UI a one-line label headline. Wire every input cell to every computed cell that should refresh. Use chart widgets for any data display; put known/static data straight into "values". Always add "init" for cells displayed at start. If the user asks to MODIFY the current UI (provided below as CURRENT UI), return the FULL updated schema, not a diff.

@@ -58,7 +58,9 @@ Generation is seconds; every interaction after is µs.
       <div class="msg ai">Ask me for a UI. Try:
 - a temperature converter
 - a tip calculator with a % slider
-- a BMI calculator
+- a bar chart of Taiwan reservoir levels
+- monthly revenue line chart + a pie of market share
+- a gauge driven by a slider
 - change the slider range to 0–100 (iterates on the current UI)
 - draw a smiling sun (switches to the drawing surface)</div>
     </div>
@@ -154,6 +156,124 @@ function fire(spec, eventVal) {
     const v = outputs[el.dataset.bind];
     el.textContent = v === undefined ? '—' : (Math.round(v * 100) / 100).toString();
   });
+  redrawCharts(); // live charts: bound values may have changed
+}
+
+// ---------------- chart vocabulary (host-rendered, zero dependencies) ----------------
+let charts = []; // {node, cvs}
+const TXT = '#e6edf3', DIM = '#8b949e', GRID = '#30363d';
+const palette = i => `hsl(${(210 + i * 67) % 360},62%,58%)`;
+const fmtN = v => (Math.round(v * 100) / 100).toString();
+
+function chartVals(node) {
+  return node.bind_values ? node.bind_values.map(id => outputs[id] ?? 0) : (node.values ?? []);
+}
+
+function drawBar(node, cvs) {
+  const g = cvs.getContext('2d'), W = cvs.width, labels = node.labels, vals = chartVals(node);
+  g.clearRect(0, 0, W, cvs.height);
+  g.font = '15px ui-monospace'; g.fillStyle = TXT;
+  if (node.title) g.fillText(node.title, 10, 20);
+  const maxv = Math.max(...vals, 1e-9), x0 = 170, bw = W - x0 - 90;
+  labels.forEach((lb, i) => {
+    const y = 40 + i * 30;
+    g.fillStyle = DIM; g.textAlign = 'right'; g.fillText(String(lb), x0 - 12, y + 14);
+    g.textAlign = 'left';
+    g.fillStyle = GRID; g.fillRect(x0, y, bw, 18);
+    g.fillStyle = palette(0); g.fillRect(x0, y, Math.max(bw * (vals[i] / maxv), 0), 18);
+    g.fillStyle = TXT; g.fillText(fmtN(vals[i]) + (node.unit ?? ''), x0 + bw + 8, y + 14);
+  });
+}
+
+function drawLine(node, cvs) {
+  const g = cvs.getContext('2d'), W = cvs.width, H = cvs.height, labels = node.labels;
+  g.clearRect(0, 0, W, H);
+  g.font = '14px ui-monospace'; g.fillStyle = TXT;
+  if (node.title) g.fillText(node.title, 10, 20);
+  const all = node.series.flatMap(s => s.values);
+  const lo = Math.min(...all, 0), hi = Math.max(...all, 1e-9);
+  const L = 55, R = W - 15, T = 34, B = H - 28;
+  g.strokeStyle = GRID; g.fillStyle = DIM; g.textAlign = 'right';
+  for (let k = 0; k <= 4; k++) {
+    const y = B - (B - T) * k / 4;
+    g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke();
+    g.fillText(fmtN(lo + (hi - lo) * k / 4), L - 6, y + 4);
+  }
+  g.textAlign = 'center';
+  labels.forEach((lb, i) => g.fillText(String(lb), L + (R - L) * i / Math.max(labels.length - 1, 1), B + 18));
+  node.series.forEach((s, si) => {
+    g.strokeStyle = g.fillStyle = palette(si); g.lineWidth = 2;
+    g.beginPath();
+    s.values.forEach((v, i) => {
+      const x = L + (R - L) * i / Math.max(labels.length - 1, 1);
+      const y = B - (B - T) * ((v - lo) / (hi - lo || 1));
+      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    });
+    g.stroke();
+    s.values.forEach((v, i) => {
+      const x = L + (R - L) * i / Math.max(labels.length - 1, 1);
+      const y = B - (B - T) * ((v - lo) / (hi - lo || 1));
+      g.beginPath(); g.arc(x, y, 3, 0, 6.2832); g.fill();
+    });
+    g.textAlign = 'left';
+    g.fillText(s.name ?? `s${si}`, L + 8 + si * 90, T - 6);
+  });
+}
+
+function drawPie(node, cvs) {
+  const g = cvs.getContext('2d'), H = cvs.height, vals = chartVals(node);
+  g.clearRect(0, 0, cvs.width, H);
+  g.font = '14px ui-monospace'; g.fillStyle = TXT; g.textAlign = 'left';
+  if (node.title) g.fillText(node.title, 10, 20);
+  const total = vals.reduce((a, b) => a + Math.max(b, 0), 0) || 1;
+  const cx = 130, cy = (H + 24) / 2, r = Math.min(H / 2 - 34, 95);
+  let a = -1.5708;
+  vals.forEach((v, i) => {
+    const da = Math.max(v, 0) / total * 6.2832;
+    g.fillStyle = palette(i);
+    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r, a, a + da); g.closePath(); g.fill();
+    a += da;
+    g.fillRect(260, 36 + i * 24, 12, 12);
+    g.fillStyle = TXT;
+    g.fillText(`${node.labels[i]}  ${fmtN(v)}${node.unit ?? ''}`, 280, 47 + i * 24);
+  });
+}
+
+function drawGauge(node, cvs) {
+  const g = cvs.getContext('2d'), W = cvs.width, H = cvs.height;
+  g.clearRect(0, 0, W, H);
+  const v = node.bind ? (outputs[node.bind] ?? 0) : (node.value ?? 0);
+  const min = node.min ?? 0, max = node.max ?? 100;
+  const frac = Math.min(Math.max((v - min) / (max - min || 1), 0), 1);
+  const cx = W / 2, cy = H - 24, r = Math.min(H - 46, W / 2 - 20);
+  g.lineWidth = 14; g.lineCap = 'round';
+  g.strokeStyle = GRID;
+  g.beginPath(); g.arc(cx, cy, r, Math.PI, 2 * Math.PI); g.stroke();
+  g.strokeStyle = palette(0);
+  g.beginPath(); g.arc(cx, cy, r, Math.PI, Math.PI * (1 + frac)); g.stroke();
+  g.fillStyle = TXT; g.textAlign = 'center'; g.font = 'bold 22px ui-monospace';
+  g.fillText(fmtN(v) + (node.unit ?? ''), cx, cy - 8);
+  g.font = '13px ui-monospace'; g.fillStyle = DIM;
+  if (node.title) g.fillText(node.title, cx, 16);
+}
+
+const CHART_DRAW = { barchart: drawBar, linechart: drawLine, piechart: drawPie, gauge: drawGauge };
+
+function makeChart(node) {
+  const cvs = document.createElement('canvas');
+  cvs.width = 680;
+  cvs.height = node.type === 'barchart' ? 46 + node.labels.length * 30
+             : node.type === 'gauge' ? 150
+             : node.type === 'piechart' ? Math.max(220, 46 + node.labels.length * 24)
+             : 240;
+  cvs.style.cssText = 'width:100%;max-width:680px;display:block;background:transparent;border:none';
+  charts.push({ node, cvs });
+  CHART_DRAW[node.type](node, cvs);
+  return cvs;
+}
+
+function redrawCharts() {
+  for (const c of charts) CHART_DRAW[c.node.type](c.node, c.cvs);
 }
 
 function render(node) {
@@ -197,6 +317,8 @@ function render(node) {
       i.oninput = () => { const v = Number(i.value); if (!Number.isNaN(v)) fire(node.on_input, v); };
       return i;
     }
+    case 'barchart': case 'linechart': case 'piechart': case 'gauge':
+      return makeChart(node);
     default: {
       const d = document.createElement('div');
       d.className = 'quar'; d.textContent = `unknown node '${node.type}'`;
@@ -211,13 +333,16 @@ function manifestUi(schema) {
   const t0 = performance.now();
   compileCells(schema.cells);
   wires = schema.wires ?? [];
+  charts = [];
   const stage = $('stage');
   stage.innerHTML = '';
   stage.appendChild(render(schema.tree));
+  for (const entry of schema.init ?? []) fire({ cell: entry.cell, arg: entry.arg ?? 0 });
+  redrawCharts();
   priorSchema = schema;
   const n = schema.cells.length;
   $('stage-status').textContent =
-    `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos only)`;
+    `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)`;
   document.title = 'live-gen UI OK';
 }
 

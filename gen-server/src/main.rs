@@ -42,7 +42,10 @@ const DRAW_IMPORTS: [HostFn; 7] = [
     HostFn { name: "arc", n_args: 5, returns: false },
     HostFn { name: "line", n_args: 4, returns: false },
 ];
-const UI_VOCAB: [&str; 7] = ["stack", "row", "label", "value", "button", "slider", "input"];
+const UI_VOCAB: [&str; 11] = [
+    "stack", "row", "label", "value", "button", "slider", "input",
+    "barchart", "linechart", "piechart", "gauge",
+];
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -97,6 +100,93 @@ fn compile_check(src: &str, params: &[&str], imports: &[HostFn], fuel: u32) -> R
         .map(|_| ())
 }
 
+fn nums_of(node: &Value, key: &str) -> Option<usize> {
+    node.get(key)
+        .and_then(|v| v.as_array())
+        .filter(|a| a.iter().all(|x| x.is_number()))
+        .map(|a| a.len())
+}
+
+/// Chart nodes are DISPLAY vocabulary: they carry data (static `values` or
+/// live `bind_values` referencing cells), never events.
+fn validate_chart(t: &str, node: &Value, cell_ids: &[String]) -> Result<(), String> {
+    let check_binds = |key: &str| -> Result<Option<usize>, String> {
+        match node.get(key).and_then(|v| v.as_array()) {
+            None => Ok(None),
+            Some(a) => {
+                for b in a {
+                    let id = b.as_str().ok_or(format!("{key} entries must be cell ids"))?;
+                    if !cell_ids.iter().any(|i| i == id) {
+                        return Err(format!("{key} references unknown cell '{id}'"));
+                    }
+                }
+                Ok(Some(a.len()))
+            }
+        }
+    };
+    match t {
+        "barchart" | "piechart" => {
+            let n = node
+                .get("labels")
+                .and_then(|l| l.as_array())
+                .map(|a| a.len())
+                .ok_or(format!("{t} lacks \"labels\" []"))?;
+            if n == 0 {
+                return Err(format!("{t} has zero labels"));
+            }
+            let vals = nums_of(node, "values");
+            let binds = check_binds("bind_values")?;
+            match (vals, binds) {
+                (Some(v), _) if v == n => Ok(()),
+                (_, Some(b)) if b == n => Ok(()),
+                (Some(v), _) => Err(format!("{t}: {n} labels but {v} values")),
+                (_, Some(b)) => Err(format!("{t}: {n} labels but {b} bind_values")),
+                (None, None) => Err(format!("{t} needs \"values\" (numbers) or \"bind_values\" (cell ids)")),
+            }
+        }
+        "linechart" => {
+            let n = node
+                .get("labels")
+                .and_then(|l| l.as_array())
+                .map(|a| a.len())
+                .ok_or("linechart lacks \"labels\" []")?;
+            let series = node
+                .get("series")
+                .and_then(|s| s.as_array())
+                .ok_or("linechart lacks \"series\" []")?;
+            if series.is_empty() {
+                return Err("linechart has zero series".into());
+            }
+            for s in series {
+                let len = nums_of(s, "values")
+                    .ok_or("each series needs numeric \"values\"")?;
+                if len != n {
+                    return Err(format!("series length {len} ≠ {n} labels"));
+                }
+            }
+            Ok(())
+        }
+        "gauge" => {
+            let has_static = node.get("value").map(|v| v.is_number()).unwrap_or(false);
+            let bind_ok = match node.get("bind").and_then(|b| b.as_str()) {
+                Some(id) => {
+                    if !cell_ids.iter().any(|i| i == id) {
+                        return Err(format!("gauge bind references unknown cell '{id}'"));
+                    }
+                    true
+                }
+                None => false,
+            };
+            if has_static || bind_ok {
+                Ok(())
+            } else {
+                Err("gauge needs a numeric \"value\" or a \"bind\" cell id".into())
+            }
+        }
+        _ => Ok(()),
+    }
+}
+
 fn validate_tree(node: &Value, cell_ids: &[String]) -> Result<(), String> {
     let t = node
         .get("type")
@@ -105,6 +195,7 @@ fn validate_tree(node: &Value, cell_ids: &[String]) -> Result<(), String> {
     if !UI_VOCAB.contains(&t) {
         return Err(format!("node type '{t}' not in vocabulary [{}]", UI_VOCAB.join(", ")));
     }
+    validate_chart(t, node, cell_ids)?;
     for ev in ["on_click", "on_input"] {
         if let Some(spec) = node.get(ev) {
             let cell = spec
@@ -159,6 +250,20 @@ fn validate(obj: &Value) -> Result<(), String> {
             }
             let tree = schema.get("tree").ok_or("schema lacks \"tree\"")?;
             validate_tree(tree, &ids)?;
+            if let Some(init) = schema.get("init").and_then(|i| i.as_array()) {
+                for entry in init {
+                    let cell = entry
+                        .get("cell")
+                        .and_then(|c| c.as_str())
+                        .ok_or("init entry lacks \"cell\"")?;
+                    if !ids.iter().any(|i| i == cell) {
+                        return Err(format!("init references unknown cell '{cell}'"));
+                    }
+                    if entry.get("arg").map(|a| !a.is_number()).unwrap_or(false) {
+                        return Err("init \"arg\" must be a number".into());
+                    }
+                }
+            }
             if let Some(wires) = schema.get("wires").and_then(|w| w.as_array()) {
                 for w in wires {
                     for side in ["from", "to"] {
@@ -344,6 +449,39 @@ mod tests {
         .unwrap();
         assert!(obj2.get("schema").is_some());
         assert!(validate(&obj2).unwrap_err().contains("unknown cell"));
+    }
+
+    #[test]
+    fn charts_validate_and_reject_mismatches() {
+        let ok: Value = serde_json::from_str(
+            r#"{"surface":"ui","schema":{
+                "cells":[{"id":"lvl","script":"set(0.0, x);\nx"}],
+                "init":[{"cell":"lvl","arg":40}],
+                "tree":{"type":"stack","children":[
+                    {"type":"barchart","title":"Reservoirs","labels":["A","B"],"values":[40,73]},
+                    {"type":"linechart","labels":["Mon","Tue"],"series":[{"name":"in","values":[1,2]}]},
+                    {"type":"piechart","labels":["x","y"],"values":[3,4]},
+                    {"type":"gauge","bind":"lvl","min":0,"max":100},
+                    {"type":"slider","min":0,"max":100,"on_input":{"cell":"lvl"}}]}}}"#,
+        )
+        .unwrap();
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+
+        let bad: Value = serde_json::from_str(
+            r#"{"surface":"ui","schema":{
+                "cells":[{"id":"c","script":"x"}],
+                "tree":{"type":"barchart","labels":["A","B","C"],"values":[1,2]}}}"#,
+        )
+        .unwrap();
+        assert!(validate(&bad).unwrap_err().contains("3 labels but 2 values"));
+
+        let ghost: Value = serde_json::from_str(
+            r#"{"surface":"ui","schema":{
+                "cells":[{"id":"c","script":"x"}],
+                "tree":{"type":"gauge","bind":"ghost"}}}"#,
+        )
+        .unwrap();
+        assert!(validate(&ghost).unwrap_err().contains("unknown cell"));
     }
 
     #[test]
