@@ -85,6 +85,13 @@ Generation is seconds; every interaction after is µs.
     </div>
     <div id="stage"></div>
     <canvas id="cv" width="1200" height="700"></canvas>
+    <details id="seed-box" style="display:none; margin-top:1rem">
+      <summary style="cursor:pointer; font-size:.78rem; opacity:.75">
+        the seed behind this UI — everything the AI wrote (JSON schema + DSL cell scripts; the rendering code is all pre-written host vocabulary)
+      </summary>
+      <pre id="seed-json" style="font-size:.72rem; line-height:1.4; overflow-x:auto; background:#010409;
+        border:1px solid #30363d; border-radius:8px; padding:.7rem; max-height:420px; overflow-y:auto"></pre>
+    </details>
   </div>
 </div>
 
@@ -343,6 +350,8 @@ function manifestUi(schema) {
   const n = schema.cells.length;
   $('stage-status').textContent =
     `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)`;
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = JSON.stringify(schema, null, 2);
   document.title = 'live-gen UI OK';
 }
 
@@ -366,6 +375,8 @@ function manifestDraw(seed) {
   cv.style.display = 'block';
   $('stage-status').textContent =
     `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms (7 primitives, no DOM, no net)`;
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = seed;
   document.title = 'live-gen DRAW OK';
 }
 (function loop(now) {
