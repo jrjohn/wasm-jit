@@ -382,11 +382,42 @@ fn validate(obj: &Value) -> Result<(), String> {
                 }
             }
             if let Some(entities) = world.get("entities").and_then(|e| e.as_array()) {
+                let ids: Vec<&str> = entities
+                    .iter()
+                    .filter_map(|e| e.get("id").and_then(|i| i.as_str()))
+                    .collect();
                 for ent in entities {
                     let id = ent
                         .get("id")
                         .and_then(|i| i.as_str())
                         .ok_or("an entity lacks \"id\"")?;
+                    // being-carried is a relation, and relations are host law
+                    if let Some(on) = ent.get("on").and_then(|o| o.as_str()) {
+                        if on == id {
+                            return Err(format!("entity '{id}' cannot ride itself"));
+                        }
+                        if !ids.contains(&on) {
+                            return Err(format!("entity '{id}' rides unknown entity '{on}'"));
+                        }
+                        // reject cycles: walk the chain
+                        let mut seen = vec![id];
+                        let mut cur = on;
+                        loop {
+                            if seen.contains(&cur) {
+                                return Err(format!("entity '{id}': riding cycle via '{cur}'"));
+                            }
+                            seen.push(cur);
+                            match entities
+                                .iter()
+                                .find(|e| e.get("id").and_then(|i| i.as_str()) == Some(cur))
+                                .and_then(|e| e.get("on"))
+                                .and_then(|o| o.as_str())
+                            {
+                                Some(next) => cur = next,
+                                None => break,
+                            }
+                        }
+                    }
                     let ty = ent
                         .get("type")
                         .and_then(|t| t.as_str())
@@ -648,6 +679,25 @@ mod tests {
                     {"id":"weng","type":"fisherman","at":[50,39],"behavior":"0.0"}
                 ]}});
         assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+
+        let riding = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[
+                    {"id":"zhou","type":"boat","at":[50,40],"behavior":"mv(0.01, 0.0);\n0.0"},
+                    {"id":"weng","type":"fisherman","at":[50,40],"on":"zhou","behavior":"0.0"}]}});
+        assert!(validate(&riding).is_ok(), "{:?}", validate(&riding));
+
+        let ghost_ride = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"weng","type":"fisherman","at":[5,5],"on":"nothing"}]}});
+        assert!(validate(&ghost_ride).unwrap_err().contains("unknown entity"));
+
+        let cycle = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[
+                    {"id":"p","type":"person","at":[5,5],"on":"q"},
+                    {"id":"q","type":"boat","at":[5,5],"on":"p"}]}});
+        assert!(validate(&cycle).unwrap_err().contains("cycle"));
 
         let ghost_type = serde_json::json!({
             "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],

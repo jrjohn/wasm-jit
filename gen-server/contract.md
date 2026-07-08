@@ -152,11 +152,15 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   (REQUEST movement — the host clamps speed and bounds; position is host-owned).
 - ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
+- "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
+  every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
+  Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
 - A snow scene example: a "frame" cell writing channel 3 on land:
   "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 { fw(3.0, x, y, min(fr(3.0, x, y) + 0.002, 1.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
 - Poetry/scenes: compose terrain cells + weather cells + entities. 孤舟蓑笠翁,獨釣寒江雪 =
-  a cold river (water), snow falling on the banks (channel 3), one "boat" entity on the river,
-  one "fisherman" entity on the boat (behavior "0.0"), and nothing else — the emptiness matters.
+  a cold river (water), snow falling on the banks (channel 3), one "boat" entity drifting on
+  the river, one "fisherman" entity with "on":"<the boat's id>" (behavior "0.0"), and nothing
+  else — the emptiness matters.
 
 When the user asks for terrain/nature/worlds ("a mountain", "let it rain", "a river", "an island"), use surface "field". When modifying a CURRENT STATE world, return the FULL updated world — keep existing cells and add/adjust; e.g. "now let it rain" on a mountain world ADDS a rain cell AND a flow+erosion cell so water visibly flows downhill.
 

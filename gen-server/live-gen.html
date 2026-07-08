@@ -567,6 +567,7 @@ function compileEntities(world, g) {
   const defs = world.entities ?? [];
   return defs.map(def => {
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
+                  on: def.on ?? null, offset: def.offset ?? [0, 0],
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
     if (def.behavior) {
       const eslots = new Float64Array(32);
@@ -590,15 +591,25 @@ function compileEntities(world, g) {
 }
 
 function tickEntities(t, g) {
+  // pass 1: the free move themselves (a rider's own mv is ignored — the carrier carries)
   for (const e of ENTITIES) {
     if (e.run && !e.quarantined) {
       e.pending[0] = 0; e.pending[1] = 0;
       try { e.run(t, e.x, e.y); e.fails = 0; }
       catch (err) { if (++e.fails >= 3) e.quarantined = true; continue; }
+      if (e.on) continue;
       const len = Math.hypot(e.pending[0], e.pending[1]);
-      const k = len > MAX_STEP ? MAX_STEP / len : 1; // host law: clamp the step
+      const k = len > MAX_STEP ? MAX_STEP / len : 1; // host law: nobody teleports
       e.x = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
       e.y = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+    }
+  }
+  // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
+  for (let round = 0; round < 3; round++) {
+    for (const e of ENTITIES) {
+      if (!e.on) continue;
+      const carrier = ENTITIES.find(c => c.id === e.on);
+      if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
     }
   }
 }
