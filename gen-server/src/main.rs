@@ -454,6 +454,32 @@ fn validate(obj: &Value) -> Result<(), String> {
     }
 }
 
+/// Inhabitant package manifest — the bundle descriptor binding a Rust skin
+/// (slow loop) to an AssemblyScript soul (Tier-2, audited in the browser).
+async fn inhabitant_manifest(axum::extract::Path(ty): axum::extract::Path<String>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !ENTITY_TYPES.contains(&ty.as_str()) {
+        return (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], "unknown inhabitant type".to_string());
+    }
+    match tokio::fs::read_to_string(format!("inhabitants/{ty}/manifest.json")).await {
+        Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "application/json")], s),
+        Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], format!("no package for '{ty}'")),
+    }
+}
+
+/// The packaged soul itself (asc output). The browser audits it BEFORE
+/// instantiating — the server serves bytes, the fence stays client-side.
+async fn inhabitant_behavior(axum::extract::Path(ty): axum::extract::Path<String>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !ENTITY_TYPES.contains(&ty.as_str()) {
+        return (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], Vec::new());
+    }
+    match tokio::fs::read(format!("inhabitants/{ty}/behavior.wasm")).await {
+        Ok(b) => (StatusCode::OK, [(CONTENT_TYPE, "application/wasm")], b),
+        Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], Vec::new()),
+    }
+}
+
 async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
     let model = req
         .model
@@ -539,8 +565,11 @@ async fn main() {
     let app = Router::new()
         .route("/api/generate", post(generate))
         .route("/api/health", get(|| async { "ok" }))
+        .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
+        .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route_service("/", ServeFile::new("gen-server/live-gen.html"))
-        .nest_service("/pkg", ServeDir::new("pkg"));
+        .nest_service("/pkg", ServeDir::new("pkg"))
+        .nest_service("/pkg-skins", ServeDir::new("pkg-skins"));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8646").await.unwrap();
     println!("gen-server: http://127.0.0.1:8646  (generator container: agent-task-node:local, override GEN_IMAGE)");
     axum::serve(listener, app).await.unwrap();

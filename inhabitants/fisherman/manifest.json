@@ -1,0 +1,9 @@
+{
+  "type": "fisherman",
+  "version": "0.1.0",
+  "abi": "entity-v1",
+  "skin": "skins::fisherman",
+  "behavior": "behavior.wasm",
+  "grants": ["env::sin", "env::cos", "env::get", "env::set", "env::fr", "env::mv"],
+  "notes": "soul: AssemblyScript, Tier-2 through the import audit; skin: Rust (skins crate), slow loop; stillness is a valid occupation"
+}

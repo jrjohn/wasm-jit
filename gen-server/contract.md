@@ -152,6 +152,8 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   (REQUEST movement — the host clamps speed and bounds; position is host-owned).
 - ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
+- OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
+  (the boat drifts with the current, the fisherman breathes) — write behavior only to override it.
 - "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
   every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.

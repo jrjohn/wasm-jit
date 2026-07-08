@@ -139,6 +139,25 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// Browser-side Tier-2 fence for inhabitant souls: audit that an externally
+/// compiled behavior module's imports ⊆ the entity grant list (env.{sin, cos,
+/// get, set, fr, mv}) BEFORE instantiating it. The soul of a packaged
+/// inhabitant enters through this gate — plugin without trust.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
+    use audit::Grant;
+    const GRANTS: [Grant; 6] = [
+        Grant { module: "env", name: "sin" },
+        Grant { module: "env", name: "cos" },
+        Grant { module: "env", name: "get" },
+        Grant { module: "env", name: "set" },
+        Grant { module: "env", name: "fr" },
+        Grant { module: "env", name: "mv" },
+    ];
+    audit::audit(bytes, &GRANTS).map_err(|e| JsError::new(&e))
+}
+
 /// Benchmark lane with fuel metering on: same `run(n)->f64` ABI plus an
 /// exported "fuel" gauge. Used to measure the back-edge-counter tax.
 #[cfg(feature = "js-api")]

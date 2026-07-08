@@ -1628,6 +1628,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "skins"
+version = "0.1.0"
+dependencies = [
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

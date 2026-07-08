@@ -1,0 +1,12 @@
+[package]
+name = "skins"
+version = "0.1.0"
+edition = "2021"
+description = "The skin registry as a Rust crate: how inhabitants look is slow-loop host vocabulary — drawn with full canvas authority, upgraded ink-silhouette style"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["CanvasRenderingContext2d"] }

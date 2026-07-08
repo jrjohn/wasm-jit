@@ -1,0 +1,9 @@
+{
+  "type": "boat",
+  "version": "0.1.0",
+  "abi": "entity-v1",
+  "skin": "skins::boat",
+  "behavior": "behavior.wasm",
+  "grants": ["env::sin", "env::cos", "env::get", "env::set", "env::fr", "env::mv"],
+  "notes": "soul: AssemblyScript, Tier-2 through the import audit — drifts toward deeper water, seeing only its four neighbors"
+}

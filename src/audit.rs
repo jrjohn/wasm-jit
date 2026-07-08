@@ -159,6 +159,35 @@ mod tests {
     }
 
     #[test]
+    fn packaged_inhabitant_souls_pass_the_entity_audit() {
+        // The shipped Tier-2 souls (AssemblyScript -> asc) must enter through
+        // the same gate as anything else: imports must be within the entity grants.
+        let grants = [
+            Grant { module: "env", name: "sin" },
+            Grant { module: "env", name: "cos" },
+            Grant { module: "env", name: "get" },
+            Grant { module: "env", name: "set" },
+            Grant { module: "env", name: "fr" },
+            Grant { module: "env", name: "mv" },
+        ];
+        let fisherman = include_bytes!("../inhabitants/fisherman/behavior.wasm");
+        let boat = include_bytes!("../inhabitants/boat/behavior.wasm");
+        assert!(audit(fisherman, &grants).is_ok());
+        assert!(audit(boat, &grants).is_ok());
+        // and a soul that reaches for the network is refused at the door
+        use wasm_encoder::{EntityType, ImportSection, Module, TypeSection};
+        let mut m = Module::new();
+        let mut types = TypeSection::new();
+        types.ty().function([], []);
+        m.section(&types);
+        let mut imp = ImportSection::new();
+        imp.import("env", "mv", EntityType::Function(0));
+        imp.import("env", "fetch", EntityType::Function(0));
+        m.section(&imp);
+        assert!(audit(&m.finish(), &grants).unwrap_err().contains("fetch"));
+    }
+
+    #[test]
     fn memory_import_rejected() {
         // an external seed wants to import the host's memory (grabbing a bigger world) → reject
         use wasm_encoder::{EntityType, ImportSection, MemoryType, Module};

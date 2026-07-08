@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "asc assembly/buddha.ts --outFile build/buddha.wasm --optimize --runtime stub --use abort= --exportRuntime false --noAssert"
+    "build": "asc assembly/buddha.ts --outFile build/buddha.wasm --optimize --runtime stub --use abort= --noAssert",
+    "build:inhabitants": "asc assembly/inhabitants/fisherman.ts --outFile ../inhabitants/fisherman/behavior.wasm --optimize --runtime stub --use abort= --noAssert && asc assembly/inhabitants/boat.ts --outFile ../inhabitants/boat/behavior.wasm --optimize --runtime stub --use abort= --noAssert"
   },
   "dependencies": {
     "assemblyscript": "^0.28.19"

@@ -104,8 +104,10 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes } from './pkg/wasm_jit.js';
+import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
+await initSkins();
 
 const $ = id => document.getElementById(id);
 const msgs = $('msgs');
@@ -466,7 +468,7 @@ function renderFieldFP() {
     const groundY = terrainH(e.x, e.y) * K2 + Math.min(FIELD[(fieldWorld.grid + (e.y | 0)) * fieldWorld.grid + (e.x | 0)], 3) * 0.6 * K2;
     const sy = horizon + ((eye - groundY) * focal) / zc;
     const s = Math.max(3, (focal / zc) * 1.1);
-    SKINS[e.type]?.(ctx, sx, sy - s * 0.4, s);
+    SKINS[e.type]?.(ctx, sx, sy - s * 0.4, s, performance.now() / 1000);
   }
   if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
@@ -493,7 +495,7 @@ function setFieldView(view) {
 // e2e / debugging: honest state, no pixel guessing
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y })) }
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, soul: e.soul ?? 'none' })) }
   : null;
 
 const DEFAULT_WORLD = {
@@ -570,6 +572,7 @@ function compileEntities(world, g) {
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
     if (def.behavior) {
+      ent.soul = 'scene (DSL)';
       const eslots = new Float64Array(32);
       const env = {
         sin: Math.sin, cos: Math.cos,
@@ -585,6 +588,8 @@ function compileEntities(world, g) {
       const bytes = compile_entity_wasm(def.behavior);
       const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
       ent.run = inst.exports.run;
+    } else {
+      loadPackagedSoul(ent, g); // async: the packaged default soul wakes shortly
     }
     return ent;
   });
@@ -614,36 +619,46 @@ function tickEntities(t, g) {
   }
 }
 
-// skin registry (top view): px = canvas x, py = canvas y, s = canvas px per grid unit
+// skin registry — thin JS bindings over the Rust `skins` crate (pkg-skins):
+// the drawing code moved to the slow loop (.rs); this object is only the socket.
 const SKINS = {
-  boat(c, px, py, s) {
-    c.fillStyle = '#6d4c2f';
-    c.beginPath(); c.ellipse(px, py, s * 1.5, s * 0.62, 0, 0, 6.2832); c.fill();
-    c.strokeStyle = '#4a331f'; c.lineWidth = Math.max(1, s * 0.16);
-    c.beginPath(); c.ellipse(px, py, s * 1.5, s * 0.62, 0, 3.3, 6.1); c.stroke();
-  },
-  fisherman(c, px, py, s) {
-    c.strokeStyle = '#20242c'; c.lineWidth = Math.max(1, s * 0.22);
-    c.beginPath(); c.arc(px, py, s * 0.42, 0, 6.2832); c.stroke();       // cloaked body
-    c.fillStyle = '#c9b87a';
-    c.beginPath(); c.moveTo(px - s * 0.55, py - s * 0.1);                 // straw hat
-    c.lineTo(px + s * 0.55, py - s * 0.1); c.lineTo(px, py - s * 0.75); c.closePath(); c.fill();
-    c.strokeStyle = '#8b949e'; c.lineWidth = 1;                            // the line into the water
-    c.beginPath(); c.moveTo(px + s * 0.3, py); c.lineTo(px + s * 1.7, py + s * 0.7); c.stroke();
-  },
-  person(c, px, py, s) {
-    c.fillStyle = '#20242c';
-    c.beginPath(); c.arc(px, py - s * 0.25, s * 0.28, 0, 6.2832); c.fill();
-    c.fillRect(px - s * 0.2, py - s * 0.05, s * 0.4, s * 0.7);
-  },
-  car(c, px, py, s) {
-    c.fillStyle = '#a33c3c';
-    c.fillRect(px - s * 0.9, py - s * 0.5, s * 1.8, s);
-    c.fillStyle = '#14171d';
-    c.beginPath(); c.arc(px - s * 0.55, py + s * 0.5, s * 0.22, 0, 6.2832); c.fill();
-    c.beginPath(); c.arc(px + s * 0.55, py + s * 0.5, s * 0.22, 0, 6.2832); c.fill();
-  },
+  boat: (c, px, py, sc, t) => skinsPkg.boat(c, px, py, sc, t),
+  fisherman: (c, px, py, sc, t) => skinsPkg.fisherman(c, px, py, sc, t),
+  person: (c, px, py, sc, t) => skinsPkg.person(c, px, py, sc, t),
+  car: (c, px, py, sc, t) => skinsPkg.car(c, px, py, sc, t),
 };
+
+// packaged soul loader: manifest → behavior.wasm → IMPORT AUDIT → instantiate.
+// The soul wakes a moment after the world starts; until then the body is still.
+async function loadPackagedSoul(ent, g) {
+  try {
+    const mr = await fetch(`/api/inhabitants/${ent.type}`);
+    if (!mr.ok) return; // no package: stillness is the default of defaults
+    const manifest = await mr.json();
+    if (!manifest.behavior) return;
+    const wr = await fetch(`/api/inhabitants/${ent.type}/behavior.wasm`);
+    if (!wr.ok) return;
+    const bytes = new Uint8Array(await wr.arrayBuffer());
+    audit_entity_bytes(bytes); // Tier-2 gate: throws if the soul over-reaches
+    const eslots = new Float64Array(32);
+    const env = {
+      sin: Math.sin, cos: Math.cos,
+      get: i => eslots[i & 31] ?? 0,
+      set: (i, v) => { eslots[i & 31] = v; },
+      fr: (c, x, y) => {
+        c |= 0; x |= 0; y |= 0;
+        if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
+        return FIELD[(c * g + y) * g + x];
+      },
+      mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; },
+    };
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+    ent.run = inst.exports.run;
+    ent.soul = `package (${manifest.version}, Tier-2 audited)`;
+  } catch (e) {
+    $('stage-status').textContent = `soul of '${ent.id}' rejected: ${e.message ?? e}`;
+  }
+}
 
 function snowing() { // is any snow on the ground? (cheap sample)
   if (!FIELD || !fieldWorld) return false;
@@ -695,7 +710,8 @@ function renderField() {
   ctx.clearRect(0, 0, cv.width, cv.height);
   ctx.drawImage(fieldCanvas, ox, 0, size, size);
   const s = size / g; // canvas px per grid unit — the skins live at full resolution
-  for (const e of ENTITIES) SKINS[e.type]?.(ctx, ox + e.x * s, e.y * s, s);
+  const tNow = performance.now() / 1000;
+  for (const e of ENTITIES) SKINS[e.type]?.(ctx, ox + e.x * s, e.y * s, s, tNow);
   if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
 }
 
@@ -719,6 +735,11 @@ function manifestField(world) {
   $('seed-json').textContent = JSON.stringify(world, null, 2);
   document.title = 'live-gen FIELD OK';
 }
+
+// e2e hooks: deterministic manifestation + direct audit access
+window.__manifestWorld = w => manifestField(w);
+window.__auditEntity = bytes => audit_entity_bytes(new Uint8Array(bytes));
+window.__compileDraw = src => compile_draw_wasm(src); // e2e: mint a wrong-ABI module locally
 
 // e2e hook: inject a runaway world cell — fuel traps it, the world keeps turning
 window.__injectBadFieldCell = () => {
