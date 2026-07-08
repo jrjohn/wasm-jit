@@ -578,6 +578,8 @@ slow loop (build-time, minutes to hours): when the expressive space isn't enough
 
 ## 18. From PoC to Live UI Manifestation: The Remaining Substrate
 
+> **STATUS (2026-07-08): all six pieces below are implemented and e2e-verified (19/19 in headless Chrome).** The gates: fuel metering traps an injected runaway loop, the supervisor quarantines it, the page stays live, restart heals it — and the measured back-edge tax on the benchmark kernel is **≈0%** (interleaved medians, 3.6ms plain vs 3.5ms fueled at N=1e6; the 10–30% estimate below was pessimistic — V8 absorbs the i32 check into the f64 pipeline). The patch grammar + event ABI run live in the LiveUI tab (verdict-gated patches, budgeted bus cascade). Memory ABI: cell-computed Σx² over host-written slots matches the host bit-exactly, fuel gauge readable. Determinism cashed in: a 121-frame input recording replays **bit-identically** (f64 to_bits equality across all 32 state slots), world state persists to localStorage. The analysis below is preserved as written — it was the build plan.
+
 An honest gap analysis, written against the actual codebase. **What is already solved and needs no further investment**: speed (generated WASM = the AOT ceiling, ties hand-written JS) and the sandbox model (the import-table audit is language-agnostic; Tier-2 seeds already pass through it). What remains are six pieces of substrate — two of them hard gates — and none of them carries research risk: every item is engineering with a known solution. The real bottleneck stays §9's: LLM generation is seconds-slow. So the correct product shape is **generate slowly, manifest fast** — once a seed enters the ālaya, every condition-triggered manifestation is µs-level.
 
 ### The two hard gates (nothing ships without them)

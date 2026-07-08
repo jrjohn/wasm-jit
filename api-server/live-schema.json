@@ -1,0 +1,31 @@
+{
+  "cells": [
+    {"id":"celsius","params":["x"],"script":"x"},
+    {"id":"fahrenheit","params":["x"],"script":"x * 1.8 + 32.0"},
+    {"id":"hot","params":["x"],"script":"let r = 0.0;\nif x >= 86.0 { r = 1.0; }\nr"},
+    {"id":"always","params":["x"],"script":"1.0"}
+  ],
+  "wires": [
+    {"from":"celsius","to":"fahrenheit"}
+  ],
+  "tree": {
+    "type":"stack","children":[
+      {"type":"label","text":"Pipeline: slider (°C) cascades over a wire to °F; the hot-gate cell's verdict gates patch 0."},
+      {"type":"row","children":[
+        {"type":"slider","min":0,"max":60,"step":1,"on_input":{"cell":"celsius"}},
+        {"type":"value","bind":"celsius","prefix":"°C "},
+        {"type":"value","bind":"fahrenheit","prefix":"°F "}
+      ]},
+      {"type":"row","children":[
+        {"type":"button","text":"hot? patch the headline","on_click":{"cell":"hot","arg_from":"fahrenheit","patch":0}},
+        {"type":"button","text":"manifest a note row","on_click":{"cell":"always","patch":1}},
+        {"type":"button","text":"un-manifest it","on_click":{"cell":"always","patch":2}}
+      ]}
+    ]
+  },
+  "patches": [
+    {"op":"update","path":[0],"props":{"text":"HOT (≥30°C / 86°F) — this headline was patched because the hot-gate cell returned 1.0"}},
+    {"op":"add","path":[3],"node":{"type":"label","text":"manifested by a patch — structure changed with no reload, validated against the vocabulary"}},
+    {"op":"remove","path":[3]}
+  ]
+}
