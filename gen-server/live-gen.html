@@ -18,6 +18,8 @@
   .msg.user { background: #1f6feb33; align-self: flex-end; }
   .msg.ai { background: #16202b; border: 1px solid #30363d; align-self: flex-start; }
   .msg.err { background: #f8514922; border: 1px solid #f8514966; color: #f85149; }
+  .msg.being { background: #1b2620; border: 1px solid #2ea04366; align-self: flex-start; }
+  .msg.thought { background: transparent; border: none; opacity: .5; font-style: italic; align-self: flex-start; }
   .chatbar { display: flex; gap: .4rem; padding: .5rem; border-top: 1px solid #30363d; }
   .chatbar input[type=text] { flex: 1; font: inherit; font-size: .82rem; padding: .4rem .6rem;
     border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; }
@@ -66,7 +68,8 @@ Generation is seconds; every interaction after is µs.
 - 一座山 (a living world rises on the field)
 - 下一場雨 (…and then, let it rain)
 - 讓我走進這個世界 (first person — walk in the rain)
-- 孤舟蓑笠翁 獨釣寒江雪 (snow, a boat, a fisherman)</div>
+- 孤舟蓑笠翁 獨釣寒江雪 (snow, a boat, a fisherman)
+- @weng 冷嗎? (speak to a minded being — its own Claude answers)</div>
     </div>
     <div class="chatbar">
       <input type="text" id="prompt" placeholder="describe a UI… (Enter to send)">
@@ -495,7 +498,8 @@ function setFieldView(view) {
 // e2e / debugging: honest state, no pixel guessing
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, soul: e.soul ?? 'none' })) }
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, soul: e.soul ?? 'none',
+        mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
 const DEFAULT_WORLD = {
@@ -565,32 +569,37 @@ function terrainColor(h, w, v, s = 0) {
 let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
 const MAX_STEP = 0.5;    // host law: nobody teleports
 
+function entityEnv(ent, g) { // one body, one slot store — reflex, packaged soul, and mind all share it
+  return {
+    sin: Math.sin, cos: Math.cos,
+    get: i => ent.slots[i & 31] ?? 0,
+    set: (i, v) => { ent.slots[i & 31] = v; },
+    fr: (c, x, y) => {
+      c |= 0; x |= 0; y |= 0;
+      if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
+      return FIELD[(c * g + y) * g + x];
+    },
+    mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
+  };
+}
+
 function compileEntities(world, g) {
   const defs = world.entities ?? [];
   return defs.map(def => {
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
+                  slots: new Float64Array(32),
+                  mind: def.mind ?? null,
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
     if (def.behavior) {
       ent.soul = 'scene (DSL)';
-      const eslots = new Float64Array(32);
-      const env = {
-        sin: Math.sin, cos: Math.cos,
-        get: i => eslots[i & 31] ?? 0,
-        set: (i, v) => { eslots[i & 31] = v; },
-        fr: (c, x, y) => {
-          c |= 0; x |= 0; y |= 0;
-          if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
-          return FIELD[(c * g + y) * g + x];
-        },
-        mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
-      };
       const bytes = compile_entity_wasm(def.behavior);
-      const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+      const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
       ent.run = inst.exports.run;
     } else {
       loadPackagedSoul(ent, g); // async: the packaged default soul wakes shortly
     }
+    if (ent.mind?.persona) mindRegister(ent);
     return ent;
   });
 }
@@ -640,19 +649,7 @@ async function loadPackagedSoul(ent, g) {
     if (!wr.ok) return;
     const bytes = new Uint8Array(await wr.arrayBuffer());
     audit_entity_bytes(bytes); // Tier-2 gate: throws if the soul over-reaches
-    const eslots = new Float64Array(32);
-    const env = {
-      sin: Math.sin, cos: Math.cos,
-      get: i => eslots[i & 31] ?? 0,
-      set: (i, v) => { eslots[i & 31] = v; },
-      fr: (c, x, y) => {
-        c |= 0; x |= 0; y |= 0;
-        if (c < 0 || c > 3 || x < 0 || x >= g || y < 0 || y >= g) return 0;
-        return FIELD[(c * g + y) * g + x];
-      },
-      mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; },
-    };
-    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
+    const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
     ent.run = inst.exports.run;
     ent.soul = `package (${manifest.version}, Tier-2 audited)`;
   } catch (e) {
@@ -736,6 +733,106 @@ function manifestField(world) {
   document.title = 'live-gen FIELD OK';
 }
 
+// ---- minds: one soul, two speeds (docs §20.3) ----
+// The reflex ticks at 30fps; the mind (its own Docker Claude, via /api/mind)
+// beats SPARSELY — on condition, or when spoken to. A rewritten reflex passes
+// the same compiler; intents land in the shared slot store. The mind cannot
+// request permissions for the body.
+const MIND_COOLDOWN_MS = 45_000;
+const MIND_MAX_BEATS = 6; // per session — hearts are not free
+
+function mindCanBeat(st) {
+  return !st.busy && st.beats < MIND_MAX_BEATS && performance.now() - st.lastBeat >= MIND_COOLDOWN_MS;
+}
+
+function mindRegister(ent) {
+  ent.mindState = { lastThought: '', beats: 0, busy: false, lastBeat: -1e9, snowSeen: false };
+}
+
+function perceptionOf(ent, g) {
+  const W = 2; // a 5×5 window — the being sees only its neighborhood
+  const win = { size: 2 * W + 1, height: [], water: [], snow: [] };
+  for (let dy = -W; dy <= W; dy++) {
+    for (let dx = -W; dx <= W; dx++) {
+      const x = Math.min(Math.max((ent.x | 0) + dx, 0), g - 1);
+      const y = Math.min(Math.max((ent.y | 0) + dy, 0), g - 1);
+      win.height.push(Math.round(FIELD[y * g + x] * 10) / 10);
+      win.water.push(Math.round(FIELD[(g + y) * g + x] * 100) / 100);
+      win.snow.push(Math.round(FIELD[(3 * g + y) * g + x] * 100) / 100);
+    }
+  }
+  return {
+    you: { id: ent.id, type: ent.type, x: Math.round(ent.x * 10) / 10, y: Math.round(ent.y * 10) / 10, riding: ent.on ?? undefined },
+    time: Math.round(performance.now() / 100) / 10,
+    snowing: snowing(),
+    window: win,
+    slots: Array.from(ent.slots.slice(0, 8)).map(v => Math.round(v * 100) / 100),
+    last_thought: ent.mindState?.lastThought || undefined,
+  };
+}
+
+async function mindBeat(ent, words) {
+  const st = ent.mindState;
+  if (!st || st.busy || !fieldWorld) return;
+  if (!words && !mindCanBeat(st)) return;
+  st.busy = true; st.lastBeat = performance.now(); st.beats++;
+  try {
+    const r = await fetch('/api/mind', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ persona: ent.mind.persona, perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined }),
+    });
+    const d = await r.json();
+    if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
+    if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
+    if (d.say) say('being', `${ent.id}: ${d.say}`);
+    if (d.intent && typeof d.intent === 'object') {
+      for (const [k, v] of Object.entries(d.intent)) {
+        const i = Number(k), val = Number(v);
+        if (Number.isFinite(i) && Number.isFinite(val)) ent.slots[i & 31] = val;
+      }
+    }
+    if (d.behavior) { // the mind rewrites its own habit — through the same gate
+      try {
+        const bytes = compile_entity_wasm(d.behavior);
+        const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, fieldWorld.grid) });
+        ent.run = inst.exports.run;
+        ent.quarantined = false; ent.fails = 0;
+        ent.soul = 'mind (rewritten reflex)';
+      } catch (e) {
+        say('err', `${ent.id}'s new reflex refused: ${e.message ?? e}`);
+      }
+    }
+  } catch (e) {
+    say('err', `mind request failed: ${e}`);
+  } finally {
+    st.busy = false;
+  }
+}
+
+// 依緣 (arising on condition): the world's state itself summons the mind.
+setInterval(() => {
+  if (!fieldWorld) return;
+  const g = fieldWorld.grid;
+  for (const ent of ENTITIES) {
+    const st = ent.mindState;
+    if (!st || st.busy) continue;
+    // he sits on the water where snow never sticks — what he NOTICES is the
+    // banks whitening: scan his perception window, not the cell under him
+    let seen = 0;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const x = Math.min(Math.max((ent.x | 0) + dx, 0), g - 1);
+        const y = Math.min(Math.max((ent.y | 0) + dy, 0), g - 1);
+        seen = Math.max(seen, FIELD[(3 * g + y) * g + x]);
+      }
+    }
+    if (seen > 0.12 && !st.snowSeen && mindCanBeat(st)) { // the first snow it notices
+      st.snowSeen = true; // the condition is consumed only when the beat actually happens
+      mindBeat(ent, null);
+    }
+  }
+}, 5000);
+
 // e2e hooks: deterministic manifestation + direct audit access
 window.__manifestWorld = w => manifestField(w);
 window.__auditEntity = bytes => audit_entity_bytes(new Uint8Array(bytes));
@@ -805,6 +902,18 @@ let busy = false;
 async function send() {
   const prompt = $('prompt').value.trim();
   if (!prompt || busy) return;
+  if (prompt.startsWith('@')) { // speak TO a being: its own mind answers
+    const sp = prompt.indexOf(' ');
+    const name = (sp < 0 ? prompt.slice(1) : prompt.slice(1, sp)).toLowerCase();
+    const words = sp < 0 ? '' : prompt.slice(sp + 1);
+    const ent = ENTITIES.find(e => e.id.toLowerCase() === name || e.type.toLowerCase() === name);
+    $('prompt').value = '';
+    say('user', prompt);
+    if (!ent) { say('err', `no being called '${name}' here`); return; }
+    if (!ent.mindState) { say('err', `${ent.id} has no mind (add "mind":{"persona":...} to it)`); return; }
+    mindBeat(ent, words || '(the visitor looks at you)');
+    return;
+  }
   busy = true; $('send').disabled = true; $('prompt').disabled = true; $('prompt').value = '';
   say('user', prompt);
   const t0 = performance.now();

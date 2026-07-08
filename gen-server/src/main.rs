@@ -442,6 +442,15 @@ fn validate(obj: &Value) -> Result<(), String> {
                     {
                         return Err(format!("entity '{id}': at out of the {grid}×{grid} field"));
                     }
+                    if let Some(m) = ent.get("mind") {
+                        let persona = m
+                            .get("persona")
+                            .and_then(|p| p.as_str())
+                            .ok_or_else(|| format!("entity '{id}': mind needs a \"persona\" string"))?;
+                        if persona.len() > 500 {
+                            return Err(format!("entity '{id}': persona too long (>500 chars)"));
+                        }
+                    }
                     if let Some(behavior) = ent.get("behavior").and_then(|b| b.as_str()) {
                         compile_check(behavior, &ENTITY_PARAMS, &ENTITY_IMPORTS, ENTITY_FUEL)
                             .map_err(|e| format!("entity '{id}' behavior failed to compile: {e}"))?;
@@ -452,6 +461,108 @@ fn validate(obj: &Value) -> Result<(), String> {
         }
         _ => Err("\"surface\" must be \"ui\", \"draw\", or \"field\"".into()),
     }
+}
+
+/// The mind contract: each minded being gets its own sparse-beating Claude.
+/// The perception package is the ENTIRETY of the mind's world; a rewritten
+/// reflex passes the same compiler gate as everything else.
+const MIND_CONTRACT: &str = r#"You are the MIND of one being living on a small world-grid. Stay in character. Be brief — a being of few words.
+
+You receive a PERCEPTION package (JSON): your position, a small window of the world around you (channels: height, water, vegetation, snow), your memory slots, whether snow falls, your last thought, and optionally WORDS someone spoke to you.
+
+Reply with ONE JSON object only (no prose outside it):
+{"say":"<one short in-character sentence (reply to words, or react) — may be empty>",
+ "thought":"<one short private thought>",
+ "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
+ "intent":{"7":12.5}   <OPTIONAL slot writes, keys 0..31>}
+
+Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
+- statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
+- float literals with a decimal point (2.0 not 2); identifiers letters/digits/underscore
+- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps]
+- ex/ey = your current position. Example, drift gently east: "mv(0.02, 0.0);
+0.0"
+- to move TOWARD a point, store it in slots and steer each tick, e.g. head for x=10:
+  "let dx = 10.0 - ex;
+mv(min(max(dx * 0.01, 0.0 - 0.03), 0.03), 0.0);
+0.0"
+"#;
+
+#[derive(Deserialize)]
+struct MindReq {
+    persona: String,
+    perception: Value,
+    #[serde(default)]
+    words: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+}
+
+/// One heartbeat of one being's mind. The reply's optional reflex rewrite is
+/// validated BY COMPILING it against the entity ABI before the browser sees it.
+async fn mind(Json(req): Json<MindReq>) -> impl IntoResponse {
+    let model = req
+        .model
+        .as_deref()
+        .filter(|m| ALLOWED_MODELS.contains(m))
+        .unwrap_or(DEFAULT_MODEL)
+        .to_string();
+    let mut prompt = format!("{MIND_CONTRACT}
+PERSONA: {}
+
+PERCEPTION:
+{}", req.persona, req.perception);
+    if let Some(w) = &req.words {
+        prompt.push_str(&format!("
+
+WORDS spoken to you: {w}"));
+    }
+    let t0 = Instant::now();
+    let mut last_err = String::new();
+    for attempt in 1..=2u32 {
+        let p = if attempt == 1 {
+            prompt.clone()
+        } else {
+            format!("{prompt}
+
+Your previous reply failed validation:
+{last_err}
+Return ONLY the corrected JSON object.")
+        };
+        match claude_generate(&p, &model).await {
+            Ok(raw) => match extract_json(&raw) {
+                Ok(obj) => {
+                    if let Some(b) = obj.get("behavior").and_then(|b| b.as_str()) {
+                        if let Err(e) = compile_check(b, &ENTITY_PARAMS, &ENTITY_IMPORTS, ENTITY_FUEL) {
+                            eprintln!("[mind] attempt {attempt} reflex failed to compile: {e}");
+                            last_err = format!("behavior failed to compile: {e}");
+                            continue;
+                        }
+                    }
+                    let mut resp = json!({
+                        "ok": true,
+                        "gen_ms": t0.elapsed().as_millis() as u64,
+                        "attempts": attempt,
+                        "say": obj.get("say").and_then(|v| v.as_str()).unwrap_or(""),
+                        "thought": obj.get("thought").and_then(|v| v.as_str()).unwrap_or(""),
+                    });
+                    if let Some(b) = obj.get("behavior") {
+                        resp["behavior"] = b.clone();
+                    }
+                    if let Some(i) = obj.get("intent") {
+                        resp["intent"] = i.clone();
+                    }
+                    return (StatusCode::OK, Json(resp));
+                }
+                Err(e) => last_err = e,
+            },
+            Err(e) => last_err = e,
+        }
+    }
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({"ok": false, "error": last_err, "gen_ms": t0.elapsed().as_millis() as u64})),
+    )
 }
 
 /// Inhabitant package manifest — the bundle descriptor binding a Rust skin
@@ -565,6 +676,7 @@ async fn main() {
     let app = Router::new()
         .route("/api/generate", post(generate))
         .route("/api/health", get(|| async { "ok" }))
+        .route("/api/mind", post(mind))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route_service("/", ServeFile::new("gen-server/live-gen.html"))
