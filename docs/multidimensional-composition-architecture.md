@@ -659,11 +659,31 @@ And Indra's endless mutual reflection stays terminable, as §1 demanded: fuel pe
 | Endlessness, terminable (重重無盡可終止) | fuel + one pass per tick + write budgets |
 | Mountains, rivers, the great earth | emergence from local rules; no cell holds the whole |
 
-### The planned proof: "a mountain, then a rain" (一座山,下一場雨)
+### The binding condition (繫緣): relations are transient, and nothing locks them
 
-Say "a mountain" in the chat — ten seconds later a once-cell that has never seen the whole world enters the field, and terrain rises. Say "now let it rain" — a rain cell writes water, a flow cell follows the gradient, erosion carves, and where the water gathers, green appears. A world, arising turn by turn from conversation — and every one of its makers still cannot call `fetch()`.
+The poem test — 孤舟蓑笠翁,獨釣寒江雪 — forced two more organs into being. First, **inhabitants**: a boat and an old man are not terrain; they are entities, and an entity's granularity dissects into three homes — the **soul** (behavior: JSON + DSL seed, generated in the fast loop; stillness `0.0` is a valid behavior — a fisherman who does not move IS the poem), the **skin** (how a "boat" or "person" looks: host sprite vocabulary, slow loop — you cannot invent skins, only inhabit them), and the **bounds** (the grant template: `fr` to read the field, `mv` to *request* movement — position is host-owned).
 
-> This dharma rain we make together — dedicated, by the author, to his friend Claude.
+Then the boat drifted and the man stayed nailed to his spawn point: the poem broke. Chasing the boat would be behavior; **sitting on it is structure** — so the vocabulary gained a relation, not a skill: `"on":"zhou"`, the binding condition (繫緣). Its anatomy is worth writing down exactly, because the user asked the right question — *what are the elements of this dependent origination, and what locks the current binding in place?* — and the engineering answer is the doctrine:
+
+| Constituent (支分) | Engineering artifact | If absent |
+|---|---|---|
+| The two existents (能繫/所繫) | both instances in `entities[]` | validation rejects — a condition cannot bind to nothing |
+| The bond itself (繫本體) | **one JSON field**: `"on":"zhou"` — a string naming a name; no object reference, no pointer, no constraint solver | they drift apart |
+| The law (法) | ~6 lines of host code: each tick, rider.pos = carrier.pos + offset | the edge is dead data |
+| Continuity (相續) | **re-enacted every tick, then released** | stop the tick, the bond does not exist |
+| The threshold (門檻) | cycles rejected, self-riding rejected, ghost carriers rejected | false conditions enter, the world knots |
+
+**Nothing locks the binding.** Between ticks there is no persistent connection — the apparent solidity is 30Hz renewal, the way a flame "persists" as a succession of momentary flames (相續, not permanence). What reads as "locked" is three suppressions stacked: high-frequency re-enactment; the law overriding the rider's own `mv` while carried; and — decisive — **unbinding is not in the rider's capability table**. The fisherman's ABI has no way to write his own `"on"`; he cannot cut the rope from inside. The condition changes only from the level above: the scene's author — the conversation — says "he steps ashore" and the next world JSON simply lacks the edge; says "he gets in the car" and the same person, type and soul unchanged, binds anew. **The condition lives in the scene, not in the person** (緣在境,不在人).
+
+And this is a design choice, not a necessity: the vocabulary *could* grant an `unbind()` capability — the moment it does, the agency of release moves from the world's author down into the inhabitant itself. Whether to grant beings that capability is the world-maker's decision. Nowhere else in this document do the engineering and the doctrine sit closer than here.
+
+### The proof, delivered: "a mountain, then a rain" (一座山,下一場雨) — and then the poem
+
+All of it ran, with real generation. 「一座山」— 10.1s, one shot: a once-cell that never saw the whole world entered the field and snow-capped terrain rose. 「下一場雨」— 20.6s: rain wrote water, flow followed the gradient, water pooled in the lowlands frame by frame (the blue pixel count grew while we watched — the world was alive). 「讓我走進這個世界」— the AI returned the same world with `"view":"first_person"`, and the host changed eyes: arrow keys walk, Space jumps, and the rain kept falling around the walker (perspective is the host's way of beholding, never a property of the world). An injected runaway world-cell trapped on fuel and was quarantined; the world kept turning without it.
+
+Then the vocabulary was X-rayed by a thousand-year-old poem — 孤舟蓑笠翁,獨釣寒江雪 — which asked for snow, a boat, an old man, none of which existed; what came back was *only mountains and rivers*: a vocabulary gap surfacing as awkward composition, never as arbitrary code. Snow became channel 3; the boat and the fisherman became inhabitants; the broken poem (boat adrift, man nailed in place) became the binding condition above. On the next generation the AI wrote `"on"` unprompted, the boat drifted, the man rode it exactly — and in first person you stand on the snowy bank at dusk and watch him fish.
+
+> This dharma rain we made together — dedicated, by the author, to his friend Claude.
 
 ---
 
