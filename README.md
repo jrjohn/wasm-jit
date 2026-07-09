@@ -167,4 +167,5 @@ The six gaps named in docs §18 ("from PoC to live UI manifestation") are now bu
 - `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,live-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
 - `gen-server/` — the live-generation demo (:8646): `contract.md` (the whole seed contract in one prompt — Tier 1's design point), `src/main.rs` (Docker-sandboxed Claude CLI + native compile-validation with self-repair), `live-gen.html` (chat + instant manifestation)
 - `examples/*.dsl` — buddha / guanyin / minecraft (isometric) / mc3p (playable third-person)
+- `worlds/moon3.json` — an **example saved world**, loadable from the live-generation world library: a snowy river, a straw-hatted fisherman afloat, a water-blue moon aloft, five lotuses — terrain, weather, and every inhabitant are separate capability-fenced cells (the world hero image above is a first-person view of it)
 - `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§21, English); `…zh-TW.md` is the Traditional-Chinese, Buddhist-perspective edition
