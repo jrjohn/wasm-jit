@@ -1,10 +1,22 @@
-# wasm-jit — scripts as seeds: runtime-generated WASM cells (borrow the browser's JIT) to run *code you don't have to trust*
+# wasm-jit
+
+**Software with no fixed screen.** You say what you want — a chart of this week's rainfall, a lone fisherman on a snowy river — and the interface is generated and shown in milliseconds. The catch that makes it safe: everything generated is fenced so it can only do what you explicitly allow.
+
+Today's apps ship a fixed set of screens. This is the opposite — there is no pre-built UI; it manifests from your intent. And because anything generated on the fly is a security risk, every piece compiles to a tiny WebAssembly "cell" whose entire world is the permissions you hand it: it literally cannot reach the network, the filesystem, or anything not on its list. **Fast**, because the browser runs it near-native; **safe**, because it can only touch what you granted.
+
+> **中文一句話**:App 不再有固定畫面。你說要什麼,介面當下生成——而生成的東西**只能碰你允許的**。快,因為瀏覽器近原生跑它;安全,因為它只夠得著你授權的那張清單。
+
+**Where this sits.** The field calls this *generative UI*, and most tools (v0, bolt, Lovable) have the model write ordinary code you then run as-is. wasm-jit takes the safer end of that spectrum: the interface is *composed from a fixed vocabulary*, never arbitrary code, and compiled into a capability-fenced WASM cell — safe by construction, not by review. That is the whole bet.
+
+---
+
+## How it works
 
 **Core claim**: compile a script to WASM bytes at runtime → `WebAssembly.instantiate()` → the browser engine JITs it → **near-native speed + a capability sandbox + synchronous calls**, the only path where all three hold at once. Measured on par with the AOT ceiling and tied with hand-written JS on speed — but it buys a property JS can't give: **the manifested code need not be trusted** (the import table *is* its entire world).
 
 > **Origin & acknowledgment**: this idea began from wanting a *sandboxed* runtime scripting language. We first prototyped against [Rhai](https://github.com/rhaiscript/rhai) and found that a tree-walking interpreter trades native speed for its sandbox — wasm-jit wants both. **Thank you to Rhai for the spark**; it shaped the whole direction. The project no longer contains Rhai (the comparison framing is gone too), returning to its own thesis: native speed *inside* a sandbox.
 
-Theory: `docs/multidimensional-composition-architecture.md` (§16 execution layer, §17 the AI-era frontend).
+Theory: `docs/multidimensional-composition-architecture.md` — the full design essay (§0–§21; §16 execution layer, §17 the AI-era frontend, §19 the shared world-field). A Traditional-Chinese, Buddhist-perspective edition sits alongside at `docs/multidimensional-composition-architecture.zh-TW.md`.
 
 ## PoC overview
 
@@ -147,4 +159,4 @@ The six gaps named in docs §18 ("from PoC to live UI manifestation") are now bu
 - `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,live-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
 - `gen-server/` — the live-generation demo (:8646): `contract.md` (the whole seed contract in one prompt — Tier 1's design point), `src/main.rs` (Docker-sandboxed Claude CLI + native compile-validation with self-repair), `live-gen.html` (chat + instant manifestation)
 - `examples/*.dsl` — buddha / guanyin / minecraft (isometric) / mc3p (playable third-person)
-- `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§17, in Chinese)
+- `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§21, English); `…zh-TW.md` is the Traditional-Chinese, Buddhist-perspective edition
