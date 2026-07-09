@@ -12,9 +12,9 @@ Today's apps ship a fixed set of screens. This is the opposite — there is no p
 
 **Where this sits.** The field calls this *generative UI*, and most tools (v0, bolt, Lovable) have the model write ordinary code you then run as-is. wasm-jit takes the safer end of that spectrum: the interface is *composed from a fixed vocabulary*, never arbitrary code, and compiled into a capability-fenced WASM cell — safe by construction, not by review. That is the whole bet.
 
-![First-person view of a straw-hatted fisherman in a boat on a river under a starry sky](assets/hero-world.png)
+![First-person view of a night river under a water-blue moon: a straw-hatted fisherman in a boat, birds aloft, fish below, lotuses, and other people on the banks](assets/hero-world.png)
 
-> The same substrate scales to a whole world: a shared 96×96 field (§19) where you say *"a lonely fisherman on a snowy river"* and walk into it. Terrain, weather, and each inhabitant are separate fuel-metered, capability-fenced cells — no cell knows the whole; the landscape emerges.
+> The same substrate scales to a whole *living* world: a shared field (§19) with a fisherman, other people, lotuses, birds aloft and fish below, all under a water-blue moon. Terrain, weather, every skin and behaviour is a separate capability-fenced cell — and beings can beget, repaint themselves, name themselves, and sense one another (§20–§21), while none can touch anything it wasn't granted. No cell knows the whole; the world emerges.
 
 ---
 
@@ -167,5 +167,6 @@ The six gaps named in docs §18 ("from PoC to live UI manifestation") are now bu
 - `api-server/` — Axum: static dist + `/api/{departments,members,form-schema,layout-schema,live-schema,examples,as,as-src}` (schemas/seeds read from disk per request)
 - `gen-server/` — the live-generation demo (:8646): `contract.md` (the whole seed contract in one prompt — Tier 1's design point), `src/main.rs` (Docker-sandboxed Claude CLI + native compile-validation with self-repair), `live-gen.html` (chat + instant manifestation)
 - `examples/*.dsl` — buddha / guanyin / minecraft (isometric) / mc3p (playable third-person)
-- `worlds/moon3.json` — an **example saved world**, loadable from the live-generation world library: a snowy river, a straw-hatted fisherman afloat, a water-blue moon aloft, five lotuses — terrain, weather, and every inhabitant are separate capability-fenced cells (the world hero image above is a first-person view of it)
+- `worlds/moon3.json` — an **example saved world**, loadable from the live-generation world library: a snowy river, a straw-hatted fisherman afloat, a water-blue moon aloft, five lotuses — terrain, weather, and every inhabitant are separate capability-fenced cells
+- `worlds/moon3-spring.json` — the same world grown lush: flowers, birds aloft, fish below, and other people on the banks (the world hero image above is a first-person view of it)
 - `docs/multidimensional-composition-architecture.md` — the full theory essay (§0–§21, English); `…zh-TW.md` is the Traditional-Chinese, Buddhist-perspective edition

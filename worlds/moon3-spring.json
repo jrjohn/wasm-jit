@@ -1,0 +1,231 @@
+{
+  "chat": [],
+  "name": "moon3-spring",
+  "payload": {
+    "cells": [
+      {
+        "id": "plains",
+        "mode": "once",
+        "order": 1,
+        "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  fw(0.0, x, y, 12.0 + 6.0 * sin(x * 0.13) * cos(y * 0.11) + 3.0 * sin((x + y) * 0.07));\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "river",
+        "mode": "once",
+        "order": 2,
+        "script": "let x = 0.0;\nwhile x < gw {\n let cy = gh * 0.5 + sin(x * 0.05) * 10.0;\n let dy = 0.0 - 8.0;\n while dy <= 8.0 {\n  let y = cy + dy;\n  let inb = (y >= 0.0) * (y < gh);\n  if inb > 0.5 {\n   let w = max(0.0, 1.0 - abs(dy) / 8.0);\n   fw(0.0, x, y, fr(0.0, x, y) - w * 5.0);\n   fw(1.0, x, y, max(fr(1.0, x, y), w * 6.0));\n  }\n  dy = dy + 1.0;\n }\n x = x + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "snowfall",
+        "mode": "frame",
+        "order": 3,
+        "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 { fw(3.0, x, y, min(fr(3.0, x, y) + 0.002, 1.0)); }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      }
+    ],
+    "entities": [
+      {
+        "at": [
+          48,
+          55
+        ],
+        "id": "boat",
+        "type": "boat"
+      },
+      {
+        "at": [
+          48,
+          55
+        ],
+        "behavior": "0.0",
+        "id": "weng",
+        "mind": {
+          "persona": "孤舟蓑笠翁，獨釣寒江雪 — a solitary old man in a straw cloak and bamboo hat, fishing alone on a frozen river under falling snow. He speaks rarely, in short quiet lines, at peace with the silence and cold."
+        },
+        "on": "boat",
+        "type": "fisherman"
+      },
+      {
+        "at": [
+          15,
+          53
+        ],
+        "behavior": "mv(sin(t*0.2)*0.01, cos(t*0.17)*0.01);\n0.0",
+        "id": "lotus1",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          30,
+          59
+        ],
+        "behavior": "mv(sin(t*0.23+1.0)*0.01, cos(t*0.19+1.0)*0.01);\n0.0",
+        "id": "lotus2",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          65,
+          45
+        ],
+        "behavior": "mv(sin(t*0.19+2.0)*0.01, cos(t*0.21+2.0)*0.01);\n0.0",
+        "id": "lotus3",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          75,
+          44
+        ],
+        "behavior": "mv(sin(t*0.25+3.0)*0.01, cos(t*0.16+3.0)*0.01);\n0.0",
+        "id": "lotus4",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          85,
+          40
+        ],
+        "behavior": "mv(sin(t*0.21+4.0)*0.01, cos(t*0.24+4.0)*0.01);\n0.0",
+        "id": "lotus5",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "altitude": 0.6,
+        "at": [
+          48,
+          20
+        ],
+        "behavior": "0.0",
+        "id": "moon",
+        "realm": "sky",
+        "skin_seed": "hue(0.57);\ndisc(px, py, s * 0.5);\nhue(0.61);\nring(px, py, s * 0.74);\n0.0",
+        "type": "moon"
+      },
+      {
+        "altitude": 0.5,
+        "at": [
+          40,
+          30
+        ],
+        "behavior": "mv(cos(t*0.4)*0.015, sin(t*0.4)*0.015);\n0.0",
+        "id": "bird1",
+        "realm": "sky",
+        "skin_seed": "hsl(0.62,0.2,0.28);\ndisc(px,py,s*0.16);\nline(px,py,px-s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\nline(px,py,px+s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\n0.0",
+        "type": "bird"
+      },
+      {
+        "altitude": 0.45,
+        "at": [
+          56,
+          26
+        ],
+        "behavior": "mv(sin(t*0.5)*0.015, cos(t*0.5)*0.01);\n0.0",
+        "id": "bird2",
+        "realm": "sky",
+        "skin_seed": "hsl(0.62,0.2,0.28);\ndisc(px,py,s*0.16);\nline(px,py,px-s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\nline(px,py,px+s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\n0.0",
+        "type": "bird"
+      },
+      {
+        "altitude": 0.4,
+        "at": [
+          64,
+          33
+        ],
+        "behavior": "mv(cos(t*0.6)*0.012, sin(t*0.6)*0.012);\n0.0",
+        "id": "bird3",
+        "realm": "sky",
+        "skin_seed": "hsl(0.62,0.2,0.28);\ndisc(px,py,s*0.16);\nline(px,py,px-s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\nline(px,py,px+s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\n0.0",
+        "type": "bird"
+      },
+      {
+        "at": [
+          45,
+          57
+        ],
+        "behavior": "mv(0.008, sin(t*0.8)*0.006);\n0.0",
+        "id": "fish1",
+        "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0",
+        "type": "fish"
+      },
+      {
+        "at": [
+          54,
+          52
+        ],
+        "behavior": "mv(0.006, cos(t*0.7)*0.006);\n0.0",
+        "id": "fish2",
+        "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0",
+        "type": "fish"
+      },
+      {
+        "at": [
+          62,
+          48
+        ],
+        "behavior": "mv(0.0-0.006, sin(t*0.9)*0.005);\n0.0",
+        "id": "fish3",
+        "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0",
+        "type": "fish"
+      },
+      {
+        "at": [
+          44,
+          59
+        ],
+        "id": "lotus6",
+        "skin_seed": "hsl(0.92,0.5,0.72);\ndisc(px,py,s*0.3);\nhsl(0.14,0.6,0.62);\ndisc(px,py,s*0.12);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          52,
+          54
+        ],
+        "id": "lotus7",
+        "skin_seed": "hsl(0.92,0.5,0.72);\ndisc(px,py,s*0.3);\nhsl(0.14,0.6,0.62);\ndisc(px,py,s*0.12);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          60,
+          49
+        ],
+        "id": "lotus8",
+        "skin_seed": "hsl(0.92,0.5,0.72);\ndisc(px,py,s*0.3);\nhsl(0.14,0.6,0.62);\ndisc(px,py,s*0.12);\n0.0",
+        "type": "lotus"
+      },
+      {
+        "at": [
+          38,
+          42
+        ],
+        "id": "lin",
+        "mind": {
+          "persona": "a woman on the near bank, watching the moon on the water; few words"
+        },
+        "skin_seed": "hsl(0.07,0.4,0.72);\ndisc(px,py-s*0.5,s*0.2);\nhsl(0.6,0.5,0.45);\ndisc(px,py+s*0.12,s*0.32);\n0.0",
+        "type": "person"
+      },
+      {
+        "at": [
+          64,
+          38
+        ],
+        "id": "he",
+        "mind": {
+          "persona": "an old man on the far bank, humming an old tune; few words"
+        },
+        "skin_seed": "hsl(0.07,0.4,0.72);\ndisc(px,py-s*0.5,s*0.2);\nhsl(0.03,0.6,0.5);\ndisc(px,py+s*0.12,s*0.32);\n0.0",
+        "type": "person"
+      }
+    ],
+    "grid": 96,
+    "view": "top"
+  },
+  "surface": "field"
+}
