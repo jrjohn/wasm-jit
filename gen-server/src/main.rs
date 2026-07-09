@@ -567,7 +567,9 @@ Reply with ONE JSON object only (no prose outside it):
 {"say":"<one short in-character sentence (reply to words, or react) — may be empty>",
  "thought":"<one short private thought>",
  "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
- "intent":{"7":12.5}   <OPTIONAL slot writes, keys 0..31>}
+ "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
+ "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"}
+   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
@@ -644,6 +646,24 @@ Return ONLY the corrected JSON object.")
                             continue;
                         }
                     }
+                    // A begotten child's soul must at least compile against the full
+                    // entity ABI (syntax) here → feeds self-repair; the parent-subset
+                    // fence is enforced client-side, where the host knows the parent's
+                    // grants. Same for the child's skin against the drawing ABI.
+                    if let Some(bg) = obj.get("beget") {
+                        if let Some(bh) = bg.get("behavior").and_then(|v| v.as_str()) {
+                            if let Err(e) = compile_check(bh, &ENTITY_PARAMS, &ENTITY_IMPORTS, ENTITY_FUEL) {
+                                last_err = format!("beget.behavior failed to compile: {e}");
+                                continue;
+                            }
+                        }
+                        if let Some(sk) = bg.get("skin_seed").and_then(|v| v.as_str()) {
+                            if let Err(e) = compile_check(sk, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000) {
+                                last_err = format!("beget.skin_seed failed to compile: {e}");
+                                continue;
+                            }
+                        }
+                    }
                     let mut resp = json!({
                         "ok": true,
                         "gen_ms": t0.elapsed().as_millis() as u64,
@@ -656,6 +676,9 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(i) = obj.get("intent") {
                         resp["intent"] = i.clone();
+                    }
+                    if let Some(b) = obj.get("beget") {
+                        resp["beget"] = b.clone();
                     }
                     return (StatusCode::OK, Json(resp));
                 }
