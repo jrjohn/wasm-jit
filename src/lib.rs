@@ -48,10 +48,12 @@ pub fn compile_kernel_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "w", "h"];
-    const IMPORTS: [HostFn; 7] = [
+    const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "hue", n_args: 1, returns: false },   // set hue
+        HostFn { name: "hue", n_args: 1, returns: false },   // set colour by hue (fixed sat/light)
+        HostFn { name: "rgb", n_args: 3, returns: false },   // set colour by r,g,b (0..1 each)
+        HostFn { name: "hsl", n_args: 3, returns: false },   // set colour by hue,sat,light (0..1) — natural tones, shadows
         HostFn { name: "disc", n_args: 3, returns: false },  // filled circle (x,y,r)
         HostFn { name: "ring", n_args: 3, returns: false },  // outlined circle (x,y,r)
         HostFn { name: "arc", n_args: 5, returns: false },   // arc (x,y,r,a0,a1)
@@ -154,10 +156,12 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 4] = ["px", "py", "s", "t"];
-    const IMPORTS: [HostFn; 7] = [
+    const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "hue", n_args: 1, returns: false },
+        HostFn { name: "rgb", n_args: 3, returns: false }, // colour by r,g,b (0..1)
+        HostFn { name: "hsl", n_args: 3, returns: false }, // colour by hue,sat,light (0..1) — skin tones, shading
         HostFn { name: "disc", n_args: 3, returns: false },
         HostFn { name: "ring", n_args: 3, returns: false },
         HostFn { name: "arc", n_args: 5, returns: false },

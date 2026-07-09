@@ -33,10 +33,12 @@ const UI_IMPORTS: [HostFn; 4] = [
     HostFn { name: "get", n_args: 1, returns: true },
     HostFn { name: "set", n_args: 2, returns: false },
 ];
-const DRAW_IMPORTS: [HostFn; 7] = [
+const DRAW_IMPORTS: [HostFn; 9] = [
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
     HostFn { name: "hue", n_args: 1, returns: false },
+    HostFn { name: "rgb", n_args: 3, returns: false },
+    HostFn { name: "hsl", n_args: 3, returns: false },
     HostFn { name: "disc", n_args: 3, returns: false },
     HostFn { name: "ring", n_args: 3, returns: false },
     HostFn { name: "arc", n_args: 5, returns: false },
@@ -84,10 +86,12 @@ const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
 /// only — how a novel inhabitant *looks*, grown at runtime, fenced by the same
 /// drawing audit as the draw surface.
 const SKIN_PARAMS: [&str; 4] = ["px", "py", "s", "t"];
-const SKIN_IMPORTS: [HostFn; 7] = [
+const SKIN_IMPORTS: [HostFn; 9] = [
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
     HostFn { name: "hue", n_args: 1, returns: false },
+    HostFn { name: "rgb", n_args: 3, returns: false },
+    HostFn { name: "hsl", n_args: 3, returns: false },
     HostFn { name: "disc", n_args: 3, returns: false },
     HostFn { name: "ring", n_args: 3, returns: false },
     HostFn { name: "arc", n_args: 5, returns: false },
@@ -557,7 +561,7 @@ const MIND_CONTRACT: &str = r#"You are the MIND of one being living on a small w
 
 You receive a PERCEPTION package (JSON) — these are your faculties; you know ONLY what they report:
 - who you are: your id, your kind (type), your realm ("sky" or "ground") and your altitude (0 = on the ground, 1 = high in the sky)
-- where you are: your x,y position, whether you ride something, and a small 5×5 window of the world around you (channels: height, water, vegetation, snow)
+- where you are: your x,y position in a world whose x and y both run 0..world.size, a plain word for where that is (you.place — e.g. "near the west edge", "north-west corner", "near the middle"), and your home (the x,y where you first appeared — so you can find your way back). If you.place says you are at an edge or a corner, you have drifted there; steer back toward the middle or toward home. Also whether you ride something, and a small 5×5 window of the world around you (channels: height, water, vegetation, snow)
 - who is near: neighbors — nearby beings with their kind and direction from you
 - your inner state: your memory slots and your last thought
 - the world: whether snow falls; and optionally WORDS someone spoke to you.
@@ -570,7 +574,7 @@ Reply with ONE JSON object only (no prose outside it):
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
    <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
- "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t), primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1 picks a colour], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a blue-robed figure with a pale head: 'hue(0.08);\ndisc(px, py - s * 0.5, s * 0.22);\nhue(0.6);\ndisc(px, py + s * 0.15, s * 0.34);\nhue(0.58);\nline(px - s * 0.3, py + s * 0.5, px + s * 0.3, py + s * 0.5);\n0.0'. Omit unless you mean to change how you look.>}
+ "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t), primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
@@ -583,6 +587,7 @@ Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/secon
   "let dx = 10.0 - ex;
 mv(min(max(dx * 0.01, 0.0 - 0.03), 0.03), 0.0);
 0.0"
+- IMPORTANT: a CONSTANT mv (e.g. always mv(0.02, 0.0)) makes you drift to an edge and get stuck there, clamped by the host — that is not "walking to a place". To reach a place, STEER toward it (as above), on BOTH axes. To return to where you started, steer toward your home (your perception gives it). To STOP and stay, use a still reflex — just "0.0" (no mv). When the visitor asks you to go somewhere or come back, rewrite your reflex to steer there; don't only speak."
 - if you RIDE something and decide to leave (go ashore, get out), your reflex must FIRST call
   unbind(), then mv toward land (height rises away from the water). To leave a boat for shore
   at y=38: "unbind();
