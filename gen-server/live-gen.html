@@ -546,6 +546,9 @@ function setFieldView(view) {
 // e2e / debugging: honest state, no pixel guessing
 window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from outside the module
 window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
+window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null) cam.pz = pz; if (yaw != null) cam.yaw = yaw; }; // e2e/compose: place the first-person camera
+window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
+window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
       entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
