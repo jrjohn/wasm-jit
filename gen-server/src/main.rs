@@ -103,24 +103,83 @@ struct GenReq {
     model: Option<String>,
 }
 
-/// Run Claude CLI in the sandboxed container. The container gets exactly two
-/// env vars and zero volumes — the generator's whole world is the prompt.
-async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
+/// The persistent generator container: created once (sleeping), each call is a
+/// `docker exec` — the 1–2s container cold-start is paid once, not per call.
+/// Same isolation as before: no volumes, API egress only, env fixed at create.
+const GEN_CONTAINER: &str = "wasmjit-gen";
+
+async fn container_running() -> bool {
+    tokio::process::Command::new("docker")
+        .args(["inspect", "-f", "{{.State.Running}}", GEN_CONTAINER])
+        .output()
+        .await
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).trim() == "true")
+        .unwrap_or(false)
+}
+
+async fn ensure_container() -> bool {
+    if container_running().await {
+        return true;
+    }
+    let _ = tokio::process::Command::new("docker")
+        .args(["rm", "-f", GEN_CONTAINER])
+        .output()
+        .await;
     let image = std::env::var("GEN_IMAGE").unwrap_or_else(|_| "agent-task-node:local".into());
+    let ok = tokio::process::Command::new("docker")
+        .args([
+            "run", "-d", "--name", GEN_CONTAINER, "--entrypoint", "sleep",
+            "-e", "CLAUDE_CODE_OAUTH_TOKEN", "-e", "IS_SANDBOX=1",
+            &image, "infinity",
+        ])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if ok {
+        eprintln!("[gen] persistent container '{GEN_CONTAINER}' started");
+    }
+    ok
+}
+
+async fn run_docker(args: Vec<String>) -> Result<std::process::Output, String> {
     let mut cmd = tokio::process::Command::new("docker");
-    cmd.args([
-        "run", "--rm", "--entrypoint", "claude",
-        "-e", "CLAUDE_CODE_OAUTH_TOKEN", "-e", "IS_SANDBOX=1",
-        &image,
-        "-p", prompt, "--model", model,
-    ])
-    .stdin(Stdio::null())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
-    let out = tokio::time::timeout(GEN_TIMEOUT, cmd.output())
+    cmd.args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    tokio::time::timeout(GEN_TIMEOUT, cmd.output())
         .await
         .map_err(|_| "generation timed out (150s)".to_string())?
-        .map_err(|e| format!("docker spawn failed: {e}"))?;
+        .map_err(|e| format!("docker spawn failed: {e}"))
+}
+
+/// Run Claude CLI: warm path = exec into the persistent container; cold
+/// fallback = the original one-shot `docker run --rm`.
+async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
+    if ensure_container().await {
+        let out = run_docker(vec![
+            "exec".into(), GEN_CONTAINER.into(), "claude".into(),
+            "-p".into(), prompt.into(), "--model".into(), model.into(),
+        ])
+        .await?;
+        if out.status.success() {
+            return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+        }
+        eprintln!(
+            "[gen] warm exec failed ({}), falling back to cold run: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).chars().take(200).collect::<String>()
+        );
+    }
+    let image = std::env::var("GEN_IMAGE").unwrap_or_else(|_| "agent-task-node:local".into());
+    let out = run_docker(vec![
+        "run".into(), "--rm".into(), "--entrypoint".into(), "claude".into(),
+        "-e".into(), "CLAUDE_CODE_OAUTH_TOKEN".into(), "-e".into(), "IS_SANDBOX=1".into(),
+        image,
+        "-p".into(), prompt.into(), "--model".into(), model.into(),
+    ])
+    .await?;
     if !out.status.success() {
         return Err(format!(
             "claude exited {}: {}",
@@ -543,6 +602,10 @@ struct MindReq {
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
 /// validated BY COMPILING it against the entity ABI before the browser sees it.
 async fn mind(Json(req): Json<MindReq>) -> impl IntoResponse {
+    // Measured, not assumed: for this structured heartbeat sonnet-5 is ~2×
+    // FASTER than haiku-4.5 (3.5–4s vs 6.5–8s) and better — so heartbeats use
+    // sonnet. The container is the only thing warm-started; the inference floor
+    // is irreducible without changing model or streaming.
     let model = req
         .model
         .as_deref()
@@ -852,6 +915,7 @@ async fn main() {
         .route("/", get(index))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .nest_service("/pkg-skins", ServeDir::new("pkg-skins"));
+    tokio::spawn(async { ensure_container().await; }); // warm the generator before the first prompt
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8646").await.unwrap();
     println!("gen-server: http://127.0.0.1:8646  (generator container: agent-task-node:local, override GEN_IMAGE)");
     axum::serve(listener, app).await.unwrap();
