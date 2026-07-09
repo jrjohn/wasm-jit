@@ -568,8 +568,9 @@ Reply with ONE JSON object only (no prose outside it):
  "thought":"<one short private thought>",
  "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
- "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"}
-   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>}
+ "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
+   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
+ "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t), primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1 picks a colour], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a blue-robed figure with a pale head: 'hue(0.08);\ndisc(px, py - s * 0.5, s * 0.22);\nhue(0.6);\ndisc(px, py + s * 0.15, s * 0.34);\nhue(0.58);\nline(px - s * 0.3, py + s * 0.5, px + s * 0.3, py + s * 0.5);\n0.0'. Omit unless you mean to change how you look.>}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
@@ -664,6 +665,14 @@ Return ONLY the corrected JSON object.")
                             }
                         }
                     }
+                    // A being repainting its OWN body: the self-portrait must compile
+                    // against the drawing ABI (primitives only — the skin fence).
+                    if let Some(sk) = obj.get("skin").and_then(|v| v.as_str()) {
+                        if let Err(e) = compile_check(sk, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000) {
+                            last_err = format!("skin (self-portrait) failed to compile: {e}");
+                            continue;
+                        }
+                    }
                     let mut resp = json!({
                         "ok": true,
                         "gen_ms": t0.elapsed().as_millis() as u64,
@@ -679,6 +688,9 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(b) = obj.get("beget") {
                         resp["beget"] = b.clone();
+                    }
+                    if let Some(s) = obj.get("skin") {
+                        resp["skin"] = s.clone();
                     }
                     return (StatusCode::OK, Json(resp));
                 }

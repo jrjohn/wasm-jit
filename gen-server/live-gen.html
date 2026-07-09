@@ -550,7 +550,7 @@ window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
-window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState } : null; };
+window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none') } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
       entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
@@ -1035,6 +1035,14 @@ async function mindBeat(ent, words) {
       } catch (e) {
         say('err', `${ent.id}'s new reflex refused: ${e.message ?? e}`);
       }
+    }
+    if (typeof d.skin === 'string' && d.skin.length) { // §20.1: a being repaints its OWN body — through the drawing fence
+      try {
+        const sb = compile_skin_wasm(d.skin);
+        ent.skinRun = new WebAssembly.Instance(new WebAssembly.Module(sb), { env: skinEnv }).exports.run;
+        ent.skinSource = 'mind (self-portrait)';
+        say('thought', `(${ent.id} repaints itself)`);
+      } catch (e) { say('err', `${ent.id}'s new look refused by the skin fence: ${e.message ?? e}`); }
     }
     if (d.beget && typeof d.beget === 'object') { // §20.1: the strongest act — a mind brings a being into being
       try { begetChild(ent, d.beget, fieldWorld.grid); }
