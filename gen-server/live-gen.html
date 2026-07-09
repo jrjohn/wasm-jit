@@ -1002,6 +1002,12 @@ function perceptionOf(ent, g) {
         ? (o.x > ent.x ? 'east' : 'west') : (o.y > ent.y ? 'south' : 'north');
       return { id: o.id, kind: o.type, dir, dist: Math.round(d) };
     });
+  // every named, minded being — WHEREVER it is — so you can find one by name and go to it
+  const people = ENTITIES.filter(o => o !== ent && o.mind).map(o => ({
+    id: o.id, kind: o.type,
+    x: Math.round(o.x * 10) / 10, y: Math.round(o.y * 10) / 10,
+    dist: Math.round(Math.hypot(o.x - ent.x, o.y - ent.y)),
+  })).sort((a, b) => a.dist - b.dist).slice(0, 8);
   return {
     // 身根: what and where you are, including your vertical nature
     you: {
@@ -1014,7 +1020,8 @@ function perceptionOf(ent, g) {
       riding: ent.on ?? undefined,
     },
     world: { size: g },              // the extent you stand in: x and y run 0..size (so you know if you're at an edge)
-    neighbors,                       // 他有情根
+    neighbors,                       // 他有情根 (whoever is close, any kind)
+    people,                          // every named minded being anywhere, with its dx,dy — so you can go to one by name
     window: win,                     // 眼根 (what you see around you)
     snowing: snowing(),              // the weather your senses report
     time: Math.round(performance.now() / 100) / 10,
