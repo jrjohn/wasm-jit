@@ -125,7 +125,7 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "ex", "ey"];
-    const IMPORTS: [HostFn; 8] = [
+    const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "get", n_args: 1, returns: true },
@@ -134,6 +134,7 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
         HostFn { name: "mv", n_args: 2, returns: false },
         HostFn { name: "unbind", n_args: 0, returns: false },
         HostFn { name: "rise", n_args: 1, returns: false }, // the vertical faculty: request a change in altitude (host clamps)
+        HostFn { name: "other", n_args: 2, returns: true },  // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
     ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
@@ -155,7 +156,7 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
-    const PARAMS: [&str; 4] = ["px", "py", "s", "t"];
+    const PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"]; // nx,ny (-1..1) = direction to the nearest other being
     const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
@@ -185,7 +186,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
     use audit::Grant;
-    const GRANTS: [Grant; 8] = [
+    const GRANTS: [Grant; 9] = [
         Grant { module: "env", name: "sin" },
         Grant { module: "env", name: "cos" },
         Grant { module: "env", name: "get" },
@@ -194,6 +195,7 @@ pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
         Grant { module: "env", name: "mv" },
         Grant { module: "env", name: "unbind" },
         Grant { module: "env", name: "rise" },
+        Grant { module: "env", name: "other" },
     ];
     audit::audit(bytes, &GRANTS).map_err(|e| JsError::new(&e))
 }
@@ -221,6 +223,7 @@ pub fn compile_entity_wasm_grants(src: &str, grants: Vec<String>) -> Result<Vec<
     if g("mv") { imports.push(HostFn { name: "mv", n_args: 2, returns: false }); }
     if g("unbind") { imports.push(HostFn { name: "unbind", n_args: 0, returns: false }); }
     if g("rise") { imports.push(HostFn { name: "rise", n_args: 1, returns: false }); }
+    if g("other") { imports.push(HostFn { name: "other", n_args: 2, returns: true }); }
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
         &prog,
@@ -248,6 +251,7 @@ pub fn audit_entity_bytes_grants(bytes: &[u8], grants: Vec<String>) -> Result<()
     if g("mv") { allow.push(Grant { module: "env", name: "mv" }); }
     if g("unbind") { allow.push(Grant { module: "env", name: "unbind" }); }
     if g("rise") { allow.push(Grant { module: "env", name: "rise" }); }
+    if g("other") { allow.push(Grant { module: "env", name: "other" }); }
     audit::audit(bytes, &allow).map_err(|e| JsError::new(&e))
 }
 

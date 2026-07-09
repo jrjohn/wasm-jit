@@ -68,7 +68,7 @@ const FIELD_FUEL: u32 = 2_000_000;
 /// loop); the bounds are this grant template. `mv(dx,dy)` REQUESTS movement —
 /// position is host-owned state, clamped and bounded by the host.
 const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
-const ENTITY_IMPORTS: [HostFn; 8] = [
+const ENTITY_IMPORTS: [HostFn; 9] = [
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
     HostFn { name: "get", n_args: 1, returns: true },
@@ -77,6 +77,7 @@ const ENTITY_IMPORTS: [HostFn; 8] = [
     HostFn { name: "mv", n_args: 2, returns: false },
     HostFn { name: "unbind", n_args: 0, returns: false }, // §19: the freedom to leave a condition
     HostFn { name: "rise", n_args: 1, returns: false },   // the vertical faculty: aloft/descend (host clamps 0..1)
+    HostFn { name: "other", n_args: 2, returns: true },   // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
 ];
 const ENTITY_FUEL: u32 = 200_000;
 /// The curated skin registry — types the host draws with hand-tuned Rust skins.
@@ -85,7 +86,7 @@ const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
 /// Generated-skin ABI (docs §20.1): run(px, py, s, t) with drawing primitives
 /// only — how a novel inhabitant *looks*, grown at runtime, fenced by the same
 /// drawing audit as the draw surface.
-const SKIN_PARAMS: [&str; 4] = ["px", "py", "s", "t"];
+const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
 const SKIN_IMPORTS: [HostFn; 9] = [
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
@@ -574,12 +575,13 @@ Reply with ONE JSON object only (no prose outside it):
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
    <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
- "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t), primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>}
+ "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
+ "attrs":{"name":"Ink","mood":"content"}   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
 - float literals with a decimal point (2.0 not 2); identifiers letters/digits/underscore
-- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps] unbind() [step off whatever you ride; ONLY after unbind() does your own mv move you] rise(dz) [change your altitude — rise(0.02) to climb toward the sky, rise(-0.02) to descend; the host clamps 0..1]
+- capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps] unbind() [step off whatever you ride; ONLY after unbind() does your own mv move you] rise(dz) [change your altitude — rise(0.02) to climb toward the sky, rise(-0.02) to descend; the host clamps 0..1] other(i,k) [sense the i-th nearest OTHER being in real time: other(0,0)=distance to the nearest, other(0,1)=its dx, other(0,2)=its dy — distance is large and dx/dy 0 if there is none. Use it to move toward or away from others, e.g. follow the nearest: "mv(other(0,1)*0.01, other(0,2)*0.01);\n0.0"]
 - to answer 'go back to the sky' / 'come down', rewrite your reflex to call rise() each tick, e.g. climb: "rise(0.02);\n0.0"; descend to the ground: "rise(0.0 - 0.02);\n0.0"
 - ex/ey = your current position. Example, drift gently east: "mv(0.02, 0.0);
 0.0"
@@ -696,6 +698,9 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(s) = obj.get("skin") {
                         resp["skin"] = s.clone();
+                    }
+                    if let Some(a) = obj.get("attrs") {
+                        resp["attrs"] = a.clone(); // pure data — a being's own named properties
                     }
                     return (StatusCode::OK, Json(resp));
                 }
