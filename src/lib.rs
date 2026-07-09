@@ -48,10 +48,12 @@ pub fn compile_kernel_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "w", "h"];
-    const IMPORTS: [HostFn; 7] = [
+    const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "hue", n_args: 1, returns: false },   // set hue
+        HostFn { name: "hue", n_args: 1, returns: false },   // set colour by hue (fixed sat/light)
+        HostFn { name: "rgb", n_args: 3, returns: false },   // set colour by r,g,b (0..1 each)
+        HostFn { name: "hsl", n_args: 3, returns: false },   // set colour by hue,sat,light (0..1) — natural tones, shadows
         HostFn { name: "disc", n_args: 3, returns: false },  // filled circle (x,y,r)
         HostFn { name: "ring", n_args: 3, returns: false },  // outlined circle (x,y,r)
         HostFn { name: "arc", n_args: 5, returns: false },   // arc (x,y,r,a0,a1)
@@ -123,7 +125,7 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "ex", "ey"];
-    const IMPORTS: [HostFn; 8] = [
+    const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "get", n_args: 1, returns: true },
@@ -132,6 +134,7 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
         HostFn { name: "mv", n_args: 2, returns: false },
         HostFn { name: "unbind", n_args: 0, returns: false },
         HostFn { name: "rise", n_args: 1, returns: false }, // the vertical faculty: request a change in altitude (host clamps)
+        HostFn { name: "other", n_args: 2, returns: true },  // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
     ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
@@ -153,11 +156,13 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
-    const PARAMS: [&str; 4] = ["px", "py", "s", "t"];
-    const IMPORTS: [HostFn; 7] = [
+    const PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"]; // nx,ny (-1..1) = direction to the nearest other being
+    const IMPORTS: [HostFn; 9] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "hue", n_args: 1, returns: false },
+        HostFn { name: "rgb", n_args: 3, returns: false }, // colour by r,g,b (0..1)
+        HostFn { name: "hsl", n_args: 3, returns: false }, // colour by hue,sat,light (0..1) — skin tones, shading
         HostFn { name: "disc", n_args: 3, returns: false },
         HostFn { name: "ring", n_args: 3, returns: false },
         HostFn { name: "arc", n_args: 5, returns: false },
@@ -181,7 +186,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
     use audit::Grant;
-    const GRANTS: [Grant; 8] = [
+    const GRANTS: [Grant; 9] = [
         Grant { module: "env", name: "sin" },
         Grant { module: "env", name: "cos" },
         Grant { module: "env", name: "get" },
@@ -190,8 +195,64 @@ pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
         Grant { module: "env", name: "mv" },
         Grant { module: "env", name: "unbind" },
         Grant { module: "env", name: "rise" },
+        Grant { module: "env", name: "other" },
     ];
     audit::audit(bytes, &GRANTS).map_err(|e| JsError::new(&e))
+}
+
+/// Recursive begetting (docs §20.1/§21): compile a BEGOTTEN child's soul with
+/// only a SUBSET of the entity capabilities — the ones its parent grants it.
+/// sin/cos are pure math (always available); get/set/fr/mv/unbind/rise are the
+/// grantable, world-touching capabilities. A child soul that calls a capability
+/// its parent did not pass down is rejected at codegen — the same fence, one
+/// generation deeper. Permissions are monotonically non-increasing by
+/// construction: the compiler will not emit an import the grant list omits.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_entity_wasm_grants(src: &str, grants: Vec<String>) -> Result<Vec<u8>, JsError> {
+    use codegen::HostFn;
+    const PARAMS: [&str; 3] = ["t", "ex", "ey"];
+    let g = |n: &str| grants.iter().any(|x| x == n);
+    let mut imports = vec![
+        HostFn { name: "sin", n_args: 1, returns: true },
+        HostFn { name: "cos", n_args: 1, returns: true },
+    ];
+    if g("get") { imports.push(HostFn { name: "get", n_args: 1, returns: true }); }
+    if g("set") { imports.push(HostFn { name: "set", n_args: 2, returns: false }); }
+    if g("fr") { imports.push(HostFn { name: "fr", n_args: 3, returns: true }); }
+    if g("mv") { imports.push(HostFn { name: "mv", n_args: 2, returns: false }); }
+    if g("unbind") { imports.push(HostFn { name: "unbind", n_args: 0, returns: false }); }
+    if g("rise") { imports.push(HostFn { name: "rise", n_args: 1, returns: false }); }
+    if g("other") { imports.push(HostFn { name: "other", n_args: 2, returns: true }); }
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &PARAMS,
+        &imports,
+        codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+/// The module-level twin of the above for externally-compiled child souls:
+/// audit that the begotten soul's imports ⊆ the subset its parent granted.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn audit_entity_bytes_grants(bytes: &[u8], grants: Vec<String>) -> Result<(), JsError> {
+    use audit::Grant;
+    let g = |n: &str| grants.iter().any(|x| x == n);
+    let mut allow = vec![
+        Grant { module: "env", name: "sin" },
+        Grant { module: "env", name: "cos" },
+    ];
+    if g("get") { allow.push(Grant { module: "env", name: "get" }); }
+    if g("set") { allow.push(Grant { module: "env", name: "set" }); }
+    if g("fr") { allow.push(Grant { module: "env", name: "fr" }); }
+    if g("mv") { allow.push(Grant { module: "env", name: "mv" }); }
+    if g("unbind") { allow.push(Grant { module: "env", name: "unbind" }); }
+    if g("rise") { allow.push(Grant { module: "env", name: "rise" }); }
+    if g("other") { allow.push(Grant { module: "env", name: "other" }); }
+    audit::audit(bytes, &allow).map_err(|e| JsError::new(&e))
 }
 
 /// Benchmark lane with fuel metering on: same `run(n)->f64` ABI plus an
