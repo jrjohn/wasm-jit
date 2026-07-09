@@ -2,11 +2,19 @@
 
 **Software with no fixed screen.** You say what you want — a chart of this week's rainfall, a lone fisherman on a snowy river — and the interface is generated and shown in milliseconds. The catch that makes it safe: everything generated is fenced so it can only do what you explicitly allow.
 
+![A bar chart of Taiwan's reservoir water levels, generated from one plain-English sentence](assets/hero-chart.png)
+
+> Typed *"a bar chart of Taiwan's reservoir water levels, in English"* → a fuel-metered WASM cell renders it in ~1.4 ms, no chart library. *(Bar values are generated from the prompt, not live data.)*
+
 Today's apps ship a fixed set of screens. This is the opposite — there is no pre-built UI; it manifests from your intent. And because anything generated on the fly is a security risk, every piece compiles to a tiny WebAssembly "cell" whose entire world is the permissions you hand it: it literally cannot reach the network, the filesystem, or anything not on its list. **Fast**, because the browser runs it near-native; **safe**, because it can only touch what you granted.
 
 > **中文一句話**:App 不再有固定畫面。你說要什麼,介面當下生成——而生成的東西**只能碰你允許的**。快,因為瀏覽器近原生跑它;安全,因為它只夠得著你授權的那張清單。
 
 **Where this sits.** The field calls this *generative UI*, and most tools (v0, bolt, Lovable) have the model write ordinary code you then run as-is. wasm-jit takes the safer end of that spectrum: the interface is *composed from a fixed vocabulary*, never arbitrary code, and compiled into a capability-fenced WASM cell — safe by construction, not by review. That is the whole bet.
+
+![First-person view of a straw-hatted fisherman in a boat on a river under a starry sky](assets/hero-world.png)
+
+> The same substrate scales to a whole world: a shared 96×96 field (§19) where you say *"a lonely fisherman on a snowy river"* and walk into it. Terrain, weather, and each inhabitant are separate fuel-metered, capability-fenced cells — no cell knows the whole; the landscape emerges.
 
 ---
 
