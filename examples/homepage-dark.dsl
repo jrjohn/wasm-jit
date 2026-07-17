@@ -17,7 +17,7 @@ let my = h * 0.24;
 let mm = h * 0.14;
 if w < h { mm = w * 0.14; }
 let N = 13.0;
-let D = S * 0.72;
+let D = S * 0.66;
 if hero > 0.5 {
   cx = w * 0.785;
   cy = h * 0.35;
@@ -31,7 +31,7 @@ if hero > 0.5 {
   N = N - (N % 1.0);
   if N < 9.0 { N = 9.0; }
   if N > 18.0 { N = 18.0; }
-  D = S * 0.62;
+  D = S * 0.52;
 }
 let D2 = D * D;
 
@@ -89,7 +89,7 @@ let yj = cy + sin(alj * 6.2832) * dlj * 0.82 + cos(j * 2.3 + t * (0.11 + (j % 3.
     let q = ddx * ddx + ddy * ddy;
     if q < D2 {
       let cl = 1.0 - q / D2;
-      hsl(0.556, 0.45, 0.20 + cl * 0.30);
+      hsl(0.556, 0.35, 0.17 + cl * 0.10);
       line(xi, yi, xj, yj);
     }
     j = j + 1.0;
