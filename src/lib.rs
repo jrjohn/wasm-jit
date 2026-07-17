@@ -169,33 +169,39 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
-/// Runtime-generated SKIN: `run(px, py, s, t)`, capabilities = the 2D drawing
-/// primitives only (env.{sin, cos, hue, disc, ring, arc, line}). Turns the key
-/// of docs §20.1 — a skin no longer needs raw canvas authority, so a novel
-/// inhabitant's *look* (a lotus, a deer, a tent) can be generated at runtime
-/// and enter through the same drawing-primitive fence as everything else.
-/// px,py = the entity's canvas center; s = canvas px per grid unit; t = seconds.
+/// The skin ABI, shared crate-side so the native validator and browser compiler
+/// agree. `run(px, py, s, t, nx, ny) -> f64`; nx,ny (-1..1) point to the nearest
+/// other being. Capabilities = the 2D drawing primitives PLUS `st(i)` — a
+/// READ-ONLY view of the being's published state (docs §20.2): the soul writes
+/// its slots via set(), the skin reads them via st(), so intent (the mind)
+/// reaches form (the body). The skin still cannot fetch, read the page, touch
+/// any other being, or write anything — richness up, reach fixed.
+pub const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
+pub const SKIN_IMPORTS: [codegen::HostFn; 10] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "hue", n_args: 1, returns: false },
+    codegen::HostFn { name: "rgb", n_args: 3, returns: false }, // colour by r,g,b (0..1)
+    codegen::HostFn { name: "hsl", n_args: 3, returns: false }, // colour by hue,sat,light (0..1) — skin tones, shading
+    codegen::HostFn { name: "disc", n_args: 3, returns: false },
+    codegen::HostFn { name: "ring", n_args: 3, returns: false },
+    codegen::HostFn { name: "arc", n_args: 5, returns: false },
+    codegen::HostFn { name: "line", n_args: 4, returns: false },
+    codegen::HostFn { name: "st", n_args: 1, returns: true },   // read the being's published state slot (soul writes, skin reads)
+];
+
+/// Runtime-generated SKIN: a novel inhabitant's *look* (a lotus, a deer, a tent)
+/// generated at runtime, entering through the same drawing-primitive fence as
+/// everything else (docs §20.1). px,py = the entity's canvas center; s = canvas
+/// px per grid unit; t = seconds. See `SKIN_IMPORTS` for the capability set.
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
-    use codegen::HostFn;
-    const PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"]; // nx,ny (-1..1) = direction to the nearest other being
-    const IMPORTS: [HostFn; 9] = [
-        HostFn { name: "sin", n_args: 1, returns: true },
-        HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "hue", n_args: 1, returns: false },
-        HostFn { name: "rgb", n_args: 3, returns: false }, // colour by r,g,b (0..1)
-        HostFn { name: "hsl", n_args: 3, returns: false }, // colour by hue,sat,light (0..1) — skin tones, shading
-        HostFn { name: "disc", n_args: 3, returns: false },
-        HostFn { name: "ring", n_args: 3, returns: false },
-        HostFn { name: "arc", n_args: 5, returns: false },
-        HostFn { name: "line", n_args: 4, returns: false },
-    ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
         &prog,
-        &PARAMS,
-        &IMPORTS,
+        &SKIN_PARAMS,
+        &SKIN_IMPORTS,
         codegen::CompileOpts { fuel: Some(300_000), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))

@@ -179,9 +179,14 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
 "world" may also carry "entities": [{"id":"name","type":"...","at":[x,y],"behavior":"<DSL>"}]
 - type "boat"/"fisherman"/"person"/"car" are drawn by curated host skins. For ANY OTHER thing
   (a lotus, a lantern, a deer, a tent…), invent a "type" name AND give a "skin_seed": a tiny
-  drawing script that renders it. skin_seed = DSL run(px, py, s, t) -> f64 where px,py is the
-  thing's screen center, s is its size in px, t is seconds; capabilities: sin cos + drawing
-  primitives hue(v) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2); end with 0.0.
+  drawing script that renders it. skin_seed = DSL run(px, py, s, t, nx, ny) -> f64 where px,py is
+  the thing's screen center, s is its size in px, t is seconds, and nx,ny (-1..1) point to the
+  nearest other being (so a skin can face/lean toward whoever is near); capabilities: sin cos +
+  drawing primitives hue(v) rgb(r,g,b) hsl(h,s,l) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2)
+  + st(i) — READ the being's published state slot i (§20.2: the soul writes a slot via set(), the
+  skin reads it via st(), so the body SHOWS what the mind intends — 自性 through the faculties
+  produces its manifestation). e.g. a being whose behavior does set(0.0, 1.0) when it boards a boat,
+  and whose skin does `if st(0.0) > 0.5 { …a seated pose… } else { …a standing pose… }`. End with 0.0.
   Example — a lotus flower: "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0"
   Many identical things (5 lotuses) = 5 entities of the same new type sharing one skin_seed.
   Grown skins are remembered: once a "lotus" skin exists, you may later place more by giving

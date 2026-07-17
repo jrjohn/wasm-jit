@@ -825,6 +825,9 @@ const SKINS = {
 // A GENERATED skin draws through drawing primitives ONLY (docs §20.1) — the
 // same fence as the draw surface, so a novel look grows at runtime with no
 // canvas authority of its own. hue/disc/ring/arc/line write to ctx directly.
+// the being whose skin is drawing right now (rendering is single-threaded, one
+// skin at a time) — so st(i) reads THIS being's published state (自性 → 用)
+let skinSelf = null;
 const skinEnv = {
   sin: Math.sin, cos: Math.cos,
   hue: v => { const c = `hsl(${(((v % 1) + 1) % 1) * 360},62%,60%)`; ctx.strokeStyle = c; ctx.fillStyle = c; },
@@ -834,6 +837,8 @@ const skinEnv = {
   ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+  // §20.2: the body reads what the mind published — read-only view of the being's slots
+  st: i => skinSelf ? (skinSelf.slots[i & 31] ?? 0) : 0,
 };
 
 // Draw an inhabitant: its generated skin if it grew one, else the curated Rust skin.
@@ -843,7 +848,9 @@ function drawSkin(ent, px, py, s, t) {
     let nx = 0, ny = 0, bd = 1e9;
     for (const o of ENTITIES) { if (o === ent) continue; const dx = o.x - ent.x, dy = o.y - ent.y, d = Math.hypot(dx, dy); if (d < bd) { bd = d; if (d > 1e-6) { nx = dx / d; ny = dy / d; } } }
     const lw = ctx.lineWidth; ctx.lineWidth = Math.max(1, s * 0.12);
+    skinSelf = ent; // so st(i) inside the skin reads THIS being's published state
     try { ent.skinRun(px, py, s, t, nx, ny); } catch (e) { /* fuel trap on a skin: skip this frame */ }
+    skinSelf = null;
     ctx.lineWidth = lw;
   } else {
     SKINS[ent.type]?.(ctx, px, py, s, t);

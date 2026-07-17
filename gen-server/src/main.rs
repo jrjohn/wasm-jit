@@ -72,18 +72,9 @@ const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
 /// Generated-skin ABI (docs §20.1): run(px, py, s, t) with drawing primitives
 /// only — how a novel inhabitant *looks*, grown at runtime, fenced by the same
 /// drawing audit as the draw surface.
-const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
-const SKIN_IMPORTS: [HostFn; 9] = [
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "hue", n_args: 1, returns: false },
-    HostFn { name: "rgb", n_args: 3, returns: false },
-    HostFn { name: "hsl", n_args: 3, returns: false },
-    HostFn { name: "disc", n_args: 3, returns: false },
-    HostFn { name: "ring", n_args: 3, returns: false },
-    HostFn { name: "arc", n_args: 5, returns: false },
-    HostFn { name: "line", n_args: 4, returns: false },
-];
+// Shared with the browser compiler via the crate (st included) so the two agree.
+const SKIN_PARAMS: [&str; 6] = wasm_jit::SKIN_PARAMS;
+const SKIN_IMPORTS: [HostFn; 10] = wasm_jit::SKIN_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -1488,6 +1479,28 @@ mod tests {
         assert!(ENTITY_IMPORTS.iter().any(|i| i.name == "unbind"), "entity ABI missing unbind");
         let bind = ENTITY_IMPORTS.iter().find(|i| i.name == "bind").unwrap();
         assert!(bind.returns && bind.n_args == 1, "bind(i) must take an index and return a verdict");
+    }
+
+    #[test]
+    fn skin_reads_published_state_validates() {
+        // §20.2: a skin that shows a different pose depending on the being's
+        // published state (st) must compile — intent (mind) reaches form (body)
+        let world = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"rower","type":"waterman","at":[40,40],
+                    "behavior":"if other(0.0,0.0) < 3.0 { set(0.0, 1.0); }\n0.0",
+                    "skin_seed":"let seated = st(0.0);\nhsl(0.08,0.5,0.4);\nif seated > 0.5 { disc(px, py, s * 0.4); }\nif seated <= 0.5 { line(px, py - s, px, py + s); }\n0.0"}]}});
+        assert!(validate(&world).is_ok(), "{:?}", validate(&world));
+    }
+
+    #[test]
+    fn skin_abi_has_st_and_matches_crate() {
+        assert_eq!(SKIN_IMPORTS.len(), wasm_jit::SKIN_IMPORTS.len());
+        for (a, b) in SKIN_IMPORTS.iter().zip(wasm_jit::SKIN_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        let st = SKIN_IMPORTS.iter().find(|i| i.name == "st").expect("skin ABI missing st");
+        assert!(st.returns && st.n_args == 1, "st(i) must read one slot and return a value");
     }
 
     #[test]
