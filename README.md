@@ -2,7 +2,7 @@
 
 **Software with no fixed screen.** You say what you want — a chart of this week's rainfall, a lone fisherman on a snowy river — and the interface is generated and shown in milliseconds. The catch that makes it safe: everything generated is fenced so it can only do what you explicitly allow.
 
-**🌊 Live: [arcana.boo](https://arcana.boo)** — the full anatomy of this architecture, with a playground where the wasm-jit compiler runs *in your browser*: edit a seed script, watch it recompile to WASM in milliseconds, and try to `fetch()` — refused at compile time, live. (中文版: [arcana.boo/index.zh.html](https://arcana.boo/index.zh.html))
+**🌊 Live: [arcana.boo](https://arcana.boo)** — the full anatomy of this architecture, with a playground where the wasm-jit compiler runs *in your browser*: edit a seed script, watch it recompile to WASM in milliseconds, and try to `fetch()` — refused at compile time, live.
 
 ![A bar chart of Taiwan's reservoir water levels, generated from one plain-English sentence](assets/hero-chart.png)
 
