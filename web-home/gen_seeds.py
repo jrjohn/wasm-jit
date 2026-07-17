@@ -37,20 +37,20 @@ TEMPLATE = """// arcana.boo homepage sky ({name} theme) — a wasm-jit `draw` se
 // 10 drawing primitives — it cannot fetch, cannot hold state, cannot read
 // the page. run(t, w, h), ~60 times a second.
 
-let cx = w * 0.785;
-let cy = h * 0.35;
-let S  = h * 0.27;
-if w < h {{ S = w * 0.27; }}
-let D  = S * 0.62;
+let cx = w * 0.5;
+let cy = h * 0.53;
+let S  = h * 0.36;
+if w < h {{ S = w * 0.36; }}
+let D  = S * 0.72;
 let D2 = D * D;
 let N  = 13.0;
 
 // ---- the moon and its halo ----
-let mm = h * 0.115;
-if w < h {{ mm = w * 0.115; }}
+let mm = h * 0.14;
+if w < h {{ mm = w * 0.14; }}
 hsl({MOON});
-glow(w * 0.84, h * 0.27, mm * 2.6);
-disc(w * 0.84, h * 0.27, mm * 0.45);
+glow(cx + S * 1.7, h * 0.24, mm * 2.4);
+disc(cx + S * 1.7, h * 0.24, mm * 0.45);
 
 // ---- snow: each flake its own quiet fall ----
 let s = 0.0;
@@ -76,8 +76,8 @@ while i < N {{
   let pr = sin(i * 78.233) * 125.432;
   pr = pr % 1.0;
   if pr < 0.0 {{ pr = pr + 1.0; }}
-  let xi = cx + cos(pa * 6.2832) * (0.15 + 0.9 * pr) * S + sin(t * 0.22 + i) * 12.0;
-  let yi = cy + sin(pa * 6.2832) * (0.15 + 0.9 * pr) * S * 0.82 + cos(t * 0.17 + i * 1.7) * 10.0;
+  let xi = cx + cos(pa * 6.2832) * (0.15 + 0.9 * pr) * S + sin(t * 0.22 + i) * 8.0;
+  let yi = cy + sin(pa * 6.2832) * (0.15 + 0.9 * pr) * S * 0.82 + cos(t * 0.17 + i * 1.7) * 7.0;
   let j = i + 1.0;
   while j < N {{
     let qa = sin(j * 12.9898) * 437.585;
@@ -86,8 +86,8 @@ while i < N {{
     let qr = sin(j * 78.233) * 125.432;
     qr = qr % 1.0;
     if qr < 0.0 {{ qr = qr + 1.0; }}
-    let xj = cx + cos(qa * 6.2832) * (0.15 + 0.9 * qr) * S + sin(t * 0.22 + j) * 12.0;
-    let yj = cy + sin(qa * 6.2832) * (0.15 + 0.9 * qr) * S * 0.82 + cos(t * 0.17 + j * 1.7) * 10.0;
+    let xj = cx + cos(qa * 6.2832) * (0.15 + 0.9 * qr) * S + sin(t * 0.22 + j) * 8.0;
+    let yj = cy + sin(qa * 6.2832) * (0.15 + 0.9 * qr) * S * 0.82 + cos(t * 0.17 + j * 1.7) * 7.0;
     let dx = xi - xj;
     let dy = yi - yj;
     let q = dx * dx + dy * dy;
@@ -127,8 +127,8 @@ while k < N {{
   let kr = sin(k * 78.233) * 125.432;
   kr = kr % 1.0;
   if kr < 0.0 {{ kr = kr + 1.0; }}
-  let xk = cx + cos(ka * 6.2832) * (0.15 + 0.9 * kr) * S + sin(t * 0.22 + k) * 12.0;
-  let yk = cy + sin(ka * 6.2832) * (0.15 + 0.9 * kr) * S * 0.82 + cos(t * 0.17 + k * 1.7) * 10.0;
+  let xk = cx + cos(ka * 6.2832) * (0.15 + 0.9 * kr) * S + sin(t * 0.22 + k) * 8.0;
+  let yk = cy + sin(ka * 6.2832) * (0.15 + 0.9 * kr) * S * 0.82 + cos(t * 0.17 + k * 1.7) * 7.0;
   let rr = 1.7 + (k % 3.0) * 0.55;
   let fl = 0.0;
   let dkb = k - nb;
@@ -163,16 +163,16 @@ if aa < 0.0 {{ aa = aa + 1.0; }}
 let ar = sin(na * 78.233) * 125.432;
 ar = ar % 1.0;
 if ar < 0.0 {{ ar = ar + 1.0; }}
-let xa = cx + cos(aa * 6.2832) * (0.15 + 0.9 * ar) * S + sin(t * 0.22 + na) * 12.0;
-let ya = cy + sin(aa * 6.2832) * (0.15 + 0.9 * ar) * S * 0.82 + cos(t * 0.17 + na * 1.7) * 10.0;
+let xa = cx + cos(aa * 6.2832) * (0.15 + 0.9 * ar) * S + sin(t * 0.22 + na) * 8.0;
+let ya = cy + sin(aa * 6.2832) * (0.15 + 0.9 * ar) * S * 0.82 + cos(t * 0.17 + na * 1.7) * 7.0;
 let ba = sin(nb * 12.9898) * 437.585;
 ba = ba % 1.0;
 if ba < 0.0 {{ ba = ba + 1.0; }}
 let br = sin(nb * 78.233) * 125.432;
 br = br % 1.0;
 if br < 0.0 {{ br = br + 1.0; }}
-let xb = cx + cos(ba * 6.2832) * (0.15 + 0.9 * br) * S + sin(t * 0.22 + nb) * 12.0;
-let yb = cy + sin(ba * 6.2832) * (0.15 + 0.9 * br) * S * 0.82 + cos(t * 0.17 + nb * 1.7) * 10.0;
+let xb = cx + cos(ba * 6.2832) * (0.15 + 0.9 * br) * S + sin(t * 0.22 + nb) * 8.0;
+let yb = cy + sin(ba * 6.2832) * (0.15 + 0.9 * br) * S * 0.82 + cos(t * 0.17 + nb * 1.7) * 7.0;
 hsl({PULSE});
 glow(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 8.0);
 disc(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 1.8);

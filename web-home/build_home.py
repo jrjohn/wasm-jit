@@ -11,8 +11,8 @@ WT = os.path.expanduser("~/Documents/projects/ai/wasm-jit/.claude/worktrees/canv
 SEED_L = open(os.path.join(WT, "examples/homepage-light.dsl"), encoding="utf-8").read().strip()
 SEED_D = open(os.path.join(WT, "examples/homepage-dark.dsl"), encoding="utf-8").read().strip()
 
-zh = open(os.path.join(TMP, "wasm-jit-architecture.html"), encoding="utf-8").read()
-en = open(os.path.join(TMP, "wasm-jit-architecture.en.html"), encoding="utf-8").read()
+zh = open(os.path.join(WT, "docs/architecture-anatomy.html"), encoding="utf-8").read()
+en = open(os.path.join(WT, "docs/architecture-anatomy.en.html"), encoding="utf-8").read()
 
 STYLE = zh[zh.index("<style>"): zh.index("</style>") + 8]
 
