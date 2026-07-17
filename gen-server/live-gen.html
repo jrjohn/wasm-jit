@@ -1206,8 +1206,11 @@ function manifestDraw(seed) {
 // ---------------- chat loop ----------------
 let busy = false;
 async function send() {
-  const prompt = $('prompt').value.trim();
+  let prompt = $('prompt').value.trim();
   if (!prompt || busy) return;
+  // a leading ! forces a fresh generation, bypassing the ālaya ledger
+  let fresh = false;
+  if (prompt.startsWith('!') && !prompt.startsWith('!@')) { fresh = true; prompt = prompt.slice(1).trim(); }
   if (prompt.startsWith('@')) { // speak TO a being: its own mind answers
     const sp = prompt.indexOf(' ');
     const name = sp < 0 ? prompt.slice(1) : prompt.slice(1, sp);
@@ -1235,12 +1238,17 @@ async function send() {
     const r = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value }),
+      body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
     });
     const d = await r.json();
     if (d.ok) {
-      say('ai', `${d.surface} seed in ${(d.gen_ms / 1000).toFixed(1)}s` +
-        (d.attempts > 1 ? ` (self-repaired ×${d.attempts - 1})` : '') + ` [${d.model}] — manifesting`);
+      if (d.cached) {
+        // ālaya ledger hit: the cause was stored, the fruit replayed — no LLM.
+        say('ai', `⚡ ${d.surface} — replayed from the ledger in ${d.gen_ms}ms (a stored cause; no LLM). Prefix ! to force a fresh one.`);
+      } else {
+        say('ai', `${d.surface} seed in ${(d.gen_ms / 1000).toFixed(1)}s` +
+          (d.attempts > 1 ? ` (self-repaired ×${d.attempts - 1})` : '') + ` [${d.model}] — manifesting · stored to the ledger`);
+      }
       if (d.surface === 'ui') manifestUi(d.schema);
       else if (d.surface === 'field') manifestField(d.world);
       else manifestDraw(d.seed);

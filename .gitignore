@@ -2,3 +2,5 @@
 /pkg
 leptos-poc/dist
 worlds/
+gen-server/ledger/
+/ledger/

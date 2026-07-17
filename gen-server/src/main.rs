@@ -107,6 +107,51 @@ struct GenReq {
     prior: Option<Value>,
     #[serde(default)]
     model: Option<String>,
+    /// force a fresh generation, bypassing (and overwriting) the ledger
+    #[serde(default)]
+    fresh: Option<bool>,
+}
+
+/// The ālaya ledger (§16): store the CAUSE (the ask + the state it acts upon)
+/// and replay the fruit in milliseconds — no LLM, no TTFT. The cause is the ask
+/// AND the prior world it modifies: two identical asks against different priors
+/// are different causes and legitimately yield different fruit. So the key mixes
+/// the normalized ask with a canonical signature of the prior. The live UI always
+/// boots the same DEFAULT_WORLD, so repeating an ask on a fresh canvas replays.
+fn normalize_ask(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+/// Canonical signature of the prior. serde_json carries no `preserve_order`
+/// feature here, so object keys serialize sorted — equal priors sign identically
+/// across requests and restarts. `None` (a from-scratch ask) signs as empty.
+fn prior_sig(prior: Option<&Value>) -> String {
+    match prior {
+        Some(v) => serde_json::to_string(v).unwrap_or_default(),
+        None => String::new(),
+    }
+}
+fn ask_key(norm: &str, psig: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    norm.hash(&mut h);
+    0u8.hash(&mut h); // domain separator so ("ab","c") ≠ ("a","bc")
+    psig.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+async fn ledger_get(key: &str, norm: &str, psig: &str) -> Option<Value> {
+    let txt = tokio::fs::read_to_string(format!("ledger/{key}.json")).await.ok()?;
+    let v: Value = serde_json::from_str(&txt).ok()?;
+    // re-check ask AND prior signature: a hash collision must read as a miss
+    let ask_ok = v.get("ask").and_then(|a| a.as_str()) == Some(norm);
+    let sig_ok = v.get("psig").and_then(|a| a.as_str()).unwrap_or("") == psig;
+    if ask_ok && sig_ok { v.get("result").cloned() } else { None }
+}
+async fn ledger_put(key: &str, norm: &str, psig: &str, result: &Value) {
+    let _ = tokio::fs::create_dir_all("ledger").await;
+    let entry = json!({ "ask": norm, "psig": psig, "result": result });
+    if let Ok(s) = serde_json::to_string_pretty(&entry) {
+        let _ = tokio::fs::write(format!("ledger/{key}.json"), s).await;
+    }
 }
 
 /// The persistent generator container: created once (sleeping), each call is a
@@ -886,6 +931,24 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
         .unwrap_or(DEFAULT_MODEL)
         .to_string();
 
+    let t0 = Instant::now();
+    // ── ālaya ledger: a repeat ask replays the stored fruit, no LLM ──────────
+    let norm = normalize_ask(&req.prompt);
+    let psig = prior_sig(req.prior.as_ref());
+    let key = ask_key(&norm, &psig);
+    let cacheable = !norm.is_empty();
+    if cacheable && !req.fresh.unwrap_or(false) {
+        if let Some(result) = ledger_get(&key, &norm, &psig).await {
+            let mut resp = json!({
+                "ok": true, "cached": true, "gen_ms": t0.elapsed().as_millis() as u64, "model": model,
+            });
+            for k in ["surface", "schema", "seed", "world"] {
+                if let Some(v) = result.get(k) { resp[k] = v.clone(); }
+            }
+            return (StatusCode::OK, Json(resp));
+        }
+    }
+
     let mut prompt = String::from(CONTRACT);
     if let Some(prior) = &req.prior {
         prompt.push_str("\n\nCURRENT STATE (the user wants to modify this — return the FULL updated JSON for the same surface):\n");
@@ -893,8 +956,6 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
     }
     prompt.push_str("\n\nUser request: ");
     prompt.push_str(&req.prompt);
-
-    let t0 = Instant::now();
     let mut last_err = String::new();
     let mut raw = String::new();
     for attempt in 1..=MAX_ATTEMPTS {
@@ -914,6 +975,7 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
                     Ok(obj) => {
                         let mut resp = json!({
                             "ok": true,
+                            "cached": false,
                             "attempts": attempt,
                             "gen_ms": t0.elapsed().as_millis() as u64,
                             "model": model,
@@ -927,6 +989,14 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
                         }
                         if let Some(w) = obj.get("world") {
                             resp["world"] = w.clone();
+                        }
+                        // perfume the ledger: store the cause so the next identical ask is instant
+                        if cacheable {
+                            let mut stored = json!({});
+                            for k in ["surface", "schema", "seed", "world"] {
+                                if let Some(v) = obj.get(k) { stored[k] = v.clone(); }
+                            }
+                            ledger_put(&key, &norm, &psig, &stored).await;
                         }
                         return (StatusCode::OK, Json(resp));
                     }
@@ -988,6 +1058,53 @@ mod tests {
         let raw = "Sure! Here is the UI:\n```json\n{\"surface\":\"draw\",\"seed\":\"0.0\"}\n```\nEnjoy.";
         let v = extract_json(raw).unwrap();
         assert_eq!(v["surface"], "draw");
+    }
+
+    #[test]
+    fn normalize_ask_collapses_whitespace_and_case() {
+        assert_eq!(normalize_ask("  A  Lone   STAR\n"), "a lone star");
+        assert_eq!(normalize_ask("a lone star"), normalize_ask("A LONE STAR"));
+    }
+
+    #[test]
+    fn ledger_key_is_deterministic_for_same_cause() {
+        let prior = json!({"surface":"field","world":{"grid":48}});
+        let a = ask_key("a lone star", &prior_sig(Some(&prior)));
+        let b = ask_key("a lone star", &prior_sig(Some(&prior)));
+        assert_eq!(a, b, "same ask + same prior must key identically across calls/restarts");
+    }
+
+    #[test]
+    fn ledger_key_separates_cause_by_prior() {
+        // the core fix: identical asks against DIFFERENT priors are different
+        // causes and must NOT collide (an ask-only key replayed the wrong fruit)
+        let ask = "now let it rain";
+        let world_a = json!({"world":{"entities":[{"type":"fisherman"}]}});
+        let world_b = json!({"world":{"entities":[{"type":"boat"}]}});
+        let ka = ask_key(ask, &prior_sig(Some(&world_a)));
+        let kb = ask_key(ask, &prior_sig(Some(&world_b)));
+        assert_ne!(ka, kb, "same ask on different worlds must not share a ledger slot");
+        // and a from-scratch ask (no prior) is its own slot, distinct from either
+        let kn = ask_key(ask, &prior_sig(None));
+        assert_ne!(kn, ka);
+        assert_ne!(kn, kb);
+    }
+
+    #[test]
+    fn ledger_key_separates_cause_by_ask() {
+        let prior = json!({"world":{"grid":48}});
+        let a = ask_key("a lone star", &prior_sig(Some(&prior)));
+        let b = ask_key("a lone moon", &prior_sig(Some(&prior)));
+        assert_ne!(a, b, "different asks on the same world must key differently");
+    }
+
+    #[test]
+    fn prior_sig_is_key_order_independent() {
+        // serde_json (no preserve_order) sorts object keys, so semantically-equal
+        // priors sent with different key order sign — and thus key — identically
+        let p1: Value = serde_json::from_str(r#"{"a":1,"b":2}"#).unwrap();
+        let p2: Value = serde_json::from_str(r#"{"b":2,"a":1}"#).unwrap();
+        assert_eq!(prior_sig(Some(&p1)), prior_sig(Some(&p2)));
     }
 
     #[test]
