@@ -1152,15 +1152,17 @@ window.__injectBadFieldCell = () => {
 // ---------------- draw surface ----------------
 const cv = $('cv'), ctx = cv.getContext('2d');
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
+let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
 const env = {
   sin: Math.sin, cos: Math.cos,
-  hue: v => { const c = hueColor(v); ctx.strokeStyle = c; ctx.fillStyle = c; },
-  rgb: (r, g, b) => { const c = `rgb(${Math.max(0, Math.min(255, r * 255)) | 0},${Math.max(0, Math.min(255, g * 255)) | 0},${Math.max(0, Math.min(255, b * 255)) | 0})`; ctx.strokeStyle = c; ctx.fillStyle = c; },
-  hsl: (h, s, l) => { const c = `hsl(${(((h % 1) + 1) % 1) * 360},${Math.max(0, Math.min(1, s)) * 100}%,${Math.max(0, Math.min(1, l)) * 100}%)`; ctx.strokeStyle = c; ctx.fillStyle = c; },
+  hue: v => { const H = (((v % 1) + 1) % 1) * 360; const c = `hsl(${H},62%,62%)`; ctx.strokeStyle = c; ctx.fillStyle = c; drawA = a => `hsla(${H},62%,62%,${a})`; },
+  rgb: (r, g, b) => { const R = Math.max(0, Math.min(255, r * 255)) | 0, G = Math.max(0, Math.min(255, g * 255)) | 0, B = Math.max(0, Math.min(255, b * 255)) | 0; const c = `rgb(${R},${G},${B})`; ctx.strokeStyle = c; ctx.fillStyle = c; drawA = a => `rgba(${R},${G},${B},${a})`; },
+  hsl: (h, s, l) => { const H = (((h % 1) + 1) % 1) * 360, S = Math.max(0, Math.min(1, s)) * 100, L = Math.max(0, Math.min(1, l)) * 100; const c = `hsl(${H},${S}%,${L}%)`; ctx.strokeStyle = c; ctx.fillStyle = c; drawA = a => `hsla(${H},${S}%,${L}%,${a})`; },
   disc: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.fill(); },
   ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+  glow: (x, y, r) => { r = Math.max(r, 0); if (!r) return; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, drawA(0.55)); g.addColorStop(1, drawA(0)); const keep = ctx.fillStyle; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill(); ctx.fillStyle = keep; },
 };
 function manifestDraw(seed) {
   fieldWorld = null;
