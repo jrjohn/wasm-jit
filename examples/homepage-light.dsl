@@ -1,27 +1,52 @@
-// arcana.boo homepage sky (light theme) — a wasm-jit `draw` seed, compiled
-// LIVE in your browser by the wasm-jit compiler (itself Rust compiled to WASM).
-// Everything moving on this page is this one module. Its entire world is
-// 10 drawing primitives — it cannot fetch, cannot hold state, cannot read
-// the page. run(t, w, h), ~60 times a second.
+// arcana.boo sky (light theme) — a wasm-jit `draw` seed, compiled LIVE in
+// your browser by the wasm-jit compiler (itself Rust compiled to WASM).
+// ONE module draws BOTH skies: on a tall canvas (the hero) it composes like
+// the original; on a short canvas (this panel) it centers itself.
+// Its entire world is 10 drawing primitives — it cannot fetch, cannot hold
+// state, cannot read the page. run(t, w, h), ~60 times a second.
 
+// ---- composition: the seed reads its canvas and places itself ----
+let hero = 0.0;
+if h > 480.0 { hero = 1.0; }
 let cx = w * 0.5;
 let cy = h * 0.53;
-let S  = h * 0.36;
+let S = h * 0.36;
 if w < h { S = w * 0.36; }
-let D  = S * 0.72;
-let D2 = D * D;
-let N  = 13.0;
-
-// ---- the moon and its halo ----
+let mx = cx + S * 1.7;
+let my = h * 0.24;
 let mm = h * 0.14;
 if w < h { mm = w * 0.14; }
-hsl(0.551, 0.58, 0.60);
-glow(cx + S * 1.7, h * 0.24, mm * 2.4);
-disc(cx + S * 1.7, h * 0.24, mm * 0.45);
+let N = 13.0;
+let D = S * 0.72;
+if hero > 0.5 {
+  cx = w * 0.785;
+  cy = h * 0.35;
+  S = h * 0.27;
+  if w < h { S = w * 0.27; }
+  mx = w * 0.84;
+  my = h * 0.27;
+  mm = h * 0.115;
+  if w < h { mm = w * 0.115; }
+  N = w / 120.0;
+  N = N - (N % 1.0);
+  if N < 9.0 { N = 9.0; }
+  if N > 18.0 { N = 18.0; }
+  D = S * 0.62;
+}
+let D2 = D * D;
 
-// ---- snow: each flake its own quiet fall ----
+// ---- the moon and its halo ----
+hsl(0.551, 0.58, 0.60);
+glow(mx, my, mm * 2.6);
+disc(mx, my, mm * 0.45);
+
+// ---- snow: density follows the canvas, each flake its own quiet fall ----
+let SN = w * h / 34000.0;
+SN = SN - (SN % 1.0);
+if SN < 16.0 { SN = 16.0; }
+if SN > 60.0 { SN = 60.0; }
 let s = 0.0;
-while s < 30.0 {
+while s < SN {
   let px = sin(s * 12.9898) * 437.585;
   px = px % 1.0;
   if px < 0.0 { px = px + 1.0; }
@@ -34,30 +59,34 @@ while s < 30.0 {
   s = s + 1.0;
 }
 
-// ---- links: transient binding between every near pair (they form and break) ----
+// ---- links: transient binding between every near pair (form and break) ----
 let i = 0.0;
 while i < N {
-  let pa = sin(i * 12.9898) * 437.585;
-  pa = pa % 1.0;
-  if pa < 0.0 { pa = pa + 1.0; }
-  let pr = sin(i * 78.233) * 125.432;
-  pr = pr % 1.0;
-  if pr < 0.0 { pr = pr + 1.0; }
-  let xi = cx + cos(pa * 6.2832) * (0.15 + 0.9 * pr) * S + sin(t * 0.22 + i) * 8.0;
-  let yi = cy + sin(pa * 6.2832) * (0.15 + 0.9 * pr) * S * 0.82 + cos(t * 0.17 + i * 1.7) * 7.0;
+  let ali = sin(i * 12.9898) * 437.585;
+ali = ali % 1.0;
+if ali < 0.0 { ali = ali + 1.0; }
+let rli = sin(i * 78.233) * 125.432;
+rli = rli % 1.0;
+if rli < 0.0 { rli = rli + 1.0; }
+let dli = (0.05 + 0.75 * rli) * S;
+if (i % 2.0) > 0.5 { dli = (0.28 + 0.77 * rli) * S; }
+let xi = cx + cos(ali * 6.2832) * dli + sin(i * 1.7 + t * (0.14 + (i % 4.0) * 0.06)) * (7.0 + (i % 3.0) * 4.0);
+let yi = cy + sin(ali * 6.2832) * dli * 0.82 + cos(i * 2.3 + t * (0.11 + (i % 3.0) * 0.05)) * (6.0 + (i % 3.0) * 3.0);
   let j = i + 1.0;
   while j < N {
-    let qa = sin(j * 12.9898) * 437.585;
-    qa = qa % 1.0;
-    if qa < 0.0 { qa = qa + 1.0; }
-    let qr = sin(j * 78.233) * 125.432;
-    qr = qr % 1.0;
-    if qr < 0.0 { qr = qr + 1.0; }
-    let xj = cx + cos(qa * 6.2832) * (0.15 + 0.9 * qr) * S + sin(t * 0.22 + j) * 8.0;
-    let yj = cy + sin(qa * 6.2832) * (0.15 + 0.9 * qr) * S * 0.82 + cos(t * 0.17 + j * 1.7) * 7.0;
-    let dx = xi - xj;
-    let dy = yi - yj;
-    let q = dx * dx + dy * dy;
+    let alj = sin(j * 12.9898) * 437.585;
+alj = alj % 1.0;
+if alj < 0.0 { alj = alj + 1.0; }
+let rlj = sin(j * 78.233) * 125.432;
+rlj = rlj % 1.0;
+if rlj < 0.0 { rlj = rlj + 1.0; }
+let dlj = (0.05 + 0.75 * rlj) * S;
+if (j % 2.0) > 0.5 { dlj = (0.28 + 0.77 * rlj) * S; }
+let xj = cx + cos(alj * 6.2832) * dlj + sin(j * 1.7 + t * (0.14 + (j % 4.0) * 0.06)) * (7.0 + (j % 3.0) * 4.0);
+let yj = cy + sin(alj * 6.2832) * dlj * 0.82 + cos(j * 2.3 + t * (0.11 + (j % 3.0) * 0.05)) * (6.0 + (j % 3.0) * 3.0);
+    let ddx = xi - xj;
+    let ddy = yi - yj;
+    let q = ddx * ddx + ddy * ddy;
     if q < D2 {
       let cl = 1.0 - q / D2;
       hsl(0.556, 0.45, 0.80 + cl * -0.33);
@@ -68,38 +97,58 @@ while i < N {
   i = i + 1.0;
 }
 
-// ---- the light: gliding being to being, flaring what it reaches ----
-let slot = t * 0.55;
-let fs = slot - (slot % 1.0);
-let pp = slot % 1.0;
-let ha = sin(fs * 91.17) * 331.73;
-ha = ha % 1.0;
-if ha < 0.0 { ha = ha + 1.0; }
-let na = ha * N;
-na = na - (na % 1.0);
-let hb = sin(fs * 47.53) * 217.31;
-hb = hb % 1.0;
-if hb < 0.0 { hb = hb + 1.0; }
-let nb = hb * N;
-nb = nb - (nb % 1.0);
-let dna = nb - na;
-if dna < 0.5 { if dna > 0.0 - 0.5 { nb = nb + 1.0; if nb >= N { nb = 0.0; } } }
+// ---- two lights gliding being to being (picked per time-slot) ----
+let sl1 = t * 0.55 + 0.0;
+let fs1 = sl1 - (sl1 % 1.0);
+let pp1 = sl1 % 1.0;
+let h11 = sin(fs1 * 91.17) * 331.73;
+h11 = h11 % 1.0;
+if h11 < 0.0 { h11 = h11 + 1.0; }
+let na1 = h11 * N;
+na1 = na1 - (na1 % 1.0);
+let h21 = sin(fs1 * 47.53) * 217.31;
+h21 = h21 % 1.0;
+if h21 < 0.0 { h21 = h21 + 1.0; }
+let nb1 = h21 * N;
+nb1 = nb1 - (nb1 % 1.0);
+let dq1 = nb1 - na1;
+if dq1 < 0.5 { if dq1 > 0.0 - 0.5 { nb1 = nb1 + 1.0; if nb1 >= N { nb1 = 0.0; } } }
+let sl2 = t * 0.41 + 0.37;
+let fs2 = sl2 - (sl2 % 1.0);
+let pp2 = sl2 % 1.0;
+let h12 = sin(fs2 * 53.29) * 331.73;
+h12 = h12 % 1.0;
+if h12 < 0.0 { h12 = h12 + 1.0; }
+let na2 = h12 * N;
+na2 = na2 - (na2 % 1.0);
+let h22 = sin(fs2 * 77.91) * 217.31;
+h22 = h22 % 1.0;
+if h22 < 0.0 { h22 = h22 + 1.0; }
+let nb2 = h22 * N;
+nb2 = nb2 - (nb2 % 1.0);
+let dq2 = nb2 - na2;
+if dq2 < 0.5 { if dq2 > 0.0 - 0.5 { nb2 = nb2 + 1.0; if nb2 >= N { nb2 = 0.0; } } }
 
-// ---- beings: water-blue cells and ember souls, breathing halos ----
+// ---- beings: water-blue cells and ember souls, breathing halos; a light's
+// ---- arrival makes its target flare ----
 let k = 0.0;
 while k < N {
-  let ka = sin(k * 12.9898) * 437.585;
-  ka = ka % 1.0;
-  if ka < 0.0 { ka = ka + 1.0; }
-  let kr = sin(k * 78.233) * 125.432;
-  kr = kr % 1.0;
-  if kr < 0.0 { kr = kr + 1.0; }
-  let xk = cx + cos(ka * 6.2832) * (0.15 + 0.9 * kr) * S + sin(t * 0.22 + k) * 8.0;
-  let yk = cy + sin(ka * 6.2832) * (0.15 + 0.9 * kr) * S * 0.82 + cos(t * 0.17 + k * 1.7) * 7.0;
+  let abk = sin(k * 12.9898) * 437.585;
+abk = abk % 1.0;
+if abk < 0.0 { abk = abk + 1.0; }
+let rbk = sin(k * 78.233) * 125.432;
+rbk = rbk % 1.0;
+if rbk < 0.0 { rbk = rbk + 1.0; }
+let dbk = (0.05 + 0.75 * rbk) * S;
+if (k % 2.0) > 0.5 { dbk = (0.28 + 0.77 * rbk) * S; }
+let xk = cx + cos(abk * 6.2832) * dbk + sin(k * 1.7 + t * (0.14 + (k % 4.0) * 0.06)) * (7.0 + (k % 3.0) * 4.0);
+let yk = cy + sin(abk * 6.2832) * dbk * 0.82 + cos(k * 2.3 + t * (0.11 + (k % 3.0) * 0.05)) * (6.0 + (k % 3.0) * 3.0);
   let rr = 1.7 + (k % 3.0) * 0.55;
   let fl = 0.0;
-  let dkb = k - nb;
-  if dkb < 0.5 { if dkb > 0.0 - 0.5 { if pp > 0.72 { fl = (pp - 0.72) * 3.5; } } }
+  let e1 = k - nb1;
+  if e1 < 0.5 { if e1 > 0.0 - 0.5 { if pp1 > 0.72 { fl = (pp1 - 0.72) * 3.5; } } }
+  let e2 = k - nb2;
+  if e2 < 0.5 { if e2 > 0.0 - 0.5 { if pp2 > 0.72 { fl = fl + (pp2 - 0.72) * 3.5; } } }
   let sv = k % 5.0;
   if sv > 1.5 {
     if sv < 2.5 {
@@ -123,25 +172,60 @@ while k < N {
   k = k + 1.0;
 }
 
-// the travelling light itself
-let aa = sin(na * 12.9898) * 437.585;
-aa = aa % 1.0;
-if aa < 0.0 { aa = aa + 1.0; }
-let ar = sin(na * 78.233) * 125.432;
-ar = ar % 1.0;
-if ar < 0.0 { ar = ar + 1.0; }
-let xa = cx + cos(aa * 6.2832) * (0.15 + 0.9 * ar) * S + sin(t * 0.22 + na) * 8.0;
-let ya = cy + sin(aa * 6.2832) * (0.15 + 0.9 * ar) * S * 0.82 + cos(t * 0.17 + na * 1.7) * 7.0;
-let ba = sin(nb * 12.9898) * 437.585;
-ba = ba % 1.0;
-if ba < 0.0 { ba = ba + 1.0; }
-let br = sin(nb * 78.233) * 125.432;
-br = br % 1.0;
-if br < 0.0 { br = br + 1.0; }
-let xb = cx + cos(ba * 6.2832) * (0.15 + 0.9 * br) * S + sin(t * 0.22 + nb) * 8.0;
-let yb = cy + sin(ba * 6.2832) * (0.15 + 0.9 * br) * S * 0.82 + cos(t * 0.17 + nb * 1.7) * 7.0;
-hsl(0.56, 0.60, 0.42);
-glow(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 8.0);
-disc(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 1.8);
+// ---- the travelling lights themselves ----
+let apa1 = sin(na1 * 12.9898) * 437.585;
+apa1 = apa1 % 1.0;
+if apa1 < 0.0 { apa1 = apa1 + 1.0; }
+let rpa1 = sin(na1 * 78.233) * 125.432;
+rpa1 = rpa1 % 1.0;
+if rpa1 < 0.0 { rpa1 = rpa1 + 1.0; }
+let dpa1 = (0.05 + 0.75 * rpa1) * S;
+if (na1 % 2.0) > 0.5 { dpa1 = (0.28 + 0.77 * rpa1) * S; }
+let xa1 = cx + cos(apa1 * 6.2832) * dpa1 + sin(na1 * 1.7 + t * (0.14 + (na1 % 4.0) * 0.06)) * (7.0 + (na1 % 3.0) * 4.0);
+let ya1 = cy + sin(apa1 * 6.2832) * dpa1 * 0.82 + cos(na1 * 2.3 + t * (0.11 + (na1 % 3.0) * 0.05)) * (6.0 + (na1 % 3.0) * 3.0);
+let apb1 = sin(nb1 * 12.9898) * 437.585;
+apb1 = apb1 % 1.0;
+if apb1 < 0.0 { apb1 = apb1 + 1.0; }
+let rpb1 = sin(nb1 * 78.233) * 125.432;
+rpb1 = rpb1 % 1.0;
+if rpb1 < 0.0 { rpb1 = rpb1 + 1.0; }
+let dpb1 = (0.05 + 0.75 * rpb1) * S;
+if (nb1 % 2.0) > 0.5 { dpb1 = (0.28 + 0.77 * rpb1) * S; }
+let xb1 = cx + cos(apb1 * 6.2832) * dpb1 + sin(nb1 * 1.7 + t * (0.14 + (nb1 % 4.0) * 0.06)) * (7.0 + (nb1 % 3.0) * 4.0);
+let yb1 = cy + sin(apb1 * 6.2832) * dpb1 * 0.82 + cos(nb1 * 2.3 + t * (0.11 + (nb1 % 3.0) * 0.05)) * (6.0 + (nb1 % 3.0) * 3.0);
+let vx1 = xb1 - xa1;
+let vy1 = yb1 - ya1;
+if (vx1 * vx1 + vy1 * vy1) < D2 * 1.44 {
+  hsl(0.56, 0.60, 0.42);
+  glow(xa1 + vx1 * pp1, ya1 + vy1 * pp1, 8.0);
+  disc(xa1 + vx1 * pp1, ya1 + vy1 * pp1, 1.8);
+}
+let apa2 = sin(na2 * 12.9898) * 437.585;
+apa2 = apa2 % 1.0;
+if apa2 < 0.0 { apa2 = apa2 + 1.0; }
+let rpa2 = sin(na2 * 78.233) * 125.432;
+rpa2 = rpa2 % 1.0;
+if rpa2 < 0.0 { rpa2 = rpa2 + 1.0; }
+let dpa2 = (0.05 + 0.75 * rpa2) * S;
+if (na2 % 2.0) > 0.5 { dpa2 = (0.28 + 0.77 * rpa2) * S; }
+let xa2 = cx + cos(apa2 * 6.2832) * dpa2 + sin(na2 * 1.7 + t * (0.14 + (na2 % 4.0) * 0.06)) * (7.0 + (na2 % 3.0) * 4.0);
+let ya2 = cy + sin(apa2 * 6.2832) * dpa2 * 0.82 + cos(na2 * 2.3 + t * (0.11 + (na2 % 3.0) * 0.05)) * (6.0 + (na2 % 3.0) * 3.0);
+let apb2 = sin(nb2 * 12.9898) * 437.585;
+apb2 = apb2 % 1.0;
+if apb2 < 0.0 { apb2 = apb2 + 1.0; }
+let rpb2 = sin(nb2 * 78.233) * 125.432;
+rpb2 = rpb2 % 1.0;
+if rpb2 < 0.0 { rpb2 = rpb2 + 1.0; }
+let dpb2 = (0.05 + 0.75 * rpb2) * S;
+if (nb2 % 2.0) > 0.5 { dpb2 = (0.28 + 0.77 * rpb2) * S; }
+let xb2 = cx + cos(apb2 * 6.2832) * dpb2 + sin(nb2 * 1.7 + t * (0.14 + (nb2 % 4.0) * 0.06)) * (7.0 + (nb2 % 3.0) * 4.0);
+let yb2 = cy + sin(apb2 * 6.2832) * dpb2 * 0.82 + cos(nb2 * 2.3 + t * (0.11 + (nb2 % 3.0) * 0.05)) * (6.0 + (nb2 % 3.0) * 3.0);
+let vx2 = xb2 - xa2;
+let vy2 = yb2 - ya2;
+if (vx2 * vx2 + vy2 * vy2) < D2 * 1.44 {
+  hsl(0.56, 0.60, 0.42);
+  glow(xa2 + vx2 * pp2, ya2 + vy2 * pp2, 8.0);
+  disc(xa2 + vx2 * pp2, ya2 + vy2 * pp2, 1.8);
+}
 
 0.0
