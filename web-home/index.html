@@ -175,7 +175,10 @@
 </style>
 
 <style>
+  /* pixel-match the beloved reference rendering (an effective 1280 viewport on a 1920 screen) */
+  @media (min-width:1680px){ body{ zoom:1.5; } }
   /* live seed panel (§00) */
+  #seedcv{display:block;width:100%;height:300px;background:transparent;border-bottom:1px solid var(--line)}
   .seedbox{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;max-width:860px;margin:34px 0 0 40px}
   @media (max-width:640px){.seedbox{margin-left:0}}
   .seedbox .fence-head{border-bottom:1px solid var(--line)}
@@ -232,11 +235,12 @@
 
 <section id="s0">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">00</span><h2 class="sec-zh">The sky you're under</h2></div>
+    <div class="sec-head"><span class="sec-num">00</span><h2 class="sec-zh">A sky you can compile</h2></div>
     <div class="sec-en">This page opens with its own proof</div>
-    <p class="lede">Everything moving above — the moon and its halo, the drifting beings, the links that form and break, the gliding light, the snow — is <b>one WASM module</b>, compiled from the tiny script below <b>in your browser, just now</b>, by the wasm-jit compiler (itself Rust compiled to WASM). Its entire world is 10 drawing primitives. Edit it and recompile; or try to break out.</p>
+    <p class="lede">The canvas below runs <b>one WASM module</b>, compiled from the tiny script <b>in your browser, just now</b>, by the wasm-jit compiler (itself Rust compiled to WASM). Its entire world is 10 drawing primitives — it cannot fetch, cannot hold state, cannot read this page. Edit it and recompile; or try to break out.</p>
     <div class="seedbox">
       <div class="fence-head"><span><b>THE SEED</b> · run(t, w, h) — recompiled live; it follows your light/dark theme (two seeds, one geometry)</span><span>examples/homepage-*.dsl</span></div>
+      <canvas id="seedcv" aria-label="live wasm-jit canvas"></canvas>
       <textarea id="seed" spellcheck="false" aria-label="wasm-jit seed source">// arcana.boo homepage sky (light theme) — a wasm-jit `draw` seed, compiled
 // LIVE in your browser by the wasm-jit compiler (itself Rust compiled to WASM).
 // Everything moving on this page is this one module. Its entire world is
@@ -619,6 +623,79 @@ disc(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 1.8);
 </footer>
 
 
+<script>
+(function(){
+  var c=document.getElementById('sky'); if(!c) return;
+  var ctx=c.getContext('2d'), W,H, dpr=Math.min(window.devicePixelRatio||1,2);
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  function theme(){ var t=document.documentElement.getAttribute('data-theme');
+    if(t) return t;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light'; }
+  // Indra's net: cells (blue) + souls (ember) beholding through light; edges
+  // form/break as nodes drift (繫緣 — relations are transient); light pulses
+  // travel edge to edge and flare on arrival (shared-light prediction).
+  var flakes=[], nodes=[], edges=[], pulses=[], tt=0, cx,cy,S,D, moonX,moonY,moonR, lastSpawn=0, spawnGap=0.7;
+  function rnd(a,b){ return a+(b-a)*Math.random(); }
+  function build(){
+    cx=W*(W<720?0.72:0.785); cy=H*0.35; S=Math.min(W,H)*0.27;
+    moonX=W*(W<720?0.80:0.84); moonY=H*0.27; moonR=Math.min(W,H)*0.115; D=S*0.6;
+    var N=Math.max(9,Math.min(18,Math.round(W/120)));
+    nodes=[];
+    for(var i=0;i<N;i++){
+      var ang=rnd(0,6.2832), rad=(i%2?rnd(0.28,1.05):rnd(0.05,0.8))*S;
+      nodes.push({ bx:cx+Math.cos(ang)*rad, by:cy+Math.sin(ang)*rad*0.82,
+        ph:rnd(0,6.28), sp:rnd(0.12,0.34), am:rnd(7,17), ph2:rnd(0,6.28), sp2:rnd(0.08,0.26),
+        r:rnd(1.6,3.1), soul:(i%5===2), flare:0, x:0,y:0 });
+      nodes[i].x=nodes[i].bx; nodes[i].y=nodes[i].by;
+    }
+    pulses=[];
+    var n=Math.round(W*H/34000); flakes=[];
+    for(var k=0;k<n;k++) flakes.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.4+0.4,vy:Math.random()*0.42+0.15,vx:(Math.random()-0.5)*0.2,a:Math.random()*0.4+0.2});
+  }
+  function size(){ var r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height; c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); build(); }
+  function nearPairs(){ edges=[]; for(var i=0;i<nodes.length;i++) for(var j=i+1;j<nodes.length;j++){ var a=nodes[i],b=nodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.sqrt(dx*dx+dy*dy); if(d<D) edges.push({a:i,b:j,w:1-d/D}); } }
+  function spawn(){ if(!edges.length) return; var e=edges[(Math.random()*edges.length)|0]; if(e.w<0.4) return; pulses.push({a:e.a,b:e.b,t:0,sp:rnd(0.012,0.022)}); }
+  function frame(dt){
+    var dark=theme()==='dark'; tt+=dt; ctx.clearRect(0,0,W,H);
+    var moon=dark?'124,198,230':'95,176,212';
+    var mg=ctx.createRadialGradient(moonX,moonY,0,moonX,moonY,moonR*2.6);
+    mg.addColorStop(0,'rgba('+moon+','+(dark?0.5:0.34)+')'); mg.addColorStop(0.28,'rgba('+moon+','+(dark?0.16:0.1)+')'); mg.addColorStop(1,'rgba('+moon+',0)');
+    ctx.fillStyle=mg; ctx.beginPath(); ctx.arc(moonX,moonY,moonR*2.6,0,7); ctx.fill();
+    ctx.fillStyle='rgba('+moon+','+(dark?0.7:0.48)+')'; ctx.beginPath(); ctx.arc(moonX,moonY,moonR*0.45,0,7); ctx.fill();
+    for(var i=0;i<nodes.length;i++){ var nd=nodes[i]; nd.x=nd.bx+Math.cos(nd.ph+tt*nd.sp)*nd.am; nd.y=nd.by+Math.sin(nd.ph2+tt*nd.sp2)*nd.am*0.8; if(nd.flare>0) nd.flare-=dt*1.7; }
+    nearPairs();
+    var blue=dark?'124,198,230':'33,122,158', emb=dark?'210,154,104':'176,111,64';
+    for(var k=0;k<edges.length;k++){ var e=edges[k],a=nodes[e.a],b=nodes[e.b]; ctx.strokeStyle='rgba('+blue+','+(e.w*(dark?0.3:0.26))+')'; ctx.lineWidth=e.w*1.1; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+    if(reduce && !pulses.length && edges.length){ for(var q=0;q<Math.min(3,edges.length);q++){ var eq=edges[(q*5+1)%edges.length]; pulses.push({a:eq.a,b:eq.b,t:0.35+q*0.2,sp:0}); } }
+    if(!reduce && tt-lastSpawn>spawnGap){ spawn(); lastSpawn=tt; spawnGap=rnd(0.5,1.15); }
+    var pc=dark?'190,232,250':'46,130,170';
+    for(var p=pulses.length-1;p>=0;p--){ var pu=pulses[p],pa=nodes[pu.a],pb=nodes[pu.b]; if(!reduce) pu.t+=pu.sp*(dt*60);
+      var x=pa.x+(pb.x-pa.x)*pu.t, y=pa.y+(pb.y-pa.y)*pu.t;
+      var gg=ctx.createRadialGradient(x,y,0,x,y,8); gg.addColorStop(0,'rgba('+pc+',0.55)'); gg.addColorStop(1,'rgba('+pc+',0)'); ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(x,y,8,0,7); ctx.fill();
+      ctx.fillStyle='rgba('+pc+',0.95)'; ctx.beginPath(); ctx.arc(x,y,2,0,7); ctx.fill();
+      if(!reduce && pu.t>=1){ nodes[pu.b].flare=1; pulses.splice(p,1); } }
+    for(var m=0;m<nodes.length;m++){ var q2=nodes[m], col=q2.soul?emb:blue, fl=Math.max(0,q2.flare), rr=q2.r+(q2.soul?0.5:0)+fl*2.2;
+      var ng=ctx.createRadialGradient(q2.x,q2.y,0,q2.x,q2.y,rr*4+fl*10); ng.addColorStop(0,'rgba('+col+','+(0.5+fl*0.4)+')'); ng.addColorStop(1,'rgba('+col+',0)'); ctx.fillStyle=ng; ctx.beginPath(); ctx.arc(q2.x,q2.y,rr*4+fl*10,0,7); ctx.fill();
+      ctx.fillStyle='rgba('+col+','+(dark?0.95:0.88)+')'; ctx.beginPath(); ctx.arc(q2.x,q2.y,rr,0,7); ctx.fill(); }
+    for(var s=0;s<flakes.length;s++){ var f=flakes[s]; ctx.fillStyle='rgba('+(dark?'220,232,244':'120,150,175')+','+f.a+')'; ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,7); ctx.fill();
+      if(!reduce){ f.y+=f.vy; f.x+=f.vx; if(f.y>H+4){f.y=-4;f.x=Math.random()*W;} if(f.x<-4)f.x=W; if(f.x>W+4)f.x=0; } }
+  }
+  var prev=0;
+  function loop(ts){ var dt=Math.min(0.05,(ts-prev)/1000||0.016); prev=ts; frame(dt); if(!reduce) requestAnimationFrame(loop); }
+  size();
+  if(reduce) frame(0.016); else requestAnimationFrame(loop);
+  window.addEventListener('resize',function(){ size(); if(reduce) frame(0.016); });
+  var mo=new MutationObserver(function(){ if(reduce) frame(0.016); });
+  mo.observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+
+  // gentle scroll reveal
+  if(!reduce && 'IntersectionObserver' in window){
+    document.querySelectorAll('section .wrap > *').forEach(function(el){ el.classList.add('reveal'); });
+    var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} }); },{threshold:0.08,rootMargin:'0px 0px -8% 0px'});
+    document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
+  }
+})();
+</script>
 
 <script type="module">
 import init, { compile_draw_wasm } from '/pkg/wasm_jit.js';
@@ -627,11 +704,11 @@ const SEED_DARK = "// arcana.boo homepage sky (dark theme) \u2014 a wasm-jit `dr
 const OK = (b,m)=>`wasm-jit compiled ${b} bytes in ${m} ms — this module's entire world: 10 drawing primitives. fetch() does not exist here.`;
 const ERR = e=>`refused at compile time: ${e}`;
 (async function(){
-  const c=document.getElementById('sky'); if(!c) return;
+  const c=document.getElementById('seedcv'); if(!c) return;
   const ctx=c.getContext('2d');
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   let W=0,H=0; const dpr=Math.min(window.devicePixelRatio||1,2);
-  function size(){ const r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height;
+  function size(){ const r=c.getBoundingClientRect(); W=r.width; H=r.height;
     c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
   function theme(){ const a=document.documentElement.getAttribute('data-theme');
     if(a) return a;
@@ -677,11 +754,6 @@ const ERR = e=>`refused at compile time: ${e}`;
   if($('btn-run')) $('btn-run').onclick=()=>compile();
   if($('btn-violate')) $('btn-violate').onclick=()=>{ edited=true; seedEl.value='// a seed that reaches for the net\nfetch(t);\n0.0'; compile(); };
   if($('btn-restore')) $('btn-restore').onclick=()=>{ edited=false; seedEl.value = curTheme==='dark' ? SEED_DARK : SEED_LIGHT; compile(); };
-  if(!reduce && 'IntersectionObserver' in window){
-    document.querySelectorAll('section .wrap > *').forEach(el=>el.classList.add('reveal'));
-    const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:0.08,rootMargin:'0px 0px -8% 0px'});
-    document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-  }
 })();
 </script>
 </body>

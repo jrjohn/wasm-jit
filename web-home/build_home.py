@@ -18,7 +18,10 @@ STYLE = zh[zh.index("<style>"): zh.index("</style>") + 8]
 
 EXTRA_CSS = """
 <style>
+  /* pixel-match the beloved reference rendering (an effective 1280 viewport on a 1920 screen) */
+  @media (min-width:1680px){ body{ zoom:1.5; } }
   /* live seed panel (§00) */
+  #seedcv{display:block;width:100%;height:300px;background:transparent;border-bottom:1px solid var(--line)}
   .seedbox{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;max-width:860px;margin:34px 0 0 40px}
   @media (max-width:640px){.seedbox{margin-left:0}}
   .seedbox .fence-head{border-bottom:1px solid var(--line)}
@@ -44,12 +47,12 @@ def build(lang):
     body = page[page.index("</style>") + 8: page.index("<script>")]
 
     if lang == "en":
-        sec_title = "The sky you're under"
+        sec_title = "A sky you can compile"
         sec_sub = "This page opens with its own proof"
-        lede = ("Everything moving above — the moon and its halo, the drifting beings, the links that form and break, "
-                "the gliding light, the snow — is <b>one WASM module</b>, compiled from the tiny script below "
+        lede = ("The canvas below runs <b>one WASM module</b>, compiled from the tiny script "
                 "<b>in your browser, just now</b>, by the wasm-jit compiler (itself Rust compiled to WASM). "
-                "Its entire world is 10 drawing primitives. Edit it and recompile; or try to break out.")
+                "Its entire world is 10 drawing primitives — it cannot fetch, cannot hold state, cannot read this page. "
+                "Edit it and recompile; or try to break out.")
         panel_head = '<span><b>THE SEED</b> · run(t, w, h) — recompiled live; it follows your light/dark theme (two seeds, one geometry)</span><span>examples/homepage-*.dsl</span>'
         btn_run, btn_violate, btn_restore = "Recompile ▸", "Try to break out — fetch()", "Restore"
         ok_tpl = "wasm-jit compiled {b} bytes in {m} ms — this module's entire world: 10 drawing primitives. fetch() does not exist here."
@@ -63,11 +66,11 @@ def build(lang):
                       'font-size:12px;color:var(--ink-faint);border:0;letter-spacing:.05em">中文 ↗</a>')
         old_link = re.compile(r'<a href="architecture-anatomy\.html"[^>]*>中文 ↗</a>')
     else:
-        sec_title = "頭頂這片天"
+        sec_title = "一片你能編譯的天"
         sec_sub = "This page opens with its own proof"
-        lede = ("上方所有會動的——月與月暈、漂移的眾生、時斷時續的連線、行走的光、飄雪——是<b>一顆 WASM 模組</b>,"
-                "由下面這段小腳本<b>此刻在你的瀏覽器裡</b>編譯而成(編譯器本身是 Rust 編成的 WASM)。"
-                "它的整個世界只有 10 個繪圖原語。改改看、重編看看;或者,試著越界。")
+        lede = ("下面這塊畫布跑著<b>一顆 WASM 模組</b>——由這段小腳本<b>此刻在你的瀏覽器裡</b>編譯而成"
+                "(編譯器本身是 Rust 編成的 WASM)。它的整個世界只有 10 個繪圖原語——碰不到網路、"
+                "存不了狀態、讀不到這個頁面。改改看、重編看看;或者,試著越界。")
         panel_head = '<span><b>種子</b> · run(t, w, h) — 活編譯;隨你的亮/暗主題切換(兩顆種子,同一套幾何)</span><span>examples/homepage-*.dsl</span>'
         btn_run, btn_violate, btn_restore = "重新編譯 ▸", "試著越界 — fetch()", "還原"
         ok_tpl = "wasm-jit 編譯 {b} bytes,{m} ms — 這顆模組的整個世界:10 個繪圖原語。這裡沒有 fetch()。"
@@ -91,6 +94,7 @@ def build(lang):
     <p class="lede">{lede}</p>
     <div class="seedbox">
       <div class="fence-head">{panel_head}</div>
+      <canvas id="seedcv" aria-label="live wasm-jit canvas"></canvas>
       <textarea id="seed" spellcheck="false" aria-label="wasm-jit seed source">{html.escape(SEED_L)}</textarea>
       <div class="seed-bar">
         <button id="btn-run">{btn_run}</button>
@@ -122,11 +126,11 @@ const SEED_DARK = __SEED_D__;
 const OK = (b,m)=>__OK__;
 const ERR = e=>__ERR__;
 (async function(){
-  const c=document.getElementById('sky'); if(!c) return;
+  const c=document.getElementById('seedcv'); if(!c) return;
   const ctx=c.getContext('2d');
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   let W=0,H=0; const dpr=Math.min(window.devicePixelRatio||1,2);
-  function size(){ const r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height;
+  function size(){ const r=c.getBoundingClientRect(); W=r.width; H=r.height;
     c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
   function theme(){ const a=document.documentElement.getAttribute('data-theme');
     if(a) return a;
@@ -172,11 +176,6 @@ const ERR = e=>__ERR__;
   if($('btn-run')) $('btn-run').onclick=()=>compile();
   if($('btn-violate')) $('btn-violate').onclick=()=>{ edited=true; seedEl.value='// a seed that reaches for the net\\nfetch(t);\\n0.0'; compile(); };
   if($('btn-restore')) $('btn-restore').onclick=()=>{ edited=false; seedEl.value = curTheme==='dark' ? SEED_DARK : SEED_LIGHT; compile(); };
-  if(!reduce && 'IntersectionObserver' in window){
-    document.querySelectorAll('section .wrap > *').forEach(el=>el.classList.add('reveal'));
-    const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:0.08,rootMargin:'0px 0px -8% 0px'});
-    document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
-  }
 })();
 </script>'''
     import json as _json
@@ -186,6 +185,7 @@ const ERR = e=>__ERR__;
                     .replace("__SEED_D__", _json.dumps(SEED_D))
                     .replace("__OK__", ok_js).replace("__ERR__", err_js))
 
+    v1_script = page[page.index("<script>"): page.index("</script>") + 9]
     doc = f'''<!doctype html>
 <html lang="{lang_attr}">
 <head>
@@ -204,6 +204,7 @@ const ERR = e=>__ERR__;
 </head>
 <body>
 {body}
+{v1_script}
 {script}
 </body>
 </html>'''
