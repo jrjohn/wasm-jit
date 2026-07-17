@@ -56,8 +56,37 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
 === surface "draw" ===
 "seed" = one DSL script, signature run(t, w, h) -> f64, called every animation frame.
 - t = seconds (animate with it), w/h = canvas size in px
-- capabilities: sin(x) cos(x) hue(v) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2)
+- capabilities: sin(x) cos(x) hue(v) rgb(r,g,b) hsl(h,s,l) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2) glow(x,y,r)
 - hue(v): v in 0..1 sets the current color; disc = filled circle; ring = outlined circle; arc angles in radians
+- INTERACTION — the drawing can read the pointer:
+  - mx() my() = pointer position in canvas px; both are -1 when the pointer is AWAY
+  - down() = 1.0 while the pointer is pressed, else 0.0
+  - get(slot) set(slot,v) = a 32-slot (0..31) f64 store the HOST owns and keeps
+    across edits — use it to REMEMBER between frames (a smoothed position, a trail
+    of past points, a click counter)
+- ⚠️ HARD RULE: if the ask says cursor / mouse / pointer / follow / track / chase /
+  touch / drag / hover / grab / "move it" / "interactive" / "you can …", the motion
+  MUST be driven by mx()/my()/down() — NOT by t. Do NOT fake it with a t-based orbit
+  or lissajous; that ignores the user. t is only for AMBIENT motion when the pointer
+  is away (mx() < 0). "a dot that follows the cursor" means the dot's position comes
+  from mx()/my(), eased toward it — never from sin(t).
+- pattern — a glowing dot that follows the cursor and trails what it remembers:
+    let x = get(0.0);
+    let y = get(1.0);
+    let tx = mx();
+    let ty = my();
+    if tx < 0.0 { tx = w * 0.5 + sin(t) * w * 0.3; ty = h * 0.5; }   // drift only when away
+    x = x + (tx - x) * 0.15;
+    y = y + (ty - y) * 0.15;
+    set(0.0, x); set(1.0, y);
+    let idx = get(2.0);
+    set(3.0 + idx * 2.0, x); set(4.0 + idx * 2.0, y);               // remember into a ring buffer
+    idx = idx + 1.0; if idx >= 8.0 { idx = 0.0; } set(2.0, idx);
+    let k = 0.0;
+    while k < 8.0 { let px = get(3.0 + k * 2.0); let py = get(4.0 + k * 2.0);
+      hsl(0.56, 0.7, 0.35 + k / 8.0 * 0.25); disc(px, py, 2.0 + k / 8.0 * 6.0); k = k + 1.0; }
+    hsl(0.56, 0.85, 0.7); glow(x, y, 44.0); disc(x, y, 10.0);
+    0.0
 - compose EVERYTHING from these primitives; end with `0.0`
 
 === example 1: single input chain (surface "ui") ===
@@ -150,16 +179,26 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
 "world" may also carry "entities": [{"id":"name","type":"...","at":[x,y],"behavior":"<DSL>"}]
 - type "boat"/"fisherman"/"person"/"car" are drawn by curated host skins. For ANY OTHER thing
   (a lotus, a lantern, a deer, a tent…), invent a "type" name AND give a "skin_seed": a tiny
-  drawing script that renders it. skin_seed = DSL run(px, py, s, t) -> f64 where px,py is the
-  thing's screen center, s is its size in px, t is seconds; capabilities: sin cos + drawing
-  primitives hue(v) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2); end with 0.0.
+  drawing script that renders it. skin_seed = DSL run(px, py, s, t, nx, ny) -> f64 where px,py is
+  the thing's screen center, s is its size in px, t is seconds, and nx,ny (-1..1) point to the
+  nearest other being (so a skin can face/lean toward whoever is near); capabilities: sin cos +
+  drawing primitives hue(v) rgb(r,g,b) hsl(h,s,l) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2)
+  + st(i) — READ the being's published state slot i (§20.2: the soul writes a slot via set(), the
+  skin reads it via st(), so the body SHOWS what the mind intends — 自性 through the faculties
+  produces its manifestation). e.g. a being whose behavior does set(0.0, 1.0) when it boards a boat,
+  and whose skin does `if st(0.0) > 0.5 { …a seated pose… } else { …a standing pose… }`. End with 0.0.
   Example — a lotus flower: "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0"
   Many identical things (5 lotuses) = 5 entities of the same new type sharing one skin_seed.
   Grown skins are remembered: once a "lotus" skin exists, you may later place more by giving
   entities {"type":"lotus"} with NO skin_seed — the host recalls the saved look by name.
 - at: [x,y] grid position; behavior (optional): DSL run(t, ex, ey) -> f64, runs every tick.
   Capabilities: sin cos get set (private slots) + fr(c,x,y) (read the field) + mv(dx,dy)
-  (REQUEST movement — the host clamps speed and bounds; position is host-owned).
+  (REQUEST movement — the host clamps speed and bounds; position is host-owned)
+  + other(i,k) (sense the i-th nearest being: k=0 dist, 1 dx, 2 dy) + rise(dz) (go aloft / descend)
+  + bind(i)/unbind() — §19's paired faculties: bind(i) boards the i-th nearest being IF it is
+  within reach (returns 1.0 if boarded, else 0.0); unbind() leaves. While riding, the being is
+  carried at its carrier's position and its own mv is ignored. e.g. walk to a boat, then board it:
+  "let d = other(0.0, 0.0);\nif d > 2.0 { mv(other(0.0,1.0) * 0.1, other(0.0,2.0) * 0.1); }\nif d <= 2.0 { bind(0.0); }\n0.0"
 - ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
 - OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
@@ -167,6 +206,8 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
 - "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
   every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
+  ("on" is the AUTHORED, initial ride; a being with a mind/behavior can also bind()/unbind() at
+  RUNTIME to board or leave by its own choice — same host law, chosen instead of declared.)
 - "mind":{"persona":"<one line of character>"} gives a being its OWN live mind (a separate
   Claude) that reacts to world events and answers when the user writes "@<id> ...". When a
   scene has a named or human character (a fisherman, a driver, a traveler), give that entity a

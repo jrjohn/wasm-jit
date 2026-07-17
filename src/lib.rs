@@ -39,30 +39,46 @@ pub fn compile_kernel_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     codegen::compile_kernel(&prog).map_err(|e| JsError::new(&e))
 }
 
-/// Free-drawing kernel: `run(t, w, h)`, capabilities = 2D drawing primitives.
-/// No widgets required — the primitive vocabulary is complete for 2D (SVG's
-/// ~10 path commands can express any shape); any shape is just the generated
-/// script composing those primitives.
+/// Free-drawing kernel: `run(t, w, h)`, capabilities = 2D drawing primitives
+/// PLUS the interaction loop (docs §21). No widgets required — the primitive
+/// vocabulary is complete for 2D (SVG's ~10 path commands can express any
+/// shape); any shape is just the generated script composing those primitives.
+///
+/// The interaction faculties turn a drawing into a live app without widening
+/// its reach: `mx`/`my`/`down` read the pointer (the host owns the mouse; the
+/// cell only SEES a position, it can't capture events elsewhere), and
+/// `get`/`set` are a host-owned 32-slot f64 data root the cell attenuates into
+/// — the host keeps it across a hot-patch, so a patched cell remembers what the
+/// interaction accumulated (a trail, a click count). Richness unbounded, reach
+/// fixed: the cell still cannot fetch, read the page, or touch any other state.
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
-    use codegen::HostFn;
-    const PARAMS: [&str; 3] = ["t", "w", "h"];
-    const IMPORTS: [HostFn; 10] = [
-        HostFn { name: "sin", n_args: 1, returns: true },
-        HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "hue", n_args: 1, returns: false },   // set colour by hue (fixed sat/light)
-        HostFn { name: "rgb", n_args: 3, returns: false },   // set colour by r,g,b (0..1 each)
-        HostFn { name: "hsl", n_args: 3, returns: false },   // set colour by hue,sat,light (0..1) — natural tones, shadows
-        HostFn { name: "disc", n_args: 3, returns: false },  // filled circle (x,y,r)
-        HostFn { name: "ring", n_args: 3, returns: false },  // outlined circle (x,y,r)
-        HostFn { name: "arc", n_args: 5, returns: false },   // arc (x,y,r,a0,a1)
-        HostFn { name: "line", n_args: 4, returns: false },  // line (x1,y1,x2,y2)
-        HostFn { name: "glow", n_args: 3, returns: false },  // soft radial halo (x,y,r) in the current colour — vocabulary grown by one word; the fence unmoved
-    ];
-    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
-    codegen::compile_with(&prog, &PARAMS, &IMPORTS).map_err(|e| JsError::new(&e))
+    codegen::compile_with(&parser::parse(src).map_err(|e| JsError::new(&e))?, &DRAW_PARAMS, &DRAW_IMPORTS)
+        .map_err(|e| JsError::new(&e))
 }
+
+/// The draw ABI, shared so the native validator (gen-server) and the browser
+/// compiler mint byte-identical modules. `run(t, w, h)`; imports below.
+pub const DRAW_PARAMS: [&str; 3] = ["t", "w", "h"];
+pub const DRAW_IMPORTS: [codegen::HostFn; 15] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "hue", n_args: 1, returns: false },   // set colour by hue (fixed sat/light)
+    codegen::HostFn { name: "rgb", n_args: 3, returns: false },   // set colour by r,g,b (0..1 each)
+    codegen::HostFn { name: "hsl", n_args: 3, returns: false },   // set colour by hue,sat,light (0..1) — natural tones, shadows
+    codegen::HostFn { name: "disc", n_args: 3, returns: false },  // filled circle (x,y,r)
+    codegen::HostFn { name: "ring", n_args: 3, returns: false },  // outlined circle (x,y,r)
+    codegen::HostFn { name: "arc", n_args: 5, returns: false },   // arc (x,y,r,a0,a1)
+    codegen::HostFn { name: "line", n_args: 4, returns: false },  // line (x1,y1,x2,y2)
+    codegen::HostFn { name: "glow", n_args: 3, returns: false },  // soft radial halo (x,y,r) in the current colour
+    // ── the interaction loop (§21): events in, host-owned state ──
+    codegen::HostFn { name: "mx", n_args: 0, returns: true },     // pointer x in canvas px (-1 when the pointer is away)
+    codegen::HostFn { name: "my", n_args: 0, returns: true },     // pointer y in canvas px (-1 when away)
+    codegen::HostFn { name: "down", n_args: 0, returns: true },   // 1.0 while the pointer is pressed, else 0.0
+    codegen::HostFn { name: "get", n_args: 1, returns: true },    // read the host data root, slot 0..31 (survives a hot-patch)
+    codegen::HostFn { name: "set", n_args: 2, returns: false },   // write the host data root, slot 0..31
+];
 
 /// UI-logic cell for the live-generation demo: `run(x) -> f64`, capabilities
 /// env.{sin, cos, get, set} — get/set is a host-granted 32-slot f64 store so
@@ -116,64 +132,76 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// The entity ABI, shared so the native validator (gen-server) and the browser
+/// compiler agree on the same capability set. `run(t, ex, ey) -> f64`; imports
+/// below. `bind`/`unbind` are §19's paired faculties: ENTER a condition — ride
+/// the i-th nearest being (host clamps reach, forbids ride cycles) — and LEAVE
+/// it. A rider's own mv() is ignored; the carrier carries.
+pub const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
+pub const ENTITY_IMPORTS: [codegen::HostFn; 10] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+    codegen::HostFn { name: "fr", n_args: 3, returns: true },
+    codegen::HostFn { name: "mv", n_args: 2, returns: false },
+    codegen::HostFn { name: "unbind", n_args: 0, returns: false }, // §19: leave the condition
+    codegen::HostFn { name: "bind", n_args: 1, returns: true },    // §19: enter one — ride the i-th nearest being (1.0 if boarded, 0.0 if refused)
+    codegen::HostFn { name: "rise", n_args: 1, returns: false },   // the vertical faculty: request a change in altitude (host clamps)
+    codegen::HostFn { name: "other", n_args: 2, returns: true },   // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
+];
+
 /// Inhabitant (entity) behavior for the Field: `run(t, ex, ey) -> f64`.
-/// Capabilities env.{sin, cos, get, set, fr, mv, unbind} — fr reads the shared
-/// field, mv REQUESTS movement (host clamps speed/bounds; position is
-/// host-owned), unbind() releases the being from whatever it rides (§19: the
-/// freedom to leave a condition, now in the being's own ABI).
+/// Capabilities env.{sin, cos, get, set, fr, mv, unbind, bind, rise, other} — fr
+/// reads the shared field, mv REQUESTS movement (host clamps speed/bounds;
+/// position is host-owned), bind()/unbind() enter and leave a riding condition
+/// (§19: the freedom to become one with a thing, and to leave it).
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
-    use codegen::HostFn;
-    const PARAMS: [&str; 3] = ["t", "ex", "ey"];
-    const IMPORTS: [HostFn; 9] = [
-        HostFn { name: "sin", n_args: 1, returns: true },
-        HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "get", n_args: 1, returns: true },
-        HostFn { name: "set", n_args: 2, returns: false },
-        HostFn { name: "fr", n_args: 3, returns: true },
-        HostFn { name: "mv", n_args: 2, returns: false },
-        HostFn { name: "unbind", n_args: 0, returns: false },
-        HostFn { name: "rise", n_args: 1, returns: false }, // the vertical faculty: request a change in altitude (host clamps)
-        HostFn { name: "other", n_args: 2, returns: true },  // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
-    ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
         &prog,
-        &PARAMS,
-        &IMPORTS,
+        &ENTITY_PARAMS,
+        &ENTITY_IMPORTS,
         codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))
 }
 
-/// Runtime-generated SKIN: `run(px, py, s, t)`, capabilities = the 2D drawing
-/// primitives only (env.{sin, cos, hue, disc, ring, arc, line}). Turns the key
-/// of docs §20.1 — a skin no longer needs raw canvas authority, so a novel
-/// inhabitant's *look* (a lotus, a deer, a tent) can be generated at runtime
-/// and enter through the same drawing-primitive fence as everything else.
-/// px,py = the entity's canvas center; s = canvas px per grid unit; t = seconds.
+/// The skin ABI, shared crate-side so the native validator and browser compiler
+/// agree. `run(px, py, s, t, nx, ny) -> f64`; nx,ny (-1..1) point to the nearest
+/// other being. Capabilities = the 2D drawing primitives PLUS `st(i)` — a
+/// READ-ONLY view of the being's published state (docs §20.2): the soul writes
+/// its slots via set(), the skin reads them via st(), so intent (the mind)
+/// reaches form (the body). The skin still cannot fetch, read the page, touch
+/// any other being, or write anything — richness up, reach fixed.
+pub const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
+pub const SKIN_IMPORTS: [codegen::HostFn; 10] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "hue", n_args: 1, returns: false },
+    codegen::HostFn { name: "rgb", n_args: 3, returns: false }, // colour by r,g,b (0..1)
+    codegen::HostFn { name: "hsl", n_args: 3, returns: false }, // colour by hue,sat,light (0..1) — skin tones, shading
+    codegen::HostFn { name: "disc", n_args: 3, returns: false },
+    codegen::HostFn { name: "ring", n_args: 3, returns: false },
+    codegen::HostFn { name: "arc", n_args: 5, returns: false },
+    codegen::HostFn { name: "line", n_args: 4, returns: false },
+    codegen::HostFn { name: "st", n_args: 1, returns: true },   // read the being's published state slot (soul writes, skin reads)
+];
+
+/// Runtime-generated SKIN: a novel inhabitant's *look* (a lotus, a deer, a tent)
+/// generated at runtime, entering through the same drawing-primitive fence as
+/// everything else (docs §20.1). px,py = the entity's canvas center; s = canvas
+/// px per grid unit; t = seconds. See `SKIN_IMPORTS` for the capability set.
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
-    use codegen::HostFn;
-    const PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"]; // nx,ny (-1..1) = direction to the nearest other being
-    const IMPORTS: [HostFn; 9] = [
-        HostFn { name: "sin", n_args: 1, returns: true },
-        HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "hue", n_args: 1, returns: false },
-        HostFn { name: "rgb", n_args: 3, returns: false }, // colour by r,g,b (0..1)
-        HostFn { name: "hsl", n_args: 3, returns: false }, // colour by hue,sat,light (0..1) — skin tones, shading
-        HostFn { name: "disc", n_args: 3, returns: false },
-        HostFn { name: "ring", n_args: 3, returns: false },
-        HostFn { name: "arc", n_args: 5, returns: false },
-        HostFn { name: "line", n_args: 4, returns: false },
-    ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
         &prog,
-        &PARAMS,
-        &IMPORTS,
+        &SKIN_PARAMS,
+        &SKIN_IMPORTS,
         codegen::CompileOpts { fuel: Some(300_000), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))
@@ -187,7 +215,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
     use audit::Grant;
-    const GRANTS: [Grant; 9] = [
+    const GRANTS: [Grant; 10] = [
         Grant { module: "env", name: "sin" },
         Grant { module: "env", name: "cos" },
         Grant { module: "env", name: "get" },
@@ -195,6 +223,7 @@ pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
         Grant { module: "env", name: "fr" },
         Grant { module: "env", name: "mv" },
         Grant { module: "env", name: "unbind" },
+        Grant { module: "env", name: "bind" },
         Grant { module: "env", name: "rise" },
         Grant { module: "env", name: "other" },
     ];
@@ -223,6 +252,7 @@ pub fn compile_entity_wasm_grants(src: &str, grants: Vec<String>) -> Result<Vec<
     if g("fr") { imports.push(HostFn { name: "fr", n_args: 3, returns: true }); }
     if g("mv") { imports.push(HostFn { name: "mv", n_args: 2, returns: false }); }
     if g("unbind") { imports.push(HostFn { name: "unbind", n_args: 0, returns: false }); }
+    if g("bind") { imports.push(HostFn { name: "bind", n_args: 1, returns: true }); }
     if g("rise") { imports.push(HostFn { name: "rise", n_args: 1, returns: false }); }
     if g("other") { imports.push(HostFn { name: "other", n_args: 2, returns: true }); }
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
@@ -251,6 +281,7 @@ pub fn audit_entity_bytes_grants(bytes: &[u8], grants: Vec<String>) -> Result<()
     if g("fr") { allow.push(Grant { module: "env", name: "fr" }); }
     if g("mv") { allow.push(Grant { module: "env", name: "mv" }); }
     if g("unbind") { allow.push(Grant { module: "env", name: "unbind" }); }
+    if g("bind") { allow.push(Grant { module: "env", name: "bind" }); }
     if g("rise") { allow.push(Grant { module: "env", name: "rise" }); }
     if g("other") { allow.push(Grant { module: "env", name: "other" }); }
     audit::audit(bytes, &allow).map_err(|e| JsError::new(&e))

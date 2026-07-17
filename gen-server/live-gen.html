@@ -138,6 +138,7 @@ function say(cls, text) {
   msgs.appendChild(d);
   msgs.scrollTop = msgs.scrollHeight;
   if (cls !== 'ai') chatLog.push({ cls, text }); // skip the static help bubble
+  return d;
 }
 function restoreChat(log) {
   // keep the first help bubble, drop the rest, replay the saved transcript
@@ -623,6 +624,7 @@ function terrainColor(h, w, v, s = 0) {
 // ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
 let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
 const MAX_STEP = 0.5;    // host law: nobody teleports
+const BIND_REACH = 2.5;  // host law: you can only board what you can reach (§19 bind)
 
 function entityEnv(ent, g) { // one body, one slot store — reflex, packaged soul, and mind all share it
   return {
@@ -636,6 +638,23 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
     },
     mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
     unbind: () => { if (ent.on) { ent.on = null; ent.freed = true; } }, // §19: leave the condition
+    bind: i => { // §19 (the other half): ENTER a condition — ride the i-th nearest being
+      i |= 0;
+      const list = [];
+      for (const o of ENTITIES) { if (o === ent) continue; list.push({ o, d: Math.hypot(o.x - ent.x, o.y - ent.y) }); }
+      list.sort((a, b) => a.d - b.d);
+      const pick = list[i];
+      if (!pick || pick.d > BIND_REACH) return 0;   // no such neighbour, or too far to board (夠近才能登)
+      const target = pick.o;
+      // host law: no ride cycle — the target must not (transitively) ride this being
+      let c = target, hops = 0;
+      while (c && c.on && hops <= ENTITIES.length) {
+        if (c.on === ent.id) return 0;
+        c = ENTITIES.find(e => e.id === c.on); hops++;
+      }
+      ent.on = target.id; ent.offset = [0, 0]; ent.freed = false; // become one with it; the carrier now carries
+      return 1;
+    },
     rise: dz => { ent.alt = Math.min(Math.max((ent.alt ?? 0) + dz, 0), 1); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
     other: (i, k) => { // real-time sense of other beings: (i,0)=dist to i-th nearest, (i,1)=dx, (i,2)=dy
       i |= 0; k |= 0;
@@ -652,7 +671,7 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
 // The grantable, world-touching capabilities (sin/cos are pure math, always
 // available). A being's `grants` is a subset of these; a begotten child's
 // grants must be ⊆ its parent's (docs §21 — monotonically non-increasing).
-const ENTITY_CAPS = ['get', 'set', 'fr', 'mv', 'unbind', 'rise', 'other'];
+const ENTITY_CAPS = ['get', 'set', 'fr', 'mv', 'unbind', 'bind', 'rise', 'other'];
 
 // Recursive begetting (docs §20.1/§21): a being's mind may bring a NEW being
 // into the world — a painter paints a painter — under three host-enforced laws:
@@ -806,6 +825,9 @@ const SKINS = {
 // A GENERATED skin draws through drawing primitives ONLY (docs §20.1) — the
 // same fence as the draw surface, so a novel look grows at runtime with no
 // canvas authority of its own. hue/disc/ring/arc/line write to ctx directly.
+// the being whose skin is drawing right now (rendering is single-threaded, one
+// skin at a time) — so st(i) reads THIS being's published state (自性 → 用)
+let skinSelf = null;
 const skinEnv = {
   sin: Math.sin, cos: Math.cos,
   hue: v => { const c = `hsl(${(((v % 1) + 1) % 1) * 360},62%,60%)`; ctx.strokeStyle = c; ctx.fillStyle = c; },
@@ -815,6 +837,8 @@ const skinEnv = {
   ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+  // §20.2: the body reads what the mind published — read-only view of the being's slots
+  st: i => skinSelf ? (skinSelf.slots[i & 31] ?? 0) : 0,
 };
 
 // Draw an inhabitant: its generated skin if it grew one, else the curated Rust skin.
@@ -824,7 +848,9 @@ function drawSkin(ent, px, py, s, t) {
     let nx = 0, ny = 0, bd = 1e9;
     for (const o of ENTITIES) { if (o === ent) continue; const dx = o.x - ent.x, dy = o.y - ent.y, d = Math.hypot(dx, dy); if (d < bd) { bd = d; if (d > 1e-6) { nx = dx / d; ny = dy / d; } } }
     const lw = ctx.lineWidth; ctx.lineWidth = Math.max(1, s * 0.12);
+    skinSelf = ent; // so st(i) inside the skin reads THIS being's published state
     try { ent.skinRun(px, py, s, t, nx, ny); } catch (e) { /* fuel trap on a skin: skip this frame */ }
+    skinSelf = null;
     ctx.lineWidth = lw;
   } else {
     SKINS[ent.type]?.(ctx, px, py, s, t);
@@ -1153,6 +1179,49 @@ window.__injectBadFieldCell = () => {
 const cv = $('cv'), ctx = cv.getContext('2d');
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
+
+// ---- the interaction loop (§21): events in, host-owned state ----
+// The host owns the mouse and the memory; the cell only SEES a pointer and
+// attenuates into a 32-slot data root. Reach fixed (it still can't fetch, read
+// the page, or capture events elsewhere); richness unbounded.
+const drawPtr = { x: -1, y: -1, down: 0 };  // pointer over the canvas, in device px (-1 = away)
+let drawRoot = new Float64Array(32);        // the host data root: survives a hot-patch, reset only on a fresh drawing
+let drawHintEl = null;                       // the "move your cursor" nudge, shown only for pointer-reading draws
+function drawPtrAt(e) {
+  const r = cv.getBoundingClientRect(); const p = (e.touches && e.touches[0]) || e;
+  if (p.clientX == null) return;
+  drawPtr.x = (p.clientX - r.left) * (cv.width / r.width);
+  drawPtr.y = (p.clientY - r.top) * (cv.height / r.height);
+}
+function fadeDrawHint() { // the nudge has done its job the moment you arrive
+  if (!drawHintEl) return;
+  const el = drawHintEl; drawHintEl = null;
+  el.style.opacity = '0'; setTimeout(() => el.remove(), 500);
+}
+cv.addEventListener('pointermove', drawPtrAt);
+cv.addEventListener('pointerenter', fadeDrawHint);
+cv.addEventListener('pointerdown', e => { drawPtr.down = 1; drawPtrAt(e); });
+window.addEventListener('pointerup', () => { drawPtr.down = 0; });
+cv.addEventListener('pointerleave', () => { drawPtr.x = drawPtr.y = -1; drawPtr.down = 0; });
+const slot = i => (((i | 0) % 32) + 32) % 32;
+// a one-time nudge over the canvas, shown only when the drawing actually reads
+// the pointer (mx/my/down) — never for a self-animating one that ignores you
+function showDrawHint(on) {
+  if (drawHintEl) { drawHintEl.remove(); drawHintEl = null; }
+  if (!on || drawPtr.x >= 0) return; // skip if the cursor is already on the canvas
+  const host = cv.parentNode;
+  if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+  const el = document.createElement('div');
+  el.textContent = '🖱 move your cursor over the canvas';
+  el.style.cssText = 'position:absolute; z-index:5; pointer-events:none; transform:translateX(-50%);' +
+    ' background:#161b22cc; border:1px solid #30363d; color:#adbac7; font-size:.78rem;' +
+    ' padding:.35rem .85rem; border-radius:999px; backdrop-filter:blur(4px);' +
+    ' box-shadow:0 4px 16px #0007; transition:opacity .5s';
+  el.style.left = (cv.offsetLeft + cv.offsetWidth / 2) + 'px';
+  el.style.top = (cv.offsetTop + 14) + 'px';
+  host.appendChild(el); drawHintEl = el;
+}
+
 const env = {
   sin: Math.sin, cos: Math.cos,
   hue: v => { const H = (((v % 1) + 1) % 1) * 360; const c = `hsl(${H},62%,62%)`; ctx.strokeStyle = c; ctx.fillStyle = c; drawA = a => `hsla(${H},62%,62%,${a})`; },
@@ -1163,22 +1232,38 @@ const env = {
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
   glow: (x, y, r) => { r = Math.max(r, 0); if (!r) return; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, drawA(0.55)); g.addColorStop(1, drawA(0)); const keep = ctx.fillStyle; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill(); ctx.fillStyle = keep; },
+  // interaction loop capabilities
+  mx: () => drawPtr.x, my: () => drawPtr.y, down: () => drawPtr.down,
+  get: i => drawRoot[slot(i)],
+  set: (i, v) => { drawRoot[slot(i)] = v; },
 };
-function manifestDraw(seed) {
+// keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
+// interaction it accumulated (a trail, a click count) survives the edit.
+function manifestDraw(seed, keepState) {
   fieldWorld = null;
+  if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
   const t0 = performance.now();
   const bytes = compile_draw_wasm(seed);
   const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
   drawRun = inst.exports.run;
   $('stage').innerHTML = '';
   cv.style.display = 'block';
+  const interactive = /\b(?:mx|my|down)\s*\(/.test(seed); // does this drawing read the pointer?
   $('stage-status').textContent =
-    `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms (7 primitives, no DOM, no net)`;
+    `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms` +
+    (interactive ? ' — 🖱 move your cursor over the canvas: it follows you (state in a host data root)' : '') +
+    (keepState ? ' · patched in place, state kept' : '');
+  showDrawHint(interactive);
   lastManifest = { surface: 'draw', payload: seed };
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = seed;
   document.title = 'live-gen DRAW OK';
 }
+// patch 雛形: hot-swap the running cell with literal DSL, no LLM, state kept
+window.__patchDraw = src => manifestDraw(src, true);
+// the data root is the HOST's: it can read it any time (here, for inspection/e2e)
+window.__drawRoot = () => Array.from(drawRoot);
+window.__manifestDraw = (src, keep) => manifestDraw(src, keep);
 (function loop(now) {
   if (drawRun) {
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -1206,8 +1291,20 @@ function manifestDraw(seed) {
 // ---------------- chat loop ----------------
 let busy = false;
 async function send() {
-  const prompt = $('prompt').value.trim();
+  let prompt = $('prompt').value.trim();
   if (!prompt || busy) return;
+  // a leading ! forces a fresh generation, bypassing the ālaya ledger
+  let fresh = false;
+  if (prompt.startsWith('!') && !prompt.startsWith('!@')) { fresh = true; prompt = prompt.slice(1).trim(); }
+  if (prompt.startsWith('~')) { // patch 雛形: hot-swap the RUNNING draw cell with literal DSL — no LLM, state kept
+    const src = prompt.slice(1).trim();
+    $('prompt').value = '';
+    say('user', prompt);
+    if (!drawRun) { say('err', 'patch applies to a running drawing — generate one first, then ~ to edit it in place'); return; }
+    try { window.__patchDraw(src); say('ai', '⌁ patched the running cell in place (no LLM) — the host data root survived the swap'); }
+    catch (e) { say('err', 'patch refused by the compiler: ' + (e.message ?? e)); }
+    return;
+  }
   if (prompt.startsWith('@')) { // speak TO a being: its own mind answers
     const sp = prompt.indexOf(' ');
     const name = sp < 0 ? prompt.slice(1) : prompt.slice(1, sp);
@@ -1228,27 +1325,93 @@ async function send() {
   busy = true; $('send').disabled = true; $('prompt').disabled = true; $('prompt').value = '';
   say('user', prompt);
   const t0 = performance.now();
+  let phaseLabel = 'reaching the generator';
   const tick = setInterval(() => {
-    $('timer').textContent = `generating… ${((performance.now() - t0) / 1000).toFixed(0)}s (container + Claude)`;
-  }, 250);
+    $('timer').textContent = `${phaseLabel}… ${((performance.now() - t0) / 1000).toFixed(1)}s`;
+  }, 100);
+  // state shared across the stream loop and the blocking fallback
+  let firstDeltaAt = 0, streamEl = null, acc = '', settled = false;
+  const clearStream = () => { if (streamEl) { streamEl.remove(); streamEl = null; } };
+  const applyResult = (d) => {
+    if (d.cached) {
+      // ālaya ledger hit: the cause was stored, the fruit replayed — no LLM.
+      say('ai', `⚡ ${d.surface} — replayed from the ledger in ${d.gen_ms}ms (a stored cause; no LLM). Prefix ! to force a fresh one.`);
+    } else {
+      const ttft = firstDeltaAt ? `, first token ${((firstDeltaAt - t0) / 1000).toFixed(1)}s` : '';
+      say('ai', `${d.surface} seed streamed in ${(d.gen_ms / 1000).toFixed(1)}s${ttft}` +
+        (d.attempts > 1 ? ` (self-repaired ×${d.attempts - 1})` : '') + ` [${d.model}] — manifesting · stored to the ledger`);
+    }
+    if (d.surface === 'ui') manifestUi(d.schema);
+    else if (d.surface === 'field') manifestField(d.world);
+    else manifestDraw(d.seed);
+  };
   try {
-    const r = await fetch('/api/generate', {
+    // #1 生成串流: watch the schema materialize token-by-token instead of
+    // waiting out the full generation. A ledger hit still arrives as one `done`.
+    const r = await fetch('/api/generate/stream', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value }),
+      body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
     });
-    const d = await r.json();
-    if (d.ok) {
-      say('ai', `${d.surface} seed in ${(d.gen_ms / 1000).toFixed(1)}s` +
-        (d.attempts > 1 ? ` (self-repaired ×${d.attempts - 1})` : '') + ` [${d.model}] — manifesting`);
-      if (d.surface === 'ui') manifestUi(d.schema);
-      else if (d.surface === 'field') manifestField(d.world);
-      else manifestDraw(d.seed);
-    } else {
-      say('err', d.error ?? 'generation failed');
+    if (!r.ok || !r.body) throw new Error('stream unavailable (' + r.status + ')');
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    outer: while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf('\n\n')) >= 0) {   // one SSE frame
+        const frame = buf.slice(0, sep); buf = buf.slice(sep + 2);
+        let ev = 'message', data = '';
+        for (const ln of frame.split('\n')) {
+          if (ln.startsWith('event:')) ev = ln.slice(6).trim();
+          else if (ln.startsWith('data:')) data += ln.slice(5).replace(/^ /, '');
+        }
+        if (!data) continue;                        // keep-alive comment frame
+        let d; try { d = JSON.parse(data); } catch (_) { continue; }
+        if (ev === 'ttft') {
+          phaseLabel = `thinking (first byte ${(d.ms / 1000).toFixed(1)}s)`;
+        } else if (ev === 'phase') {
+          phaseLabel = d.phase === 'writing' ? 'writing the schema'
+            : d.phase === 'repairing' ? `self-repairing (try ${d.attempt})`
+            : 'thinking';
+          if (d.phase === 'repairing') { clearStream(); acc = ''; }
+        } else if (ev === 'delta') {
+          if (!firstDeltaAt) firstDeltaAt = performance.now();
+          acc += d.text;
+          if (!streamEl) {
+            streamEl = say('ai', '');
+            streamEl.style.cssText = 'font-family:ui-monospace,SFMono-Regular,monospace;font-size:11px;opacity:.6;white-space:pre-wrap;word-break:break-all;max-height:8.5em;overflow:hidden';
+          }
+          streamEl.textContent = acc.length > 280 ? '…' + acc.slice(-280) : acc;
+          msgs.scrollTop = msgs.scrollHeight;
+        } else if (ev === 'done') {
+          settled = true; clearStream();
+          if (d.ok) applyResult(d); else say('err', d.error ?? 'generation failed');
+          break outer;
+        } else if (ev === 'error') {
+          settled = true; clearStream();
+          say('err', d.error ?? 'generation failed');
+          break outer;
+        }
+      }
     }
+    if (!settled) throw new Error('stream ended without a result');
   } catch (e) {
-    say('err', 'request failed: ' + e);
+    // a stream hiccup must never lose the ask — fall back to the blocking path
+    clearStream();
+    try {
+      const r = await fetch('/api/generate', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
+      });
+      const d = await r.json();
+      if (d.ok) applyResult(d); else say('err', d.error ?? 'generation failed');
+    } catch (e2) {
+      say('err', 'request failed: ' + e2);
+    }
   } finally {
     clearInterval(tick); $('timer').textContent = '';
     busy = false; $('send').disabled = false; $('prompt').disabled = false;

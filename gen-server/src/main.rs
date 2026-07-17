@@ -11,8 +11,10 @@
 //! the demo. Runs on :8646, fully separate from the other demos.
 
 use axum::http::StatusCode;
+use axum::response::sse::Sse;
 use axum::response::IntoResponse;
 use axum::{routing::get, routing::post, Json, Router};
+use tokio_stream::wrappers::ReceiverStream;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::process::Stdio;
@@ -33,18 +35,10 @@ const UI_IMPORTS: [HostFn; 4] = [
     HostFn { name: "get", n_args: 1, returns: true },
     HostFn { name: "set", n_args: 2, returns: false },
 ];
-const DRAW_IMPORTS: [HostFn; 10] = [
-    HostFn { name: "glow", n_args: 3, returns: false }, // soft radial halo (x,y,r) in the current colour
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "hue", n_args: 1, returns: false },
-    HostFn { name: "rgb", n_args: 3, returns: false },
-    HostFn { name: "hsl", n_args: 3, returns: false },
-    HostFn { name: "disc", n_args: 3, returns: false },
-    HostFn { name: "ring", n_args: 3, returns: false },
-    HostFn { name: "arc", n_args: 5, returns: false },
-    HostFn { name: "line", n_args: 4, returns: false },
-];
+// The draw ABI lives in the wasm-jit crate so the native validator here and the
+// browser's compile_draw_wasm mint byte-identical modules — no drift. It now
+// carries the interaction loop (mx/my/down + get/set); see wasm_jit::DRAW_IMPORTS.
+const DRAW_IMPORTS: [HostFn; 15] = wasm_jit::DRAW_IMPORTS;
 const UI_VOCAB: [&str; 11] = [
     "stack", "row", "label", "value", "button", "slider", "input",
     "barchart", "linechart", "piechart", "gauge",
@@ -67,19 +61,10 @@ const FIELD_FUEL: u32 = 2_000_000;
 /// Inhabitant (entity) ABI: run(t, ex, ey) -> f64, once per tick. The soul is
 /// a seed (JSON+DSL, fast loop); the skin is host sprite vocabulary (slow
 /// loop); the bounds are this grant template. `mv(dx,dy)` REQUESTS movement —
-/// position is host-owned state, clamped and bounded by the host.
-const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
-const ENTITY_IMPORTS: [HostFn; 9] = [
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "get", n_args: 1, returns: true },
-    HostFn { name: "set", n_args: 2, returns: false },
-    HostFn { name: "fr", n_args: 3, returns: true },
-    HostFn { name: "mv", n_args: 2, returns: false },
-    HostFn { name: "unbind", n_args: 0, returns: false }, // §19: the freedom to leave a condition
-    HostFn { name: "rise", n_args: 1, returns: false },   // the vertical faculty: aloft/descend (host clamps 0..1)
-    HostFn { name: "other", n_args: 2, returns: true },   // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
-];
+/// position is host-owned state, clamped and bounded by the host. Shared with
+/// the browser compiler via the crate so the two agree (bind/unbind included).
+const ENTITY_PARAMS: [&str; 3] = wasm_jit::ENTITY_PARAMS;
+const ENTITY_IMPORTS: [HostFn; 10] = wasm_jit::ENTITY_IMPORTS;
 const ENTITY_FUEL: u32 = 200_000;
 /// The curated skin registry — types the host draws with hand-tuned Rust skins.
 const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
@@ -87,18 +72,9 @@ const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
 /// Generated-skin ABI (docs §20.1): run(px, py, s, t) with drawing primitives
 /// only — how a novel inhabitant *looks*, grown at runtime, fenced by the same
 /// drawing audit as the draw surface.
-const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
-const SKIN_IMPORTS: [HostFn; 9] = [
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "hue", n_args: 1, returns: false },
-    HostFn { name: "rgb", n_args: 3, returns: false },
-    HostFn { name: "hsl", n_args: 3, returns: false },
-    HostFn { name: "disc", n_args: 3, returns: false },
-    HostFn { name: "ring", n_args: 3, returns: false },
-    HostFn { name: "arc", n_args: 5, returns: false },
-    HostFn { name: "line", n_args: 4, returns: false },
-];
+// Shared with the browser compiler via the crate (st included) so the two agree.
+const SKIN_PARAMS: [&str; 6] = wasm_jit::SKIN_PARAMS;
+const SKIN_IMPORTS: [HostFn; 10] = wasm_jit::SKIN_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -107,6 +83,51 @@ struct GenReq {
     prior: Option<Value>,
     #[serde(default)]
     model: Option<String>,
+    /// force a fresh generation, bypassing (and overwriting) the ledger
+    #[serde(default)]
+    fresh: Option<bool>,
+}
+
+/// The ālaya ledger (§16): store the CAUSE (the ask + the state it acts upon)
+/// and replay the fruit in milliseconds — no LLM, no TTFT. The cause is the ask
+/// AND the prior world it modifies: two identical asks against different priors
+/// are different causes and legitimately yield different fruit. So the key mixes
+/// the normalized ask with a canonical signature of the prior. The live UI always
+/// boots the same DEFAULT_WORLD, so repeating an ask on a fresh canvas replays.
+fn normalize_ask(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+/// Canonical signature of the prior. serde_json carries no `preserve_order`
+/// feature here, so object keys serialize sorted — equal priors sign identically
+/// across requests and restarts. `None` (a from-scratch ask) signs as empty.
+fn prior_sig(prior: Option<&Value>) -> String {
+    match prior {
+        Some(v) => serde_json::to_string(v).unwrap_or_default(),
+        None => String::new(),
+    }
+}
+fn ask_key(norm: &str, psig: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    norm.hash(&mut h);
+    0u8.hash(&mut h); // domain separator so ("ab","c") ≠ ("a","bc")
+    psig.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+async fn ledger_get(key: &str, norm: &str, psig: &str) -> Option<Value> {
+    let txt = tokio::fs::read_to_string(format!("ledger/{key}.json")).await.ok()?;
+    let v: Value = serde_json::from_str(&txt).ok()?;
+    // re-check ask AND prior signature: a hash collision must read as a miss
+    let ask_ok = v.get("ask").and_then(|a| a.as_str()) == Some(norm);
+    let sig_ok = v.get("psig").and_then(|a| a.as_str()).unwrap_or("") == psig;
+    if ask_ok && sig_ok { v.get("result").cloned() } else { None }
+}
+async fn ledger_put(key: &str, norm: &str, psig: &str, result: &Value) {
+    let _ = tokio::fs::create_dir_all("ledger").await;
+    let entry = json!({ "ask": norm, "psig": psig, "result": result });
+    if let Ok(s) = serde_json::to_string_pretty(&entry) {
+        let _ = tokio::fs::write(format!("ledger/{key}.json"), s).await;
+    }
 }
 
 /// The persistent generator container: created once (sleeping), each call is a
@@ -194,6 +215,101 @@ async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Streaming Claude: same warm container, but `--output-format stream-json`
+/// emits the reply token-by-token so the browser watches the schema materialize
+/// instead of staring at a dead ~4s TTFT + full generation. Text deltas are
+/// forwarded to `tx` as they arrive; the full accumulated text is returned for
+/// the same native validate + self-repair the blocking path already runs. Still
+/// the subscription CLI (OAuth token baked into the container) — no API keys.
+async fn claude_stream(
+    prompt: &str,
+    model: &str,
+    attempt: u32,
+    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
+) -> Result<String, String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    if !ensure_container().await {
+        return Err("generator container unavailable".into());
+    }
+    let mut child = tokio::process::Command::new("docker")
+        .args([
+            "exec", GEN_CONTAINER, "claude", "-p", prompt, "--model", model,
+            "--output-format", "stream-json", "--include-partial-messages", "--verbose",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("stream spawn failed: {e}"))?;
+    let stdout = child.stdout.take().ok_or("no stdout on stream child")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let mut full = String::new();
+    let mut writing = false;
+    let mut thinking_sent = false;
+    let deadline = tokio::time::Instant::now() + GEN_TIMEOUT;
+    loop {
+        let next = tokio::time::timeout_at(deadline, lines.next_line()).await;
+        let line = match next {
+            Err(_) => { let _ = child.start_kill(); return Err("generation timed out".into()); }
+            Ok(Ok(Some(l))) => l,
+            Ok(Ok(None)) => break,
+            Ok(Err(e)) => return Err(format!("stream read failed: {e}")),
+        };
+        let v: Value = match serde_json::from_str(&line) { Ok(v) => v, Err(_) => continue };
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("stream_event") => {
+                let ev = &v["event"];
+                match ev.get("type").and_then(|t| t.as_str()) {
+                    Some("message_start") => {
+                        if let Some(ttft) = v.get("ttft_ms").and_then(|n| n.as_u64()) {
+                            send_ev(tx, "ttft", json!({ "ms": ttft })).await;
+                        }
+                    }
+                    Some("content_block_delta") => {
+                        let d = &ev["delta"];
+                        match d.get("type").and_then(|t| t.as_str()) {
+                            Some("text_delta") => {
+                                if !writing {
+                                    send_ev(tx, "phase", json!({ "phase": "writing", "attempt": attempt })).await;
+                                    writing = true;
+                                }
+                                if let Some(t) = d.get("text").and_then(|t| t.as_str()) {
+                                    full.push_str(t);
+                                    send_ev(tx, "delta", json!({ "text": t })).await;
+                                }
+                            }
+                            Some("thinking_delta") if !writing && !thinking_sent => {
+                                thinking_sent = true;
+                                send_ev(tx, "phase", json!({ "phase": "thinking", "attempt": attempt })).await;
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some("result") => {
+                if v.get("is_error").and_then(|b| b.as_bool()) == Some(true) {
+                    let msg = v.get("result").and_then(|r| r.as_str()).unwrap_or("api error");
+                    let _ = child.wait().await;
+                    return Err(format!("claude api error: {}", msg.chars().take(300).collect::<String>()));
+                }
+            }
+            _ => {}
+        }
+    }
+    let status = child.wait().await.map_err(|e| format!("stream wait failed: {e}"))?;
+    if full.is_empty() && !status.success() {
+        let mut errbuf = String::new();
+        if let Some(mut se) = child.stderr.take() {
+            use tokio::io::AsyncReadExt;
+            let _ = se.read_to_string(&mut errbuf).await;
+        }
+        return Err(format!("claude exited {}: {}", status, errbuf.chars().take(300).collect::<String>()));
+    }
+    Ok(full)
 }
 
 /// Pull the JSON object out of the model's reply (tolerates stray prose/fences).
@@ -886,6 +1002,24 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
         .unwrap_or(DEFAULT_MODEL)
         .to_string();
 
+    let t0 = Instant::now();
+    // ── ālaya ledger: a repeat ask replays the stored fruit, no LLM ──────────
+    let norm = normalize_ask(&req.prompt);
+    let psig = prior_sig(req.prior.as_ref());
+    let key = ask_key(&norm, &psig);
+    let cacheable = !norm.is_empty();
+    if cacheable && !req.fresh.unwrap_or(false) {
+        if let Some(result) = ledger_get(&key, &norm, &psig).await {
+            let mut resp = json!({
+                "ok": true, "cached": true, "gen_ms": t0.elapsed().as_millis() as u64, "model": model,
+            });
+            for k in ["surface", "schema", "seed", "world"] {
+                if let Some(v) = result.get(k) { resp[k] = v.clone(); }
+            }
+            return (StatusCode::OK, Json(resp));
+        }
+    }
+
     let mut prompt = String::from(CONTRACT);
     if let Some(prior) = &req.prior {
         prompt.push_str("\n\nCURRENT STATE (the user wants to modify this — return the FULL updated JSON for the same surface):\n");
@@ -893,8 +1027,6 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
     }
     prompt.push_str("\n\nUser request: ");
     prompt.push_str(&req.prompt);
-
-    let t0 = Instant::now();
     let mut last_err = String::new();
     let mut raw = String::new();
     for attempt in 1..=MAX_ATTEMPTS {
@@ -914,6 +1046,7 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
                     Ok(obj) => {
                         let mut resp = json!({
                             "ok": true,
+                            "cached": false,
                             "attempts": attempt,
                             "gen_ms": t0.elapsed().as_millis() as u64,
                             "model": model,
@@ -927,6 +1060,14 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
                         }
                         if let Some(w) = obj.get("world") {
                             resp["world"] = w.clone();
+                        }
+                        // perfume the ledger: store the cause so the next identical ask is instant
+                        if cacheable {
+                            let mut stored = json!({});
+                            for k in ["surface", "schema", "seed", "world"] {
+                                if let Some(v) = obj.get(k) { stored[k] = v.clone(); }
+                            }
+                            ledger_put(&key, &norm, &psig, &stored).await;
                         }
                         return (StatusCode::OK, Json(resp));
                     }
@@ -953,6 +1094,122 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
     )
 }
 
+/// One SSE frame, JSON-bodied. `kind` names the event the browser switches on:
+/// `ttft` (first byte latency) · `phase` (thinking/writing/repairing) · `delta`
+/// (a chunk of the reply as it streams) · `done` (the validated result) ·
+/// `error`. serde escapes newlines, so each frame's data stays single-line.
+async fn send_ev(
+    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
+    kind: &str,
+    data: Value,
+) {
+    let ev = axum::response::sse::Event::default()
+        .event(kind)
+        .json_data(&data)
+        .unwrap_or_else(|_| axum::response::sse::Event::default().event(kind).data("{}"));
+    let _ = tx.send(Ok(ev)).await;
+}
+
+/// Streaming twin of `generate`: same ledger, same prompt, same validate +
+/// self-repair — but the reply streams token-by-token so the browser watches the
+/// schema materialize instead of waiting out the whole generation. A ledger hit
+/// still replays instantly (a single `done` event, no LLM).
+async fn generate_stream(Json(req): Json<GenReq>) -> impl IntoResponse {
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    tokio::spawn(async move { run_generation_stream(req, tx).await });
+    Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+async fn run_generation_stream(
+    req: GenReq,
+    tx: tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
+) {
+    let model = req
+        .model
+        .as_deref()
+        .filter(|m| ALLOWED_MODELS.contains(m))
+        .unwrap_or(DEFAULT_MODEL)
+        .to_string();
+    let t0 = Instant::now();
+    let norm = normalize_ask(&req.prompt);
+    let psig = prior_sig(req.prior.as_ref());
+    let key = ask_key(&norm, &psig);
+    let cacheable = !norm.is_empty();
+    // ── ledger hit: replay instantly, no stream ──────────────────────────────
+    if cacheable && !req.fresh.unwrap_or(false) {
+        if let Some(result) = ledger_get(&key, &norm, &psig).await {
+            let mut done = json!({
+                "ok": true, "cached": true, "gen_ms": t0.elapsed().as_millis() as u64, "model": model,
+            });
+            for k in ["surface", "schema", "seed", "world"] {
+                if let Some(v) = result.get(k) { done[k] = v.clone(); }
+            }
+            send_ev(&tx, "done", done).await;
+            return;
+        }
+    }
+    let mut prompt = String::from(CONTRACT);
+    if let Some(prior) = &req.prior {
+        prompt.push_str("\n\nCURRENT STATE (the user wants to modify this — return the FULL updated JSON for the same surface):\n");
+        prompt.push_str(&prior.to_string());
+    }
+    prompt.push_str("\n\nUser request: ");
+    prompt.push_str(&req.prompt);
+
+    let mut last_err = String::new();
+    let mut raw = String::new();
+    for attempt in 1..=MAX_ATTEMPTS {
+        let p = if attempt == 1 {
+            prompt.clone()
+        } else {
+            send_ev(&tx, "phase", json!({ "phase": "repairing", "attempt": attempt })).await;
+            let trimmed: String = raw.chars().take(4000).collect();
+            format!(
+                "{prompt}\n\nYour previous reply failed validation:\n{last_err}\nPrevious reply:\n{trimmed}\nReturn ONLY the corrected JSON object."
+            )
+        };
+        match claude_stream(&p, &model, attempt, &tx).await {
+            Ok(text) => {
+                raw = text;
+                match extract_json(&raw).and_then(|obj| validate(&obj).map(|_| obj)) {
+                    Ok(obj) => {
+                        let mut done = json!({
+                            "ok": true, "cached": false, "attempts": attempt,
+                            "gen_ms": t0.elapsed().as_millis() as u64, "model": model,
+                        });
+                        done["surface"] = obj["surface"].clone();
+                        for k in ["schema", "seed", "world"] {
+                            if let Some(v) = obj.get(k) { done[k] = v.clone(); }
+                        }
+                        // perfume the ledger so the next identical ask is instant
+                        if cacheable {
+                            let mut stored = json!({});
+                            for k in ["surface", "schema", "seed", "world"] {
+                                if let Some(v) = obj.get(k) { stored[k] = v.clone(); }
+                            }
+                            ledger_put(&key, &norm, &psig, &stored).await;
+                        }
+                        send_ev(&tx, "done", done).await;
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("[gen-stream] attempt {attempt} validation failed: {e}");
+                        last_err = e;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[gen-stream] attempt {attempt} claude failed: {e}");
+                last_err = e;
+            }
+        }
+    }
+    send_ev(&tx, "error", json!({
+        "error": format!("failed after {MAX_ATTEMPTS} attempts: {last_err}"),
+        "gen_ms": t0.elapsed().as_millis() as u64,
+    })).await;
+}
+
 #[tokio::main]
 async fn main() {
     if std::env::var("CLAUDE_CODE_OAUTH_TOKEN").is_err() {
@@ -962,6 +1219,7 @@ async fn main() {
     }
     let app = Router::new()
         .route("/api/generate", post(generate))
+        .route("/api/generate/stream", post(generate_stream))
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/mind", post(mind))
         .route("/api/skins", get(skin_list).post(skin_save))
@@ -988,6 +1246,53 @@ mod tests {
         let raw = "Sure! Here is the UI:\n```json\n{\"surface\":\"draw\",\"seed\":\"0.0\"}\n```\nEnjoy.";
         let v = extract_json(raw).unwrap();
         assert_eq!(v["surface"], "draw");
+    }
+
+    #[test]
+    fn normalize_ask_collapses_whitespace_and_case() {
+        assert_eq!(normalize_ask("  A  Lone   STAR\n"), "a lone star");
+        assert_eq!(normalize_ask("a lone star"), normalize_ask("A LONE STAR"));
+    }
+
+    #[test]
+    fn ledger_key_is_deterministic_for_same_cause() {
+        let prior = json!({"surface":"field","world":{"grid":48}});
+        let a = ask_key("a lone star", &prior_sig(Some(&prior)));
+        let b = ask_key("a lone star", &prior_sig(Some(&prior)));
+        assert_eq!(a, b, "same ask + same prior must key identically across calls/restarts");
+    }
+
+    #[test]
+    fn ledger_key_separates_cause_by_prior() {
+        // the core fix: identical asks against DIFFERENT priors are different
+        // causes and must NOT collide (an ask-only key replayed the wrong fruit)
+        let ask = "now let it rain";
+        let world_a = json!({"world":{"entities":[{"type":"fisherman"}]}});
+        let world_b = json!({"world":{"entities":[{"type":"boat"}]}});
+        let ka = ask_key(ask, &prior_sig(Some(&world_a)));
+        let kb = ask_key(ask, &prior_sig(Some(&world_b)));
+        assert_ne!(ka, kb, "same ask on different worlds must not share a ledger slot");
+        // and a from-scratch ask (no prior) is its own slot, distinct from either
+        let kn = ask_key(ask, &prior_sig(None));
+        assert_ne!(kn, ka);
+        assert_ne!(kn, kb);
+    }
+
+    #[test]
+    fn ledger_key_separates_cause_by_ask() {
+        let prior = json!({"world":{"grid":48}});
+        let a = ask_key("a lone star", &prior_sig(Some(&prior)));
+        let b = ask_key("a lone moon", &prior_sig(Some(&prior)));
+        assert_ne!(a, b, "different asks on the same world must key differently");
+    }
+
+    #[test]
+    fn prior_sig_is_key_order_independent() {
+        // serde_json (no preserve_order) sorts object keys, so semantically-equal
+        // priors sent with different key order sign — and thus key — identically
+        let p1: Value = serde_json::from_str(r#"{"a":1,"b":2}"#).unwrap();
+        let p2: Value = serde_json::from_str(r#"{"b":2,"a":1}"#).unwrap();
+        assert_eq!(prior_sig(Some(&p1)), prior_sig(Some(&p2)));
     }
 
     #[test]
@@ -1149,6 +1454,56 @@ mod tests {
     }
 
     #[test]
+    fn entity_bind_behavior_validates() {
+        // §19 bind/unbind: a being that walks to the nearest thing and boards it
+        // (bind as a statement AND in an expression), then can leave (unbind)
+        let world = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[
+                    {"id":"boat","type":"boat","at":[50,50],"behavior":"mv(0.01,0.0);\n0.0"},
+                    {"id":"he","type":"person","at":[44,50],
+                     "behavior":"let d = other(0.0, 0.0);\nif d > 2.0 { mv(other(0.0,1.0) * 0.1, other(0.0,2.0) * 0.1); }\nif d <= 2.0 { let boarded = bind(0.0);\n if boarded < 0.5 { unbind(); } }\n0.0"}
+                ]}});
+        assert!(validate(&world).is_ok(), "{:?}", validate(&world));
+    }
+
+    #[test]
+    fn entity_abi_has_bind_paired_with_unbind() {
+        // the native validator and the browser compiler must share one entity ABI
+        assert_eq!(ENTITY_IMPORTS.len(), wasm_jit::ENTITY_IMPORTS.len());
+        for (a, b) in ENTITY_IMPORTS.iter().zip(wasm_jit::ENTITY_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        // §19 is complete only if both halves are present
+        assert!(ENTITY_IMPORTS.iter().any(|i| i.name == "bind"), "entity ABI missing bind");
+        assert!(ENTITY_IMPORTS.iter().any(|i| i.name == "unbind"), "entity ABI missing unbind");
+        let bind = ENTITY_IMPORTS.iter().find(|i| i.name == "bind").unwrap();
+        assert!(bind.returns && bind.n_args == 1, "bind(i) must take an index and return a verdict");
+    }
+
+    #[test]
+    fn skin_reads_published_state_validates() {
+        // §20.2: a skin that shows a different pose depending on the being's
+        // published state (st) must compile — intent (mind) reaches form (body)
+        let world = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"rower","type":"waterman","at":[40,40],
+                    "behavior":"if other(0.0,0.0) < 3.0 { set(0.0, 1.0); }\n0.0",
+                    "skin_seed":"let seated = st(0.0);\nhsl(0.08,0.5,0.4);\nif seated > 0.5 { disc(px, py, s * 0.4); }\nif seated <= 0.5 { line(px, py - s, px, py + s); }\n0.0"}]}});
+        assert!(validate(&world).is_ok(), "{:?}", validate(&world));
+    }
+
+    #[test]
+    fn skin_abi_has_st_and_matches_crate() {
+        assert_eq!(SKIN_IMPORTS.len(), wasm_jit::SKIN_IMPORTS.len());
+        for (a, b) in SKIN_IMPORTS.iter().zip(wasm_jit::SKIN_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        let st = SKIN_IMPORTS.iter().find(|i| i.name == "st").expect("skin ABI missing st");
+        assert!(st.returns && st.n_args == 1, "st(i) must read one slot and return a value");
+    }
+
+    #[test]
     fn field_view_enum_validated() {
         let ok = serde_json::json!({
             "surface":"field","world":{"view":"first_person","cells":[{"id":"a","script":"1.0"}]}});
@@ -1180,5 +1535,32 @@ mod tests {
         )
         .unwrap();
         assert!(validate(&obj).is_ok());
+    }
+
+    #[test]
+    fn interactive_draw_seed_validates() {
+        // §21 interaction loop: a draw that reads the pointer (mx/my/down) and
+        // remembers via the host data root (get/set) must compile natively, so
+        // the server never ships a seed the browser's new ABI can't instantiate.
+        let obj: Value = serde_json::from_str(
+            r#"{"surface":"draw","seed":"let px = get(0.0);\npx = px + (mx() - px) * 0.1;\nset(0.0, px);\nlet r = 8.0;\nif down() > 0.5 { r = 16.0; }\ndisc(px, my(), r);\n0.0"}"#,
+        )
+        .unwrap();
+        assert!(validate(&obj).is_ok(), "interactive draw seed should validate");
+    }
+
+    #[test]
+    fn draw_abi_matches_crate() {
+        // the native validator and the browser compiler must share one draw ABI
+        assert_eq!(DRAW_IMPORTS.len(), wasm_jit::DRAW_IMPORTS.len());
+        for (a, b) in DRAW_IMPORTS.iter().zip(wasm_jit::DRAW_IMPORTS.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.n_args, b.n_args);
+            assert_eq!(a.returns, b.returns);
+        }
+        // the interaction faculties are present
+        for f in ["mx", "my", "down", "get", "set"] {
+            assert!(DRAW_IMPORTS.iter().any(|i| i.name == f), "draw ABI missing {f}");
+        }
     }
 }
