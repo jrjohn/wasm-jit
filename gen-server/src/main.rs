@@ -11,8 +11,10 @@
 //! the demo. Runs on :8646, fully separate from the other demos.
 
 use axum::http::StatusCode;
+use axum::response::sse::Sse;
 use axum::response::IntoResponse;
 use axum::{routing::get, routing::post, Json, Router};
+use tokio_stream::wrappers::ReceiverStream;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::process::Stdio;
@@ -239,6 +241,101 @@ async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Streaming Claude: same warm container, but `--output-format stream-json`
+/// emits the reply token-by-token so the browser watches the schema materialize
+/// instead of staring at a dead ~4s TTFT + full generation. Text deltas are
+/// forwarded to `tx` as they arrive; the full accumulated text is returned for
+/// the same native validate + self-repair the blocking path already runs. Still
+/// the subscription CLI (OAuth token baked into the container) — no API keys.
+async fn claude_stream(
+    prompt: &str,
+    model: &str,
+    attempt: u32,
+    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
+) -> Result<String, String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    if !ensure_container().await {
+        return Err("generator container unavailable".into());
+    }
+    let mut child = tokio::process::Command::new("docker")
+        .args([
+            "exec", GEN_CONTAINER, "claude", "-p", prompt, "--model", model,
+            "--output-format", "stream-json", "--include-partial-messages", "--verbose",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("stream spawn failed: {e}"))?;
+    let stdout = child.stdout.take().ok_or("no stdout on stream child")?;
+    let mut lines = BufReader::new(stdout).lines();
+    let mut full = String::new();
+    let mut writing = false;
+    let mut thinking_sent = false;
+    let deadline = tokio::time::Instant::now() + GEN_TIMEOUT;
+    loop {
+        let next = tokio::time::timeout_at(deadline, lines.next_line()).await;
+        let line = match next {
+            Err(_) => { let _ = child.start_kill(); return Err("generation timed out".into()); }
+            Ok(Ok(Some(l))) => l,
+            Ok(Ok(None)) => break,
+            Ok(Err(e)) => return Err(format!("stream read failed: {e}")),
+        };
+        let v: Value = match serde_json::from_str(&line) { Ok(v) => v, Err(_) => continue };
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("stream_event") => {
+                let ev = &v["event"];
+                match ev.get("type").and_then(|t| t.as_str()) {
+                    Some("message_start") => {
+                        if let Some(ttft) = v.get("ttft_ms").and_then(|n| n.as_u64()) {
+                            send_ev(tx, "ttft", json!({ "ms": ttft })).await;
+                        }
+                    }
+                    Some("content_block_delta") => {
+                        let d = &ev["delta"];
+                        match d.get("type").and_then(|t| t.as_str()) {
+                            Some("text_delta") => {
+                                if !writing {
+                                    send_ev(tx, "phase", json!({ "phase": "writing", "attempt": attempt })).await;
+                                    writing = true;
+                                }
+                                if let Some(t) = d.get("text").and_then(|t| t.as_str()) {
+                                    full.push_str(t);
+                                    send_ev(tx, "delta", json!({ "text": t })).await;
+                                }
+                            }
+                            Some("thinking_delta") if !writing && !thinking_sent => {
+                                thinking_sent = true;
+                                send_ev(tx, "phase", json!({ "phase": "thinking", "attempt": attempt })).await;
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some("result") => {
+                if v.get("is_error").and_then(|b| b.as_bool()) == Some(true) {
+                    let msg = v.get("result").and_then(|r| r.as_str()).unwrap_or("api error");
+                    let _ = child.wait().await;
+                    return Err(format!("claude api error: {}", msg.chars().take(300).collect::<String>()));
+                }
+            }
+            _ => {}
+        }
+    }
+    let status = child.wait().await.map_err(|e| format!("stream wait failed: {e}"))?;
+    if full.is_empty() && !status.success() {
+        let mut errbuf = String::new();
+        if let Some(mut se) = child.stderr.take() {
+            use tokio::io::AsyncReadExt;
+            let _ = se.read_to_string(&mut errbuf).await;
+        }
+        return Err(format!("claude exited {}: {}", status, errbuf.chars().take(300).collect::<String>()));
+    }
+    Ok(full)
 }
 
 /// Pull the JSON object out of the model's reply (tolerates stray prose/fences).
@@ -1023,6 +1120,122 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
     )
 }
 
+/// One SSE frame, JSON-bodied. `kind` names the event the browser switches on:
+/// `ttft` (first byte latency) · `phase` (thinking/writing/repairing) · `delta`
+/// (a chunk of the reply as it streams) · `done` (the validated result) ·
+/// `error`. serde escapes newlines, so each frame's data stays single-line.
+async fn send_ev(
+    tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
+    kind: &str,
+    data: Value,
+) {
+    let ev = axum::response::sse::Event::default()
+        .event(kind)
+        .json_data(&data)
+        .unwrap_or_else(|_| axum::response::sse::Event::default().event(kind).data("{}"));
+    let _ = tx.send(Ok(ev)).await;
+}
+
+/// Streaming twin of `generate`: same ledger, same prompt, same validate +
+/// self-repair — but the reply streams token-by-token so the browser watches the
+/// schema materialize instead of waiting out the whole generation. A ledger hit
+/// still replays instantly (a single `done` event, no LLM).
+async fn generate_stream(Json(req): Json<GenReq>) -> impl IntoResponse {
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    tokio::spawn(async move { run_generation_stream(req, tx).await });
+    Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default())
+}
+
+async fn run_generation_stream(
+    req: GenReq,
+    tx: tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
+) {
+    let model = req
+        .model
+        .as_deref()
+        .filter(|m| ALLOWED_MODELS.contains(m))
+        .unwrap_or(DEFAULT_MODEL)
+        .to_string();
+    let t0 = Instant::now();
+    let norm = normalize_ask(&req.prompt);
+    let psig = prior_sig(req.prior.as_ref());
+    let key = ask_key(&norm, &psig);
+    let cacheable = !norm.is_empty();
+    // ── ledger hit: replay instantly, no stream ──────────────────────────────
+    if cacheable && !req.fresh.unwrap_or(false) {
+        if let Some(result) = ledger_get(&key, &norm, &psig).await {
+            let mut done = json!({
+                "ok": true, "cached": true, "gen_ms": t0.elapsed().as_millis() as u64, "model": model,
+            });
+            for k in ["surface", "schema", "seed", "world"] {
+                if let Some(v) = result.get(k) { done[k] = v.clone(); }
+            }
+            send_ev(&tx, "done", done).await;
+            return;
+        }
+    }
+    let mut prompt = String::from(CONTRACT);
+    if let Some(prior) = &req.prior {
+        prompt.push_str("\n\nCURRENT STATE (the user wants to modify this — return the FULL updated JSON for the same surface):\n");
+        prompt.push_str(&prior.to_string());
+    }
+    prompt.push_str("\n\nUser request: ");
+    prompt.push_str(&req.prompt);
+
+    let mut last_err = String::new();
+    let mut raw = String::new();
+    for attempt in 1..=MAX_ATTEMPTS {
+        let p = if attempt == 1 {
+            prompt.clone()
+        } else {
+            send_ev(&tx, "phase", json!({ "phase": "repairing", "attempt": attempt })).await;
+            let trimmed: String = raw.chars().take(4000).collect();
+            format!(
+                "{prompt}\n\nYour previous reply failed validation:\n{last_err}\nPrevious reply:\n{trimmed}\nReturn ONLY the corrected JSON object."
+            )
+        };
+        match claude_stream(&p, &model, attempt, &tx).await {
+            Ok(text) => {
+                raw = text;
+                match extract_json(&raw).and_then(|obj| validate(&obj).map(|_| obj)) {
+                    Ok(obj) => {
+                        let mut done = json!({
+                            "ok": true, "cached": false, "attempts": attempt,
+                            "gen_ms": t0.elapsed().as_millis() as u64, "model": model,
+                        });
+                        done["surface"] = obj["surface"].clone();
+                        for k in ["schema", "seed", "world"] {
+                            if let Some(v) = obj.get(k) { done[k] = v.clone(); }
+                        }
+                        // perfume the ledger so the next identical ask is instant
+                        if cacheable {
+                            let mut stored = json!({});
+                            for k in ["surface", "schema", "seed", "world"] {
+                                if let Some(v) = obj.get(k) { stored[k] = v.clone(); }
+                            }
+                            ledger_put(&key, &norm, &psig, &stored).await;
+                        }
+                        send_ev(&tx, "done", done).await;
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("[gen-stream] attempt {attempt} validation failed: {e}");
+                        last_err = e;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("[gen-stream] attempt {attempt} claude failed: {e}");
+                last_err = e;
+            }
+        }
+    }
+    send_ev(&tx, "error", json!({
+        "error": format!("failed after {MAX_ATTEMPTS} attempts: {last_err}"),
+        "gen_ms": t0.elapsed().as_millis() as u64,
+    })).await;
+}
+
 #[tokio::main]
 async fn main() {
     if std::env::var("CLAUDE_CODE_OAUTH_TOKEN").is_err() {
@@ -1032,6 +1245,7 @@ async fn main() {
     }
     let app = Router::new()
         .route("/api/generate", post(generate))
+        .route("/api/generate/stream", post(generate_stream))
         .route("/api/health", get(|| async { "ok" }))
         .route("/api/mind", post(mind))
         .route("/api/skins", get(skin_list).post(skin_save))
