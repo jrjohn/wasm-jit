@@ -177,7 +177,6 @@
       <span class="tag">seed DSL → <b>wasm-encoder</b> → WebAssembly</span>
       <span class="tag">~117 bytes · <b>1–3ms</b> compile · 0.03ms/frame</span>
       <span class="tag">capability fence · <b>fetch() rejected</b></span>
-      <span class="tag">↗ the net, top-right = a <b>1,529 B</b> WASM module wasm-jit compiled · 9 primitives · no network</span>
     </div>
 
     <div class="fence">
@@ -423,39 +422,52 @@
   function theme(){ var t=document.documentElement.getAttribute('data-theme');
     if(t) return t;
     return (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light'; }
-  // The Indra's net below is a REAL wasm-jit `draw` cell — wasm-jit compiled it
-  // from a tiny seed (examples/indranet.dsl) and audited it: imports ⊆ the 9
-  // drawing primitives, so it CANNOT fetch and CANNOT hold state. The moon glow
-  // and snow are host ambient; the net is generated, sandboxed content — the very
-  // split this page is about (a fixed trusted host + manifested cells).
-  var NET_B64="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";
-  function b64b(s){ var b=atob(s),a=new Uint8Array(b.length); for(var i=0;i<b.length;i++) a[i]=b.charCodeAt(i); return a; }
-  function col(x){ ctx.fillStyle=x; ctx.strokeStyle=x; }
-  var netEnv={ sin:Math.sin, cos:Math.cos,
-    hue:function(v){ col('hsl('+((((v%1)+1)%1)*360)+',62%,60%)'); },
-    rgb:function(r,g,b){ col('rgb('+(r*255|0)+','+(g*255|0)+','+(b*255|0)+')'); },
-    hsl:function(h,s,l){ col('hsl('+((((h%1)+1)%1)*360)+','+(s*100)+'%,'+(l*100)+'%)'); },
-    disc:function(x,y,r){ ctx.beginPath(); ctx.arc(x,y,Math.max(r,0),0,6.2832); ctx.fill(); },
-    ring:function(x,y,r){ ctx.beginPath(); ctx.arc(x,y,Math.max(r,0),0,6.2832); ctx.stroke(); },
-    arc:function(x,y,r,a0,a1){ ctx.beginPath(); ctx.arc(x,y,Math.max(r,0),a0,a1); ctx.stroke(); },
-    line:function(x1,y1,x2,y2){ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); } };
-  var netRun=null; try{ netRun=new WebAssembly.Instance(new WebAssembly.Module(b64b(NET_B64)),{env:netEnv}).exports.run; }catch(e){}
-
-  var flakes=[], tt=0, moonX, moonY, moonR;
-  function size(){ var r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height; c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
-    moonX=W*(W<720?0.82:0.9); moonY=H*0.15; moonR=Math.min(W,H)*0.1;
-    var n=Math.round(W*H/34000); flakes=[]; for(var i=0;i<n;i++) flakes.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.4+0.4,vy:Math.random()*0.42+0.15,vx:(Math.random()-0.5)*0.2,a:Math.random()*0.4+0.2}); }
+  // Indra's net: cells (blue) + souls (ember) beholding through light; edges
+  // form/break as nodes drift (繫緣 — relations are transient); light pulses
+  // travel edge to edge and flare on arrival (shared-light prediction).
+  var flakes=[], nodes=[], edges=[], pulses=[], tt=0, cx,cy,S,D, moonX,moonY,moonR, lastSpawn=0, spawnGap=0.7;
+  function rnd(a,b){ return a+(b-a)*Math.random(); }
+  function build(){
+    cx=W*(W<720?0.72:0.785); cy=H*0.35; S=Math.min(W,H)*0.27;
+    moonX=W*(W<720?0.80:0.84); moonY=H*0.27; moonR=Math.min(W,H)*0.115; D=S*0.6;
+    var N=Math.max(9,Math.min(18,Math.round(W/120)));
+    nodes=[];
+    for(var i=0;i<N;i++){
+      var ang=rnd(0,6.2832), rad=(i%2?rnd(0.28,1.05):rnd(0.05,0.8))*S;
+      nodes.push({ bx:cx+Math.cos(ang)*rad, by:cy+Math.sin(ang)*rad*0.82,
+        ph:rnd(0,6.28), sp:rnd(0.12,0.34), am:rnd(7,17), ph2:rnd(0,6.28), sp2:rnd(0.08,0.26),
+        r:rnd(1.6,3.1), soul:(i%5===2), flare:0, x:0,y:0 });
+      nodes[i].x=nodes[i].bx; nodes[i].y=nodes[i].by;
+    }
+    pulses=[];
+    var n=Math.round(W*H/34000); flakes=[];
+    for(var k=0;k<n;k++) flakes.push({x:Math.random()*W,y:Math.random()*H,r:Math.random()*1.4+0.4,vy:Math.random()*0.42+0.15,vx:(Math.random()-0.5)*0.2,a:Math.random()*0.4+0.2});
+  }
+  function size(){ var r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height; c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); build(); }
+  function nearPairs(){ edges=[]; for(var i=0;i<nodes.length;i++) for(var j=i+1;j<nodes.length;j++){ var a=nodes[i],b=nodes[j],dx=a.x-b.x,dy=a.y-b.y,d=Math.sqrt(dx*dx+dy*dy); if(d<D) edges.push({a:i,b:j,w:1-d/D}); } }
+  function spawn(){ if(!edges.length) return; var e=edges[(Math.random()*edges.length)|0]; if(e.w<0.4) return; pulses.push({a:e.a,b:e.b,t:0,sp:rnd(0.012,0.022)}); }
   function frame(dt){
     var dark=theme()==='dark'; tt+=dt; ctx.clearRect(0,0,W,H);
-    // moon luminary — host ambient
     var moon=dark?'124,198,230':'95,176,212';
     var mg=ctx.createRadialGradient(moonX,moonY,0,moonX,moonY,moonR*2.6);
-    mg.addColorStop(0,'rgba('+moon+','+(dark?0.5:0.34)+')'); mg.addColorStop(0.3,'rgba('+moon+','+(dark?0.14:0.09)+')'); mg.addColorStop(1,'rgba('+moon+',0)');
+    mg.addColorStop(0,'rgba('+moon+','+(dark?0.5:0.34)+')'); mg.addColorStop(0.28,'rgba('+moon+','+(dark?0.16:0.1)+')'); mg.addColorStop(1,'rgba('+moon+',0)');
     ctx.fillStyle=mg; ctx.beginPath(); ctx.arc(moonX,moonY,moonR*2.6,0,7); ctx.fill();
-    ctx.fillStyle='rgba('+moon+','+(dark?0.62:0.42)+')'; ctx.beginPath(); ctx.arc(moonX,moonY,moonR*0.42,0,7); ctx.fill();
-    // the net — a real wasm-jit cell drawing itself, sandboxed to 9 primitives
-    if(netRun){ ctx.save(); ctx.lineWidth=1.3; ctx.lineCap='round'; try{ netRun(tt,W,H); }catch(e){} ctx.restore(); }
-    // snow — host ambient
+    ctx.fillStyle='rgba('+moon+','+(dark?0.7:0.48)+')'; ctx.beginPath(); ctx.arc(moonX,moonY,moonR*0.45,0,7); ctx.fill();
+    for(var i=0;i<nodes.length;i++){ var nd=nodes[i]; nd.x=nd.bx+Math.cos(nd.ph+tt*nd.sp)*nd.am; nd.y=nd.by+Math.sin(nd.ph2+tt*nd.sp2)*nd.am*0.8; if(nd.flare>0) nd.flare-=dt*1.7; }
+    nearPairs();
+    var blue=dark?'124,198,230':'33,122,158', emb=dark?'210,154,104':'176,111,64';
+    for(var k=0;k<edges.length;k++){ var e=edges[k],a=nodes[e.a],b=nodes[e.b]; ctx.strokeStyle='rgba('+blue+','+(e.w*(dark?0.3:0.26))+')'; ctx.lineWidth=e.w*1.1; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+    if(reduce && !pulses.length && edges.length){ for(var q=0;q<Math.min(3,edges.length);q++){ var eq=edges[(q*5+1)%edges.length]; pulses.push({a:eq.a,b:eq.b,t:0.35+q*0.2,sp:0}); } }
+    if(!reduce && tt-lastSpawn>spawnGap){ spawn(); lastSpawn=tt; spawnGap=rnd(0.5,1.15); }
+    var pc=dark?'190,232,250':'46,130,170';
+    for(var p=pulses.length-1;p>=0;p--){ var pu=pulses[p],pa=nodes[pu.a],pb=nodes[pu.b]; if(!reduce) pu.t+=pu.sp*(dt*60);
+      var x=pa.x+(pb.x-pa.x)*pu.t, y=pa.y+(pb.y-pa.y)*pu.t;
+      var gg=ctx.createRadialGradient(x,y,0,x,y,8); gg.addColorStop(0,'rgba('+pc+',0.55)'); gg.addColorStop(1,'rgba('+pc+',0)'); ctx.fillStyle=gg; ctx.beginPath(); ctx.arc(x,y,8,0,7); ctx.fill();
+      ctx.fillStyle='rgba('+pc+',0.95)'; ctx.beginPath(); ctx.arc(x,y,2,0,7); ctx.fill();
+      if(!reduce && pu.t>=1){ nodes[pu.b].flare=1; pulses.splice(p,1); } }
+    for(var m=0;m<nodes.length;m++){ var q2=nodes[m], col=q2.soul?emb:blue, fl=Math.max(0,q2.flare), rr=q2.r+(q2.soul?0.5:0)+fl*2.2;
+      var ng=ctx.createRadialGradient(q2.x,q2.y,0,q2.x,q2.y,rr*4+fl*10); ng.addColorStop(0,'rgba('+col+','+(0.5+fl*0.4)+')'); ng.addColorStop(1,'rgba('+col+',0)'); ctx.fillStyle=ng; ctx.beginPath(); ctx.arc(q2.x,q2.y,rr*4+fl*10,0,7); ctx.fill();
+      ctx.fillStyle='rgba('+col+','+(dark?0.95:0.88)+')'; ctx.beginPath(); ctx.arc(q2.x,q2.y,rr,0,7); ctx.fill(); }
     for(var s=0;s<flakes.length;s++){ var f=flakes[s]; ctx.fillStyle='rgba('+(dark?'220,232,244':'120,150,175')+','+f.a+')'; ctx.beginPath(); ctx.arc(f.x,f.y,f.r,0,7); ctx.fill();
       if(!reduce){ f.y+=f.vy; f.x+=f.vx; if(f.y>H+4){f.y=-4;f.x=Math.random()*W;} if(f.x<-4)f.x=W; if(f.x>W+4)f.x=0; } }
   }
