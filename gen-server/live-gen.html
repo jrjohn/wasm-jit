@@ -1161,17 +1161,41 @@ let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for 
 // the page, or capture events elsewhere); richness unbounded.
 const drawPtr = { x: -1, y: -1, down: 0 };  // pointer over the canvas, in device px (-1 = away)
 let drawRoot = new Float64Array(32);        // the host data root: survives a hot-patch, reset only on a fresh drawing
+let drawHintEl = null;                       // the "move your cursor" nudge, shown only for pointer-reading draws
 function drawPtrAt(e) {
   const r = cv.getBoundingClientRect(); const p = (e.touches && e.touches[0]) || e;
   if (p.clientX == null) return;
   drawPtr.x = (p.clientX - r.left) * (cv.width / r.width);
   drawPtr.y = (p.clientY - r.top) * (cv.height / r.height);
 }
+function fadeDrawHint() { // the nudge has done its job the moment you arrive
+  if (!drawHintEl) return;
+  const el = drawHintEl; drawHintEl = null;
+  el.style.opacity = '0'; setTimeout(() => el.remove(), 500);
+}
 cv.addEventListener('pointermove', drawPtrAt);
+cv.addEventListener('pointerenter', fadeDrawHint);
 cv.addEventListener('pointerdown', e => { drawPtr.down = 1; drawPtrAt(e); });
 window.addEventListener('pointerup', () => { drawPtr.down = 0; });
 cv.addEventListener('pointerleave', () => { drawPtr.x = drawPtr.y = -1; drawPtr.down = 0; });
 const slot = i => (((i | 0) % 32) + 32) % 32;
+// a one-time nudge over the canvas, shown only when the drawing actually reads
+// the pointer (mx/my/down) — never for a self-animating one that ignores you
+function showDrawHint(on) {
+  if (drawHintEl) { drawHintEl.remove(); drawHintEl = null; }
+  if (!on || drawPtr.x >= 0) return; // skip if the cursor is already on the canvas
+  const host = cv.parentNode;
+  if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+  const el = document.createElement('div');
+  el.textContent = '🖱 move your cursor over the canvas';
+  el.style.cssText = 'position:absolute; z-index:5; pointer-events:none; transform:translateX(-50%);' +
+    ' background:#161b22cc; border:1px solid #30363d; color:#adbac7; font-size:.78rem;' +
+    ' padding:.35rem .85rem; border-radius:999px; backdrop-filter:blur(4px);' +
+    ' box-shadow:0 4px 16px #0007; transition:opacity .5s';
+  el.style.left = (cv.offsetLeft + cv.offsetWidth / 2) + 'px';
+  el.style.top = (cv.offsetTop + 14) + 'px';
+  host.appendChild(el); drawHintEl = el;
+}
 
 const env = {
   sin: Math.sin, cos: Math.cos,
@@ -1199,9 +1223,12 @@ function manifestDraw(seed, keepState) {
   drawRun = inst.exports.run;
   $('stage').innerHTML = '';
   cv.style.display = 'block';
+  const interactive = /\b(?:mx|my|down)\s*\(/.test(seed); // does this drawing read the pointer?
   $('stage-status').textContent =
     `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms` +
-    ` — touch it: the pointer flows in, state lives in a host data root${keepState ? ' (kept across this patch)' : ''}`;
+    (interactive ? ' — 🖱 move your cursor over the canvas: it follows you (state in a host data root)' : '') +
+    (keepState ? ' · patched in place, state kept' : '');
+  showDrawHint(interactive);
   lastManifest = { surface: 'draw', payload: seed };
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = seed;
