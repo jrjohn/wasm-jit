@@ -48,7 +48,7 @@ pub fn compile_kernel_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     use codegen::HostFn;
     const PARAMS: [&str; 3] = ["t", "w", "h"];
-    const IMPORTS: [HostFn; 9] = [
+    const IMPORTS: [HostFn; 10] = [
         HostFn { name: "sin", n_args: 1, returns: true },
         HostFn { name: "cos", n_args: 1, returns: true },
         HostFn { name: "hue", n_args: 1, returns: false },   // set colour by hue (fixed sat/light)
@@ -58,6 +58,7 @@ pub fn compile_draw_wasm(src: &str) -> Result<Vec<u8>, JsError> {
         HostFn { name: "ring", n_args: 3, returns: false },  // outlined circle (x,y,r)
         HostFn { name: "arc", n_args: 5, returns: false },   // arc (x,y,r,a0,a1)
         HostFn { name: "line", n_args: 4, returns: false },  // line (x1,y1,x2,y2)
+        HostFn { name: "glow", n_args: 3, returns: false },  // soft radial halo (x,y,r) in the current colour — vocabulary grown by one word; the fence unmoved
     ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with(&prog, &PARAMS, &IMPORTS).map_err(|e| JsError::new(&e))

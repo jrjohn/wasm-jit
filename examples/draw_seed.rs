@@ -43,6 +43,7 @@ fn main() {
         HostFn { name: "ring", n_args: 3, returns: false },
         HostFn { name: "arc", n_args: 5, returns: false },
         HostFn { name: "line", n_args: 4, returns: false },
+        HostFn { name: "glow", n_args: 3, returns: false },
     ];
 
     let prog = match parser::parse(&src) {
@@ -55,10 +56,10 @@ fn main() {
     };
 
     // The sandbox proof: every import ⊆ the 9 drawing primitives (no fetch, no state).
-    let grants: Vec<Grant> = ["sin", "cos", "hue", "rgb", "hsl", "disc", "ring", "arc", "line"]
+    let grants: Vec<Grant> = ["sin", "cos", "hue", "rgb", "hsl", "disc", "ring", "arc", "line", "glow"]
         .iter().map(|n| Grant { module: "env", name: n }).collect();
     match audit::audit(&bytes, &grants) {
-        Ok(()) => eprintln!("compiled {} bytes; audit ✓ imports ⊆ {{9 primitives}} — cannot fetch, cannot touch state", bytes.len()),
+        Ok(()) => eprintln!("compiled {} bytes; audit ✓ imports ⊆ {{10 primitives}} — cannot fetch, cannot touch state", bytes.len()),
         Err(e) => { eprintln!("AUDIT FAILED: {e}"); std::process::exit(1); }
     }
     println!("{}", b64(&bytes));

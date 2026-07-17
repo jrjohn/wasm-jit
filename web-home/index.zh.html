@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wasm-jit — 沒有固定畫面的軟體</title>
+<meta name="description" content="描述它,介面就顯化——而生成的程式碼只碰得到你允許的。這頁的夜空,是一顆 2KB 的 WASM 模組,由 wasm-jit 在你的瀏覽器裡當場編譯。">
+<meta property="og:title" content="wasm-jit — 沒有固定畫面的軟體">
+<meta property="og:description" content="描述它,介面就顯化——而生成的程式碼只碰得到你允許的。這頁的夜空,是一顆 2KB 的 WASM 模組,由 wasm-jit 在你的瀏覽器裡當場編譯。">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://arcana.boo/">
+<meta property="og:image" content="https://arcana.boo/home-assets/world-moon3-spring.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg:#eceff3; --surface:#f7f9fb; --surface-2:#e5eaef; --sunk:#e9edf1;
+    --ink:#18222f; --ink-soft:#47556a; --ink-faint:#8492a4; --line:#d3dbe4;
+    --accent:#217a9e; --accent-bright:#3fa3c7; --moon:#5fb0d4;
+    --ember:#b06f40; --pass:#37855e; --reject:#b3524f;
+    --shadow:0 1px 2px rgba(20,32,48,.05),0 8px 30px rgba(20,32,48,.07);
+    --font-display:"Iowan Old Style","Palatino Linotype",Palatino,"Songti TC","Noto Serif TC",Georgia,serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Segoe UI",ui-sans-serif,system-ui,sans-serif;
+    --font-mono:"SF Mono","JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b111a; --surface:#111a26; --surface-2:#0e1621; --sunk:#0a0f17;
+      --ink:#dde6f0; --ink-soft:#9db0c4; --ink-faint:#63748a; --line:#213042;
+      --accent:#5fb0d4; --accent-bright:#82caea; --moon:#7cc6e6;
+      --ember:#d29a68; --pass:#5fbb8c; --reject:#d3817e;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 40px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eceff3; --surface:#f7f9fb; --surface-2:#e5eaef; --sunk:#e9edf1;
+    --ink:#18222f; --ink-soft:#47556a; --ink-faint:#8492a4; --line:#d3dbe4;
+    --accent:#217a9e; --accent-bright:#3fa3c7; --moon:#5fb0d4;
+    --ember:#b06f40; --pass:#37855e; --reject:#b3524f;
+    --shadow:0 1px 2px rgba(20,32,48,.05),0 8px 30px rgba(20,32,48,.07);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b111a; --surface:#111a26; --surface-2:#0e1621; --sunk:#0a0f17;
+    --ink:#dde6f0; --ink-soft:#9db0c4; --ink-faint:#63748a; --line:#213042;
+    --accent:#5fb0d4; --accent-bright:#82caea; --moon:#7cc6e6;
+    --ember:#d29a68; --pass:#5fbb8c; --reject:#d3817e;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 40px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--font-body);font-size:17px;line-height:1.72;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+  .measure{max-width:660px}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in oklab,var(--accent) 35%,transparent)}
+  a:hover{border-bottom-color:var(--accent)}
+  code,.mono{font-family:var(--font-mono)}
+  h1,h2,h3{font-family:var(--font-display);font-weight:600;text-wrap:balance;line-height:1.16;letter-spacing:.01em}
+  .eyebrow{font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:600}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line);isolation:isolate}
+  #sky{position:absolute;inset:0;width:100%;height:100%;z-index:-1;display:block}
+  .hero-grad{position:absolute;inset:0;z-index:-1;
+    background:linear-gradient(180deg,color-mix(in oklab,var(--moon) 10%,transparent),transparent 42%);}
+  .hero .wrap{padding-top:96px;padding-bottom:80px}
+  .kicker{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+  .kicker .dot{width:9px;height:9px;border-radius:50%;background:var(--moon);box-shadow:0 0 16px 2px color-mix(in oklab,var(--moon) 70%,transparent)}
+  h1{font-size:clamp(38px,6.4vw,68px);margin:0 0 22px;letter-spacing:-.01em}
+  h1 .sub{display:block;font-size:clamp(18px,2.6vw,26px);color:var(--ink-soft);font-weight:500;margin-top:14px;letter-spacing:0}
+  .thesis{max-width:640px;font-size:clamp(18px,2.3vw,22px);line-height:1.6;color:var(--ink);margin:0 0 30px}
+  .thesis b{color:var(--accent);font-weight:600}
+  .hero-meta{display:flex;flex-wrap:wrap;gap:8px 10px;font-family:var(--font-mono);font-size:12.5px}
+  .tag{padding:5px 11px;border:1px solid var(--line);border-radius:999px;color:var(--ink-soft);background:color-mix(in oklab,var(--surface) 60%,transparent)}
+  .tag b{color:var(--accent);font-weight:600}
+
+  /* ---------- fence figure in hero ---------- */
+  .fence{margin-top:44px;background:color-mix(in oklab,var(--surface) 88%,transparent);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow);overflow:hidden;max-width:720px}
+  .fence-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);
+    font-family:var(--font-mono);font-size:12px;letter-spacing:.06em;color:var(--ink-faint);background:var(--surface-2)}
+  .fence-head b{color:var(--ink);font-weight:600}
+  .fence-body{padding:16px 18px;font-family:var(--font-mono);font-size:13.5px;line-height:1.95;overflow-x:auto}
+  .imp{display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:baseline;white-space:nowrap}
+  .ok{color:var(--pass)} .no{color:var(--reject)} .dim{color:var(--ink-faint)}
+  .verdict{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);color:var(--ink-soft);white-space:normal;font-size:12.5px;line-height:1.7}
+  .verdict b{color:var(--ink)}
+
+  /* ---------- sections ---------- */
+  section{padding:74px 0;border-bottom:1px solid var(--line)}
+  .sec-head{display:flex;gap:20px;align-items:baseline;margin-bottom:8px}
+  .sec-num{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+  h2{font-size:clamp(26px,3.4vw,36px);margin:0}
+  .sec-zh{color:var(--ink)}
+  .sec-en{font-family:var(--font-mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 0 0 40px}
+  .lede{font-size:19px;line-height:1.7;color:var(--ink-soft);margin:26px 0 0 40px;max-width:660px}
+  .body{margin:28px 0 0 40px;max-width:660px}
+  .body p{margin:0 0 18px}
+  .body b{color:var(--ink);font-weight:600}
+  @media (max-width:640px){.sec-en,.lede,.body{margin-left:0}}
+
+  /* ---------- component map ---------- */
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin:34px 0 0 40px}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr;margin-left:0}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:20px 22px;box-shadow:var(--shadow)}
+  .card h4{margin:0 0 4px;font-family:var(--font-mono);font-size:13.5px;color:var(--accent);font-weight:600}
+  .card .path{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-faint);margin-bottom:10px}
+  .card p{margin:0;font-size:15px;line-height:1.6;color:var(--ink-soft)}
+  .card .loc{margin-top:12px;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.03em}
+  .card.soul{border-left:3px solid var(--ember)}
+  .card.soul h4{color:var(--ember)}
+
+  /* ---------- mono panel (figures) ---------- */
+  figure{margin:36px 0 0;}
+  figure.indent{margin-left:40px}
+  @media (max-width:640px){figure.indent{margin-left:0}}
+  .panel{background:var(--sunk);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);overflow:hidden}
+  .panel-label{padding:10px 18px;border-bottom:1px solid var(--line);background:var(--surface-2);
+    font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+  pre{margin:0;padding:20px 22px;font-family:var(--font-mono);font-size:13px;line-height:1.85;color:var(--ink);
+    overflow-x:auto;white-space:pre}
+  pre .c{color:var(--ink-faint)} /* comment */
+  pre .k{color:var(--accent);font-weight:600} /* keyword */
+  pre .s{color:var(--ember)} /* string/soul */
+  pre .g{color:var(--pass)} /* good */
+  pre .r{color:var(--reject)} /* reject */
+  figcaption{margin-top:12px;font-size:14px;color:var(--ink-faint);line-height:1.6}
+  figure.indent figcaption{padding-left:2px}
+
+  /* ---------- pyramid ---------- */
+  .pyramid{display:flex;flex-direction:column;gap:10px;margin:34px 0 0 40px;max-width:660px}
+  @media (max-width:640px){.pyramid{margin-left:0}}
+  .rung{display:flex;align-items:center;gap:16px;padding:16px 20px;border-radius:12px;border:1px solid var(--line);background:var(--surface)}
+  .rung .lab{font-family:var(--font-display);font-size:19px;font-weight:600;flex:1}
+  .rung .cost{font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .rung .mult{font-family:var(--font-mono);font-size:11px;color:var(--accent);letter-spacing:.05em}
+  .r1{width:100%} .r2{width:78%} .r3{width:56%}
+  .r1{background:color-mix(in oklab,var(--reject) 12%,var(--surface))}
+  .r2{background:color-mix(in oklab,var(--ember) 12%,var(--surface))}
+  .r3{background:color-mix(in oklab,var(--pass) 13%,var(--surface))}
+
+  /* ---------- capability chips ---------- */
+  .caps{margin:30px 0 0 40px;max-width:680px}
+  @media (max-width:640px){.caps{margin-left:0}}
+  .caprow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px}
+  .caprow .who{font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);width:100%;margin-bottom:2px;letter-spacing:.04em}
+  .chip{font-family:var(--font-mono);font-size:12.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+  .chip.acc{border-color:color-mix(in oklab,var(--accent) 45%,var(--line));color:var(--accent)}
+  .chip.emb{border-color:color-mix(in oklab,var(--ember) 45%,var(--line));color:var(--ember)}
+
+  /* ---------- future list ---------- */
+  .futures{display:grid;grid-template-columns:repeat(2,1fr);gap:2px;margin:34px 0 0 40px;background:var(--line);border:1px solid var(--line);border-radius:13px;overflow:hidden}
+  @media (max-width:760px){.futures{grid-template-columns:1fr;margin-left:0}}
+  .fut{background:var(--surface);padding:22px 24px}
+  .fut h4{margin:0 0 8px;font-size:18px;font-family:var(--font-display);font-weight:600}
+  .fut p{margin:0;font-size:14.5px;line-height:1.62;color:var(--ink-soft)}
+  .fut .n{font-family:var(--font-mono);font-size:11px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase}
+
+  /* ---------- closing ---------- */
+  .closing{background:var(--surface-2);border-bottom:none}
+  .closing .body{max-width:680px}
+  blockquote{margin:0 0 0 40px;padding:20px 26px;border-left:3px solid var(--accent);background:var(--surface);
+    border-radius:0 12px 12px 0;font-family:var(--font-display);font-size:20px;line-height:1.55;color:var(--ink);max-width:640px}
+  @media (max-width:640px){blockquote{margin-left:0}}
+  footer{padding:40px 0 56px;color:var(--ink-faint);font-family:var(--font-mono);font-size:12.5px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}
+
+  @media (prefers-reduced-motion:no-preference){
+    .reveal{opacity:0;transform:translateY(14px);transition:opacity .7s ease,transform .7s ease}
+    .reveal.in{opacity:1;transform:none}
+  }
+</style>
+
+<style>
+  /* hero commits to one world: the ink night (both themes) */
+  .hero{--bg:#0b111a;--surface:#111a26;--surface-2:#0e1621;--sunk:#0a0f17;
+    --ink:#dde6f0;--ink-soft:#9db0c4;--ink-faint:#63748a;--line:#213042;
+    --accent:#5fb0d4;--accent-bright:#82caea;--moon:#7cc6e6;--ember:#d29a68;
+    --pass:#5fbb8c;--reject:#d3817e;background:#0b111a;color:var(--ink);color-scheme:dark}
+  /* live seed panel */
+  .seed-wrap{padding:0}
+  #seed{display:block;width:100%;height:216px;resize:vertical;border:0;outline:none;
+    background:var(--sunk);color:var(--ink);font-family:var(--font-mono);font-size:12.5px;
+    line-height:1.7;padding:14px 18px;box-sizing:border-box}
+  #seed:focus{background:#0d1420}
+  .seed-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;
+    border-top:1px solid var(--line);background:var(--surface-2)}
+  .seed-bar button{font-family:var(--font-mono);font-size:12.5px;padding:7px 14px;border-radius:8px;
+    border:1px solid color-mix(in oklab,var(--accent) 45%,var(--line));background:transparent;
+    color:var(--accent);cursor:pointer}
+  .seed-bar button:hover{background:color-mix(in oklab,var(--accent) 12%,transparent)}
+  .seed-bar button.warn{border-color:color-mix(in oklab,var(--reject) 55%,var(--line));color:var(--reject)}
+  .seed-bar button.warn:hover{background:color-mix(in oklab,var(--reject) 10%,transparent)}
+  #seed-status{font-size:12px;line-height:1.5;flex:1;min-width:220px}
+  #seed-status.ok2{color:var(--pass)} #seed-status.no2{color:var(--reject)}
+  .worldshot img{display:block;width:100%;max-width:860px;border-radius:13px;border:1px solid var(--line);box-shadow:var(--shadow)}
+</style>
+
+</head>
+<body>
+
+
+<header class="hero">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="hero-grad"></div>
+  <div class="wrap">
+    <div class="kicker"><span class="dot"></span><span class="eyebrow">Architecture Anatomy · github.com/jrjohn/wasm-jit</span><a href="/" style="margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);border:0;letter-spacing:.05em">EN ↗</a></div>
+    <h1>wasm-jit
+      <span class="sub">一個「多維度軟體世界」的解剖——AI 隨想即生、即刻執行,卻碰不到它沒被授予的任何東西。</span>
+    </h1>
+    <p class="thesis">把<b>規則</b>存起來,不是把<b>網</b>存起來。一段語言微小到能當種子的腳本,在執行期編成 WebAssembly、由瀏覽器引擎 JIT——<b>而那個模組能觸及的整個世界,就是它宣告的 import 表</b>。沒被授予的能力,再強的生成者也拿不到。</p>
+    <div class="hero-meta">
+      <span class="tag"><b>Rust</b> workspace · 5 crates</span>
+      <span class="tag">seed DSL → <b>wasm-encoder</b> → WebAssembly</span>
+      <span class="tag">~117 bytes · <b>1–3ms</b> compile · 0.03ms/frame</span>
+      <span class="tag">capability fence · <b>fetch() 被拒</b></span>
+    </div>
+
+    
+    <div class="fence" id="seedpanel">
+      <div class="fence-head"><span><b>種子</b> — 上方所有會動的,都是這段腳本,此刻在你的瀏覽器裡編成 WASM。可以改。</span><span>run(t, w, h)</span></div>
+      <div class="seed-wrap">
+        <textarea id="seed" spellcheck="false" aria-label="wasm-jit seed source">// arcana.boo homepage sky — a wasm-jit `draw` seed, compiled LIVE in your
+// browser by the wasm-jit compiler (itself Rust compiled to WASM).
+// Everything moving on this page is this one module. Its entire world is
+// 10 drawing primitives — it cannot fetch, cannot hold state, cannot read
+// the page. run(t, w, h), ~60 times a second.
+
+// the night itself — the seed paints its own sky, one world in every theme
+hsl(0.62, 0.42, 0.055);
+disc(w * 0.5, h * 0.5, w + h);
+
+let cx = w * 0.785;
+let cy = h * 0.38;
+let R  = w * 0.135;
+let am = w * 0.0075;
+let dd = w * 0.083;
+let D2 = dd * dd;
+let N  = 13.0;
+let GA = 2.39996;
+
+// ---- the moon: one luminary, water-blue, with its halo (glow) ----
+let mx = w * 0.84;
+let my = h * 0.16;
+let mr = h * 0.115;
+hsl(0.565, 0.6, 0.66);
+glow(mx, my, mr * 2.4);
+glow(mx, my, mr * 1.2);
+hsl(0.56, 0.55, 0.62);
+disc(mx, my, mr * 0.42);
+
+// ---- snow: a deterministic field, each flake its own fall ----
+let s = 0.0;
+while s &lt; 34.0 {
+  let px = sin(s * 12.9898) * 437.585;
+  px = px % 1.0;
+  if px &lt; 0.0 { px = px + 1.0; }
+  let vy = 0.018 + (s % 5.0) * 0.006;
+  let py = px * 3.7 + t * vy;
+  py = py % 1.0;
+  if py &lt; 0.0 { py = py + 1.0; }
+  let sx = px * w + sin(t * 0.4 + s) * 6.0;
+  hsl(0.58, 0.25, 0.6);
+  disc(sx, py * h, 0.9 + (s % 3.0) * 0.35);
+  s = s + 1.0;
+}
+
+// ---- links: transient binding between every near pair (繫緣) ----
+let i = 0.0;
+while i &lt; N {
+  let ai = i * GA;
+  let ri = R * (0.26 + 0.7 * i / N);
+  let xi = cx + cos(ai) * ri + sin(t * 0.3 + i) * am;
+  let yi = cy + sin(ai) * ri * 0.82 + cos(t * 0.24 + i * 1.7) * am * 0.82;
+  let j = i + 1.0;
+  while j &lt; N {
+    let aj = j * GA;
+    let rj = R * (0.26 + 0.7 * j / N);
+    let xj = cx + cos(aj) * rj + sin(t * 0.3 + j) * am;
+    let yj = cy + sin(aj) * rj * 0.82 + cos(t * 0.24 + j * 1.7) * am * 0.82;
+    let dx = xi - xj;
+    let dy = yi - yj;
+    let q = dx * dx + dy * dy;
+    if q &lt; D2 {
+      let cl = 1.0 - q / D2;
+      hsl(0.56, 0.5, 0.18 + cl * 0.3);
+      line(xi, yi, xj, yj);
+    }
+    j = j + 1.0;
+  }
+  i = i + 1.0;
+}
+
+// ---- beings: water-blue cells and ember souls, each with its halo ----
+let k = 0.0;
+while k &lt; N {
+  let ak = k * GA;
+  let rk = R * (0.26 + 0.7 * k / N);
+  let xk = cx + cos(ak) * rk + sin(t * 0.3 + k) * am;
+  let yk = cy + sin(ak) * rk * 0.82 + cos(t * 0.24 + k * 1.7) * am * 0.82;
+  let nh = 0.56;
+  let ns = 0.5;
+  let sv = k % 5.0;
+  if sv &gt; 1.5 {
+    if sv &lt; 2.5 {
+      nh = 0.07;
+      ns = 0.6;
+    }
+  }
+  let breath = 1.0 + 0.18 * sin(t * 0.9 + k * 2.1);
+  hsl(nh, ns, 0.55);
+  glow(xk, yk, 11.0 * breath);
+  hsl(nh, ns, 0.72);
+  disc(xk, yk, 2.4);
+  k = k + 1.0;
+}
+
+// ---- a light gliding being to being: beholding through shared light ----
+let hop = t * 0.5;
+let seg = hop % N;
+let fs = seg - (seg % 1.0);
+let pp = seg % 1.0;
+let ga = fs * GA;
+let ra = R * (0.26 + 0.7 * fs / N);
+let xa = cx + cos(ga) * ra + sin(t * 0.3 + fs) * am;
+let ya = cy + sin(ga) * ra * 0.82 + cos(t * 0.24 + fs * 1.7) * am * 0.82;
+let fb = fs + 1.0;
+let gb = fb * GA;
+let rb = R * (0.26 + 0.7 * fb / N);
+let xb = cx + cos(gb) * rb + sin(t * 0.3 + fb) * am;
+let yb = cy + sin(gb) * rb * 0.82 + cos(t * 0.24 + fb * 1.7) * am * 0.82;
+let lx = xa + (xb - xa) * pp;
+let ly = ya + (yb - ya) * pp;
+hsl(0.58, 0.7, 0.85);
+glow(lx, ly, 10.0);
+disc(lx, ly, 2.0);
+
+0.0</textarea>
+        <div class="seed-bar">
+          <button id="btn-run">重新編譯 ▸</button>
+          <button id="btn-violate" class="warn">試著越界 — fetch()</button>
+          <button id="btn-restore">還原</button>
+          <span id="seed-status" class="mono"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- 1 組成 -->
+<section id="s1">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">01</span><h2 class="sec-zh">組成</h2></div>
+    <div class="sec-en">Composition — a workspace with two runtimes</div>
+    <p class="lede">整個系統是一個 Rust workspace,分成「離線生成」與「線上世界」兩個運行面——中間唯一的接縫,是一顆可稽核的種子。</p>
+    <div class="grid2">
+      <div class="card">
+        <h4>核心編譯器</h4>
+        <div class="path">src/ · parser.rs · codegen.rs · audit.rs · lib.rs</div>
+        <p>種子語言的 parser → codegen → <code>wasm-encoder</code>,對外 7 個編譯出口與能力稽核。安全機制的家。</p>
+        <div class="loc">lib.rs 316 · audit.rs 211 LOC</div>
+      </div>
+      <div class="card">
+        <h4>生成伺服器</h4>
+        <div class="path">gen-server/ · main.rs (Rust / Axum)</div>
+        <p>沙箱容器裡的 Claude 依「合約」生出 schema + DSL 腳本;伺服器在顯化<b>之前</b>編譯並驗證每一件產物,錯了就自我修復重試。</p>
+        <div class="loc">main.rs 1,183 LOC · :8646</div>
+      </div>
+      <div class="card">
+        <h4>線上世界</h4>
+        <div class="path">gen-server/live-gen.html</div>
+        <p>世界真正活著的地方:96×96 的場、住民、皮、心跳。瀏覽器端 instantiate 每一顆 WASM 細胞,每秒三十次。</p>
+        <div class="loc">1,345 LOC · 純瀏覽器,無框架</div>
+      </div>
+      <div class="card soul">
+        <h4>住民與皮</h4>
+        <div class="path">skins/ (Rust→wasm) · assemblyscript/ · inhabitants/</div>
+        <p>皮用 Rust、魂可用 AssemblyScript 外部編譯——只要能出 WASM,<b>過同一道 audit</b> 就能進場。語言無關的證明。</p>
+        <div class="loc">語言無關 · 一牆兩門</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 程式碼分析 -->
+<section id="s2">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">02</span><h2 class="sec-zh">程式碼分析</h2></div>
+    <div class="sec-en">Code — the seed pipeline &amp; the one wall</div>
+    <div class="body measure">
+      <p>一段腳本如何在世界上跑?<b>執行期把它編成一顆極小的 WASM 模組,交給瀏覽器引擎(V8 / JSC / SpiderMonkey)JIT。</b>同一份 DSL 三路並跑,生成的 WASM 追平 AOT Rust 的天花板、也追平手寫 JS,值逐位元相同。價值不在速度(那本來就打平),在於<b>「快 + 沙箱 + 同步」同時成立</b>。</p>
+    </div>
+    <figure class="indent"><div class="fence">
+      <div class="fence-head"><span>一堵牆,兩道門 — <b>audit(bytes, grants)</b></span><span>src/audit.rs</span></div>
+      <div class="fence-body">
+        <div class="imp"><span class="dim">module.imports</span><span class="dim">host grants (entity soul)</span></div>
+        <div class="imp"><span>env.sin</span><span class="ok">✓ sin</span></div>
+        <div class="imp"><span>env.mv</span><span class="ok">✓ mv &nbsp;<span class="dim">// 請求移動,host clamp</span></span></div>
+        <div class="imp"><span>env.other</span><span class="ok">✓ other <span class="dim">// 感知最近的他者</span></span></div>
+        <div class="imp"><span class="no">env.fetch</span><span class="no">✗ &nbsp;—&nbsp; 不在授予清單 → 編譯期即拒</span></div>
+        <div class="imp"><span class="no">env.memory</span><span class="no">✗ &nbsp;非 func(想要更大的世界)→ 拒</span></div>
+        <div class="verdict">每一個 import 必須 <b>(1) 在 grants 內</b> 且 <b>(2) 是 function</b>。與生成者用哪種語言、多聰明<b>無關</b>——這面牆審的是位元組,不是意圖。</div>
+      </div>
+    </div></figure>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">整合管線 — 生成一次,編譯一次,執行百萬次</div>
+<pre><span class="c">condition (觸發)</span>
+    │
+    ▼  <span class="k">LLM</span> 生一段 DSL 腳本 ······················· <span class="c">秒級,唯一的非確定接縫</span>
+    │   <span class="c">熏習:把「腳本原文」寫進 ālaya 帳本(存因,不存果)</span>
+    ▼  <span class="k">wasm-jit</span>  script → WASM cell ·············· <span class="c">1–3ms,依 script hash 快取</span>
+    │   <span class="g">audit: imports ⊆ grants</span>   <span class="s">~117 bytes</span>
+    ▼  <span class="k">WebAssembly.instantiate</span>  每格 / 每事件執行 ··· <span class="c">~0.03ms/frame</span>
+    │   <span class="c">host imports 只給:讀自己的切片、吐 patch</span>
+    ▼  reactive DAG 傳播 → GPU 向量渲染 ············· <span class="c">確定性層,不進腳本</span></pre>
+      </div>
+      <figcaption>重載世界時,整個行為層從帳本<b>重新編譯、重新掛上</b>,不必再問一次 LLM。存的是因(文本),果(模組)隨時從因再生。</figcaption>
+    </figure>
+    <div class="body measure" style="margin-top:34px">
+      <p><b>一堵牆,兩道門。</b>家用 DSL 在 <code>codegen</code> 就把未授權的函式擋掉;外部語言編來的 WASM,在 <code>instantiate</code> 之前由 <code>audit()</code> 擋掉。同一個安全模型只看一件事——模組宣告的 import ⊆ host 授予的能力清單。這讓語言可以長到不再塞得進一個 prompt,而<b>能力圍欄一寸不移</b>。</p>
+    </div>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">對外 7 個編譯出口 + 稽核 + 燃料 + 確定性重放 — src/lib.rs</div>
+<pre><span class="k">pub fn</span> compile_to_wasm / compile_kernel_wasm / compile_draw_wasm
+        compile_ui_cell_wasm / compile_field_cell_wasm
+        compile_entity_wasm <span class="c">// 魂  run(t, ex, ey)</span>
+        compile_skin_wasm   <span class="c">// 皮  run(px, py, s, t, nx, ny)</span>
+
+<span class="k">pub fn</span> audit_entity_bytes(bytes)              <span class="c">// 語言無關的 import 稽核</span>
+        compile_entity_wasm_grants(src, grants) <span class="c">// 只給子集能力編譯</span>
+        audit_entity_bytes_grants(bytes, grants)<span class="c">// 對子集稽核(遞歸生育用)</span>
+        compile_to_wasm_fueled(src, budget)     <span class="g">// 燃料計量,≈0% 數值開銷</span>
+        transpile_to_js(src)                    <span class="c">// 多路對照的第二車道(值逐位對拍)</span></pre>
+      </div>
+      <figcaption>多車道即「神諭」模式:同一 AST 的 WASM 與 JS 轉譯並行、比值,一致才晉升——不一致就是抓到一個編譯器 bug。確定性讓一段 121 幀的世界能<b>位元不差地重放</b>。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 3 擴充分析 -->
+<section id="s3">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">03</span><h2 class="sec-zh">擴充分析</h2></div>
+    <div class="sec-en">Extensibility — grow the vocabulary, never the reach</div>
+    <p class="lede">要加東西,只有四種合法形狀。每一種都是<b>能力詞彙</b>的加法;沒有一種是「新的觸及」。</p>
+    <div class="caps">
+      <div class="caprow"><span class="who">魂 · entity soul &nbsp; run(t, ex, ey)</span>
+        <span class="chip acc">sin</span><span class="chip acc">cos</span><span class="chip acc">get</span><span class="chip acc">set</span><span class="chip acc">fr</span><span class="chip acc">mv</span><span class="chip acc">unbind</span><span class="chip acc">rise</span><span class="chip acc">other</span>
+      </div>
+      <div class="caprow"><span class="who">皮 · skin &nbsp; run(px, py, s, t, nx, ny) &nbsp;— 只能畫,碰不到世界</span>
+        <span class="chip emb">sin</span><span class="chip emb">cos</span><span class="chip emb">hue</span><span class="chip emb">rgb</span><span class="chip emb">hsl</span><span class="chip emb">disc</span><span class="chip emb">ring</span><span class="chip emb">arc</span><span class="chip emb">line</span>
+      </div>
+      <div class="caprow"><span class="who">心 · mind reply — 一次心跳能回傳的欄位</span>
+        <span class="chip">say</span><span class="chip">thought</span><span class="chip">behavior</span><span class="chip">intent</span><span class="chip">beget</span><span class="chip">skin</span><span class="chip">attrs</span><span class="chip">remember</span>
+      </div>
+    </div>
+    <div class="body measure" style="margin-top:32px">
+      <p>加一個<b>編譯出口</b>=給它一組 PARAMS + IMPORTS,再照 audit 授一份 grant;加一個<b>能力</b>=加一個 host import,而它只會是四類之一——<b>資料</b>(attrs)、<b>感知</b>(other / perception)、<b>外觀</b>(skin)、<b>有界生成</b>(beget)。語言無關則是天生的:任何能編到 WASM 的語言都能當魂,audit 只認位元組。AssemblyScript 的魂,已經走過這道門。</p>
+    </div>
+  </div>
+</section>
+
+<!-- 4 延伸性 -->
+<section id="s4">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">04</span><h2 class="sec-zh">延伸性</h2></div>
+    <div class="sec-en">Generativity — the cost pyramid &amp; self-begetting worlds</div>
+    <p class="lede">架構的功夫,是把計算往下推。每往下一層,便宜約一千倍;而每一層都有自己的業力快取。</p>
+    <div class="pyramid">
+      <div class="rung r1"><span class="lab">生成 · generate</span><span class="cost">秒級 · seconds</span></div>
+      <div class="rung r2"><span class="lab">編譯 · compile</span><span class="cost">毫秒 · ms</span><span class="mult">×1000 cheaper</span></div>
+      <div class="rung r3"><span class="lab">執行 · execute</span><span class="cost">微秒 · µs · ×百萬</span><span class="mult">×1000 cheaper</span></div>
+    </div>
+    <div class="body measure" style="margin-top:34px">
+      <p>更深的延伸性是<b>自我生成</b>:一個住民的心,能再生出住民(畫裡的工畫師又在裡面畫)。而它守三條由 host 強制的律——</p>
+    </div>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">遞歸生育 · 三律 · 遞減不變量</div>
+<pre>parent grants  { <span class="g">get set fr mv unbind rise other</span> }
+    │
+    └─ <span class="k">beget</span> child
+         ① grants ⊆ parent ······· <span class="r">越界的能力被丟棄</span>
+         ② birth budget: child = parent − 1 ··· <span class="c">生育額度分下去,樹必有限</span>
+         ③ child soul → <span class="g">同一道 audit</span>,對它的<span class="k">子集</span>受審
+
+  ∴  能力跨世代<span class="k">單調不增</span>。創造本身,也遞減。</pre>
+      </div>
+      <figcaption><b>內在無界,觸及有界。</b>住民能無界地長——改自己的反射、重畫自己的皮、給自己命名、記自己的一夜、感知彼此——卻拿不到一個沒被授予的能力。豐富與圍限,正交。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 5 世界打包格式 -->
+<section id="s5">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">05</span><h2 class="sec-zh">世界打包格式</h2></div>
+    <div class="sec-en">World packaging — a world is a seed</div>
+    <p class="lede">一個世界存成一個 JSON。它不是一張截圖、不是一段錄影,而是一顆能<b>即刻顯化、不需重新生成</b>的種子。</p>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">worlds/moon3-spring.json — 19 位住民的活世界</div>
+<pre>{
+  <span class="k">"name"</span>: "moon3-spring",
+  <span class="k">"surface"</span>: "field",        <span class="c">// field | ui | draw</span>
+  <span class="k">"payload"</span>: {
+    <span class="k">"grid"</span>: 96,               <span class="c">// 96×96 的場</span>
+    <span class="k">"cells"</span>: [ … ],           <span class="c">// 通道 0 height · 1 water · 2 veg · 3 snow</span>
+    <span class="k">"entities"</span>: [             <span class="c">// 19 位住民</span>
+      { <span class="k">"id"</span>:"weng", <span class="k">"type"</span>:"fisherman", <span class="k">"at"</span>:[48,55],
+        <span class="k">"behavior"</span>:  <span class="s">"…DSL…"</span>,  <span class="c">// 魂 run(t,ex,ey)</span>
+        <span class="k">"skin_seed"</span>: <span class="s">"…DSL…"</span>,  <span class="c">// 皮 run(px,py,s,t,nx,ny)</span>
+        <span class="k">"persona"</span>:   <span class="s">"…"</span> }      <span class="c">// 心 一顆 Claude 心跳</span>
+    ],
+    <span class="k">"view"</span>: { … }             <span class="c">// 第一人稱鏡位</span>
+  },
+  <span class="k">"chat"</span>: [ … ]                <span class="c">// 對話軌,與世界同存</span>
+}</pre>
+      </div>
+      <figcaption>三種 surface 共用同一個封裝:<code>field</code>(地景 + 住民)、<code>ui</code>(介面)、<code>draw</code>(畫布)。載入即 <code>manifestSaved()</code> 顯化,毫秒完成——因為存的是種子,不是像素。</figcaption>
+    </figure>
+    <figure class="indent worldshot">
+      <img src="/home-assets/world-moon3-spring.jpg" alt="moon3-spring 世界:藍月下漁翁泛舟,鳥與魚環繞" loading="lazy">
+      <figcaption>上面那顆種子,顯化之後 — <code>worlds/moon3-spring.json</code> 載入活世界:寒江上的漁翁、水藍的月、天上的鳥、水下的魚。每一位住民都是沙箱裡的 WASM 細胞(魂+皮);有些還載著一顆活的心。</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- 6 讓人如何理解 -->
+<section id="s6">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">06</span><h2 class="sec-zh">讓人如何理解這架構</h2></div>
+    <div class="sec-en">The mental model — hold three things</div>
+    <div class="grid2">
+      <div class="card">
+        <h4>一句話</h4>
+        <p style="color:var(--ink)"><b style="color:var(--accent)">import 表就是模組的整個世界。</b>沒放進去的能力,就是它伸手也摸不到的邊界。圍欄的效力,與生成者的智力無關。</p>
+      </div>
+      <div class="card">
+        <h4>三種「即時」,相差千倍</h4>
+        <p>生成(秒)/ 編譯(毫秒)/ 執行(微秒)。把它們當同一件事,就會誤判成本;分開看,架構就清楚了。</p>
+      </div>
+      <div class="card">
+        <h4>因陀羅網:存規則,不存網</h4>
+        <p>N 個組件的相互關聯不是 N² 條線,而是「透過同一道理」互相映照。存的是規則,顯化時才成網。</p>
+      </div>
+      <div class="card soul">
+        <h4>事與理:硬鐘上騎著軟念</h4>
+        <p>世界底層一口共享的時鐘 <code>t</code>(事);而整段時間可折進一顆種子(理),延促自在留在宿主手裡。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 未來應用 -->
+<section id="s7">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">07</span><h2 class="sec-zh">未來應用</h2></div>
+    <div class="sec-en">Where this goes</div>
+    <div class="futures">
+      <div class="fut"><span class="n">Generative UI</span><h4>沒有固定的 App</h4><p>介面隨使用者當下的意圖顯化,毫秒成形——而且天生安全,因為生成的碼被構造性地圍住。</p></div>
+      <div class="fut"><span class="n">Untrusted code</span><h4>安全執行不可信的 AI 產物</h4><p>外掛市集、Agent 的工具沙箱、跑「你不必信任」的生成碼——圍欄的效力不隨模型變強而失效。</p></div>
+      <div class="fut"><span class="n">Souled worlds</span><h4>每個物件都有靈魂</h4><p>能自我繁衍、自畫其皮、自記其憶的模擬、遊戲、活文件——住民各有其識,卻碰不到未授之物。</p></div>
+      <div class="fut"><span class="n">Measurement</span><h4>固定詞彙下的生成合法率</h4><p>一個開放、可重現的量測:模型被限定在固定能力詞彙時,產出「合法」產物的可靠度有多高。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- closing -->
+<section class="closing">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">§</span><h2 class="sec-zh">法界畫布 — 一個誠實的註腳</h2></div>
+    <div class="sec-en">A note on the metaphor</div>
+    <blockquote>存規則,不存網;讓萬物透過同一道光互相映照而彼此不觸——而那道光,終究是你與所交涉者,在當下共同校正的預測。</blockquote>
+    <div class="body measure" style="margin-top:26px">
+      <p>這套架構用了佛學的語彙——因陀羅網、阿賴耶、六根六識、眾生各有其識。這些是<b>座標,不是證明</b>:它們幫人把「共業場」「存因不存果」「能力遞減」看得更快,但架構的正確性只靠位元組與 SQL 站著,不靠經典背書。譬喻當指月看,隨喜;當證明看,便攔一下。</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>wasm-jit · 多維度軟體架構的解剖</span>
+    <span>github.com/jrjohn/wasm-jit · MIT</span>
+  </div>
+</footer>
+
+
+
+<script type="module">
+import init, { compile_draw_wasm } from '/pkg/wasm_jit.js';
+const OK = (b,m)=>`wasm-jit 編譯 ${b} bytes,${m} ms — 這顆模組的整個世界:10 個繪圖原語。這裡沒有 fetch()。`;
+const ERR = e=>`編譯期拒絕:${e}`;
+(async function(){
+  const c=document.getElementById('sky'); if(!c) return;
+  const ctx=c.getContext('2d');
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  let W=0,H=0; const dpr=Math.min(window.devicePixelRatio||1,2);
+  function size(){ const r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height;
+    c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+  let drawA=a=>`hsla(200,62%,62%,${a})`;
+  const env={ sin:Math.sin, cos:Math.cos,
+    hue:v=>{const Hh=(((v%1)+1)%1)*360;const s=`hsl(${Hh},62%,62%)`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`hsla(${Hh},62%,62%,${a})`;},
+    rgb:(r,g,b)=>{const R=Math.max(0,Math.min(255,r*255))|0,G=Math.max(0,Math.min(255,g*255))|0,B=Math.max(0,Math.min(255,b*255))|0;const s=`rgb(${R},${G},${B})`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`rgba(${R},${G},${B},${a})`;},
+    hsl:(hh,ss,ll)=>{const Hh=(((hh%1)+1)%1)*360,S=Math.max(0,Math.min(1,ss))*100,L=Math.max(0,Math.min(1,ll))*100;const s=`hsl(${Hh},${S}%,${L}%)`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`hsla(${Hh},${S}%,${L}%,${a})`;},
+    disc:(x,y,r)=>{ctx.beginPath();ctx.arc(x,y,Math.max(r,0),0,6.2832);ctx.fill();},
+    ring:(x,y,r)=>{ctx.beginPath();ctx.arc(x,y,Math.max(r,0),0,6.2832);ctx.stroke();},
+    arc:(x,y,r,a0,a1)=>{ctx.beginPath();ctx.arc(x,y,Math.max(r,0),a0,a1);ctx.stroke();},
+    line:(x1,y1,x2,y2)=>{ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();},
+    glow:(x,y,r)=>{r=Math.max(r,0); if(!r)return; const g=ctx.createRadialGradient(x,y,0,x,y,r);
+      g.addColorStop(0,drawA(0.55)); g.addColorStop(1,drawA(0)); const k=ctx.fillStyle;
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,6.2832); ctx.fill(); ctx.fillStyle=k; } };
+  const seedEl=document.getElementById('seed'), st=document.getElementById('seed-status');
+  const SEED0=seedEl?seedEl.value:'';
+  let run=null;
+  function compile(){
+    try{
+      const a=performance.now();
+      const bytes=compile_draw_wasm(seedEl.value);
+      const inst=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env});
+      run=inst.exports.run;
+      if(st){ st.textContent=OK(bytes.length,(performance.now()-a).toFixed(1)); st.className='mono ok2'; }
+    }catch(e){ if(st){ st.textContent=ERR(e && e.message ? e.message : String(e)); st.className='mono no2'; } }
+  }
+  await init(); size(); compile();
+  const t0=performance.now();
+  function frame(){ if(run){ ctx.clearRect(0,0,W,H); ctx.lineWidth=1.3; ctx.lineCap='round';
+    try{ run((performance.now()-t0)/1000+2.0, W, H); }catch(e){ run=null; } } }
+  function loop(){ frame(); if(!reduce) requestAnimationFrame(loop); }
+  if(reduce){ frame(); } else requestAnimationFrame(loop);
+  window.addEventListener('resize',()=>{ size(); if(reduce) frame(); });
+  const $=id=>document.getElementById(id);
+  if($('btn-run')) $('btn-run').onclick=()=>compile();
+  if($('btn-violate')) $('btn-violate').onclick=()=>{ seedEl.value='// a seed that reaches for the net\nfetch(t);\n0.0'; compile(); };
+  if($('btn-restore')) $('btn-restore').onclick=()=>{ seedEl.value=SEED0; compile(); };
+  if(!reduce && 'IntersectionObserver' in window){
+    document.querySelectorAll('section .wrap > *').forEach(el=>el.classList.add('reveal'));
+    const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:0.08,rootMargin:'0px 0px -8% 0px'});
+    document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+  }
+})();
+</script>
+</body>
+</html>

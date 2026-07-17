@@ -33,7 +33,8 @@ const UI_IMPORTS: [HostFn; 4] = [
     HostFn { name: "get", n_args: 1, returns: true },
     HostFn { name: "set", n_args: 2, returns: false },
 ];
-const DRAW_IMPORTS: [HostFn; 9] = [
+const DRAW_IMPORTS: [HostFn; 10] = [
+    HostFn { name: "glow", n_args: 3, returns: false }, // soft radial halo (x,y,r) in the current colour
     HostFn { name: "sin", n_args: 1, returns: true },
     HostFn { name: "cos", n_args: 1, returns: true },
     HostFn { name: "hue", n_args: 1, returns: false },

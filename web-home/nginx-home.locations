@@ -1,0 +1,17 @@
+# ── Public homepage — wasm-jit (static, no auth) ─────────────────
+# Included from registry.conf just before `location /` (gateway).
+# Only exact / + the homepage's own asset prefixes are taken; every
+# other path keeps its existing behaviour.
+location = / { root /data/www/home; index index.html; }
+location = /index.html { root /data/www/home; }
+location = /index.zh.html { root /data/www/home; }
+location ^~ /pkg/ {
+    root /data/www/home;
+    types { application/javascript js mjs; application/wasm wasm; }
+    add_header Cache-Control "public, max-age=3600";
+}
+location ^~ /home-assets/ {
+    root /data/www/home;
+    types { image/jpeg jpg jpeg; }
+    add_header Cache-Control "public, max-age=86400";
+}

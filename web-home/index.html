@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>wasm-jit — software with no fixed screen</title>
+<meta name="description" content="Describe it and the interface appears — and the generated code can only touch what you allow. The night sky on this page is a 2KB WASM module, compiled live in your browser by wasm-jit.">
+<meta property="og:title" content="wasm-jit — software with no fixed screen">
+<meta property="og:description" content="Describe it and the interface appears — and the generated code can only touch what you allow. The night sky on this page is a 2KB WASM module, compiled live in your browser by wasm-jit.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://arcana.boo/">
+<meta property="og:image" content="https://arcana.boo/home-assets/world-moon3-spring.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg:#eceff3; --surface:#f7f9fb; --surface-2:#e5eaef; --sunk:#e9edf1;
+    --ink:#18222f; --ink-soft:#47556a; --ink-faint:#8492a4; --line:#d3dbe4;
+    --accent:#217a9e; --accent-bright:#3fa3c7; --moon:#5fb0d4;
+    --ember:#b06f40; --pass:#37855e; --reject:#b3524f;
+    --shadow:0 1px 2px rgba(20,32,48,.05),0 8px 30px rgba(20,32,48,.07);
+    --font-display:"Iowan Old Style","Palatino Linotype",Palatino,"Songti TC","Noto Serif TC",Georgia,serif;
+    --font-body:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Segoe UI",ui-sans-serif,system-ui,sans-serif;
+    --font-mono:"SF Mono","JetBrains Mono","Cascadia Code",ui-monospace,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0b111a; --surface:#111a26; --surface-2:#0e1621; --sunk:#0a0f17;
+      --ink:#dde6f0; --ink-soft:#9db0c4; --ink-faint:#63748a; --line:#213042;
+      --accent:#5fb0d4; --accent-bright:#82caea; --moon:#7cc6e6;
+      --ember:#d29a68; --pass:#5fbb8c; --reject:#d3817e;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 40px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#eceff3; --surface:#f7f9fb; --surface-2:#e5eaef; --sunk:#e9edf1;
+    --ink:#18222f; --ink-soft:#47556a; --ink-faint:#8492a4; --line:#d3dbe4;
+    --accent:#217a9e; --accent-bright:#3fa3c7; --moon:#5fb0d4;
+    --ember:#b06f40; --pass:#37855e; --reject:#b3524f;
+    --shadow:0 1px 2px rgba(20,32,48,.05),0 8px 30px rgba(20,32,48,.07);
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b111a; --surface:#111a26; --surface-2:#0e1621; --sunk:#0a0f17;
+    --ink:#dde6f0; --ink-soft:#9db0c4; --ink-faint:#63748a; --line:#213042;
+    --accent:#5fb0d4; --accent-bright:#82caea; --moon:#7cc6e6;
+    --ember:#d29a68; --pass:#5fbb8c; --reject:#d3817e;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 40px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--font-body);font-size:17px;line-height:1.72;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
+  .measure{max-width:660px}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid color-mix(in oklab,var(--accent) 35%,transparent)}
+  a:hover{border-bottom-color:var(--accent)}
+  code,.mono{font-family:var(--font-mono)}
+  h1,h2,h3{font-family:var(--font-display);font-weight:600;text-wrap:balance;line-height:1.16;letter-spacing:.01em}
+  .eyebrow{font-family:var(--font-mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);font-weight:600}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line);isolation:isolate}
+  #sky{position:absolute;inset:0;width:100%;height:100%;z-index:-1;display:block}
+  .hero-grad{position:absolute;inset:0;z-index:-1;
+    background:linear-gradient(180deg,color-mix(in oklab,var(--moon) 10%,transparent),transparent 42%);}
+  .hero .wrap{padding-top:96px;padding-bottom:80px}
+  .kicker{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+  .kicker .dot{width:9px;height:9px;border-radius:50%;background:var(--moon);box-shadow:0 0 16px 2px color-mix(in oklab,var(--moon) 70%,transparent)}
+  h1{font-size:clamp(38px,6.4vw,68px);margin:0 0 22px;letter-spacing:-.01em}
+  h1 .sub{display:block;font-size:clamp(18px,2.6vw,26px);color:var(--ink-soft);font-weight:500;margin-top:14px;letter-spacing:0}
+  .thesis{max-width:640px;font-size:clamp(18px,2.3vw,22px);line-height:1.6;color:var(--ink);margin:0 0 30px}
+  .thesis b{color:var(--accent);font-weight:600}
+  .hero-meta{display:flex;flex-wrap:wrap;gap:8px 10px;font-family:var(--font-mono);font-size:12.5px}
+  .tag{padding:5px 11px;border:1px solid var(--line);border-radius:999px;color:var(--ink-soft);background:color-mix(in oklab,var(--surface) 60%,transparent)}
+  .tag b{color:var(--accent);font-weight:600}
+
+  /* ---------- fence figure in hero ---------- */
+  .fence{margin-top:44px;background:color-mix(in oklab,var(--surface) 88%,transparent);border:1px solid var(--line);
+    border-radius:14px;box-shadow:var(--shadow);overflow:hidden;max-width:720px}
+  .fence-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);
+    font-family:var(--font-mono);font-size:12px;letter-spacing:.06em;color:var(--ink-faint);background:var(--surface-2)}
+  .fence-head b{color:var(--ink);font-weight:600}
+  .fence-body{padding:16px 18px;font-family:var(--font-mono);font-size:13.5px;line-height:1.95;overflow-x:auto}
+  .imp{display:grid;grid-template-columns:150px 1fr;gap:8px;align-items:baseline;white-space:nowrap}
+  .ok{color:var(--pass)} .no{color:var(--reject)} .dim{color:var(--ink-faint)}
+  .verdict{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);color:var(--ink-soft);white-space:normal;font-size:12.5px;line-height:1.7}
+  .verdict b{color:var(--ink)}
+
+  /* ---------- sections ---------- */
+  section{padding:74px 0;border-bottom:1px solid var(--line)}
+  .sec-head{display:flex;gap:20px;align-items:baseline;margin-bottom:8px}
+  .sec-num{font-family:var(--font-mono);font-size:14px;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+  h2{font-size:clamp(26px,3.4vw,36px);margin:0}
+  .sec-zh{color:var(--ink)}
+  .sec-en{font-family:var(--font-mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:6px 0 0 40px}
+  .lede{font-size:19px;line-height:1.7;color:var(--ink-soft);margin:26px 0 0 40px;max-width:660px}
+  .body{margin:28px 0 0 40px;max-width:660px}
+  .body p{margin:0 0 18px}
+  .body b{color:var(--ink);font-weight:600}
+  @media (max-width:640px){.sec-en,.lede,.body{margin-left:0}}
+
+  /* ---------- component map ---------- */
+  .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin:34px 0 0 40px}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr;margin-left:0}}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:20px 22px;box-shadow:var(--shadow)}
+  .card h4{margin:0 0 4px;font-family:var(--font-mono);font-size:13.5px;color:var(--accent);font-weight:600}
+  .card .path{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-faint);margin-bottom:10px}
+  .card p{margin:0;font-size:15px;line-height:1.6;color:var(--ink-soft)}
+  .card .loc{margin-top:12px;font-family:var(--font-mono);font-size:11px;color:var(--ink-faint);letter-spacing:.03em}
+  .card.soul{border-left:3px solid var(--ember)}
+  .card.soul h4{color:var(--ember)}
+
+  /* ---------- mono panel (figures) ---------- */
+  figure{margin:36px 0 0;}
+  figure.indent{margin-left:40px}
+  @media (max-width:640px){figure.indent{margin-left:0}}
+  .panel{background:var(--sunk);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);overflow:hidden}
+  .panel-label{padding:10px 18px;border-bottom:1px solid var(--line);background:var(--surface-2);
+    font-family:var(--font-mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+  pre{margin:0;padding:20px 22px;font-family:var(--font-mono);font-size:13px;line-height:1.85;color:var(--ink);
+    overflow-x:auto;white-space:pre}
+  pre .c{color:var(--ink-faint)} /* comment */
+  pre .k{color:var(--accent);font-weight:600} /* keyword */
+  pre .s{color:var(--ember)} /* string/soul */
+  pre .g{color:var(--pass)} /* good */
+  pre .r{color:var(--reject)} /* reject */
+  figcaption{margin-top:12px;font-size:14px;color:var(--ink-faint);line-height:1.6}
+  figure.indent figcaption{padding-left:2px}
+
+  /* ---------- pyramid ---------- */
+  .pyramid{display:flex;flex-direction:column;gap:10px;margin:34px 0 0 40px;max-width:660px}
+  @media (max-width:640px){.pyramid{margin-left:0}}
+  .rung{display:flex;align-items:center;gap:16px;padding:16px 20px;border-radius:12px;border:1px solid var(--line);background:var(--surface)}
+  .rung .lab{font-family:var(--font-display);font-size:19px;font-weight:600;flex:1}
+  .rung .cost{font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .rung .mult{font-family:var(--font-mono);font-size:11px;color:var(--accent);letter-spacing:.05em}
+  .r1{width:100%} .r2{width:78%} .r3{width:56%}
+  .r1{background:color-mix(in oklab,var(--reject) 12%,var(--surface))}
+  .r2{background:color-mix(in oklab,var(--ember) 12%,var(--surface))}
+  .r3{background:color-mix(in oklab,var(--pass) 13%,var(--surface))}
+
+  /* ---------- capability chips ---------- */
+  .caps{margin:30px 0 0 40px;max-width:680px}
+  @media (max-width:640px){.caps{margin-left:0}}
+  .caprow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 16px}
+  .caprow .who{font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);width:100%;margin-bottom:2px;letter-spacing:.04em}
+  .chip{font-family:var(--font-mono);font-size:12.5px;padding:4px 10px;border-radius:7px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+  .chip.acc{border-color:color-mix(in oklab,var(--accent) 45%,var(--line));color:var(--accent)}
+  .chip.emb{border-color:color-mix(in oklab,var(--ember) 45%,var(--line));color:var(--ember)}
+
+  /* ---------- future list ---------- */
+  .futures{display:grid;grid-template-columns:repeat(2,1fr);gap:2px;margin:34px 0 0 40px;background:var(--line);border:1px solid var(--line);border-radius:13px;overflow:hidden}
+  @media (max-width:760px){.futures{grid-template-columns:1fr;margin-left:0}}
+  .fut{background:var(--surface);padding:22px 24px}
+  .fut h4{margin:0 0 8px;font-size:18px;font-family:var(--font-display);font-weight:600}
+  .fut p{margin:0;font-size:14.5px;line-height:1.62;color:var(--ink-soft)}
+  .fut .n{font-family:var(--font-mono);font-size:11px;color:var(--accent);letter-spacing:.1em;text-transform:uppercase}
+
+  /* ---------- closing ---------- */
+  .closing{background:var(--surface-2);border-bottom:none}
+  .closing .body{max-width:680px}
+  blockquote{margin:0 0 0 40px;padding:20px 26px;border-left:3px solid var(--accent);background:var(--surface);
+    border-radius:0 12px 12px 0;font-family:var(--font-display);font-size:20px;line-height:1.55;color:var(--ink);max-width:640px}
+  @media (max-width:640px){blockquote{margin-left:0}}
+  footer{padding:40px 0 56px;color:var(--ink-faint);font-family:var(--font-mono);font-size:12.5px}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}
+
+  @media (prefers-reduced-motion:no-preference){
+    .reveal{opacity:0;transform:translateY(14px);transition:opacity .7s ease,transform .7s ease}
+    .reveal.in{opacity:1;transform:none}
+  }
+</style>
+
+<style>
+  /* hero commits to one world: the ink night (both themes) */
+  .hero{--bg:#0b111a;--surface:#111a26;--surface-2:#0e1621;--sunk:#0a0f17;
+    --ink:#dde6f0;--ink-soft:#9db0c4;--ink-faint:#63748a;--line:#213042;
+    --accent:#5fb0d4;--accent-bright:#82caea;--moon:#7cc6e6;--ember:#d29a68;
+    --pass:#5fbb8c;--reject:#d3817e;background:#0b111a;color:var(--ink);color-scheme:dark}
+  /* live seed panel */
+  .seed-wrap{padding:0}
+  #seed{display:block;width:100%;height:216px;resize:vertical;border:0;outline:none;
+    background:var(--sunk);color:var(--ink);font-family:var(--font-mono);font-size:12.5px;
+    line-height:1.7;padding:14px 18px;box-sizing:border-box}
+  #seed:focus{background:#0d1420}
+  .seed-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;
+    border-top:1px solid var(--line);background:var(--surface-2)}
+  .seed-bar button{font-family:var(--font-mono);font-size:12.5px;padding:7px 14px;border-radius:8px;
+    border:1px solid color-mix(in oklab,var(--accent) 45%,var(--line));background:transparent;
+    color:var(--accent);cursor:pointer}
+  .seed-bar button:hover{background:color-mix(in oklab,var(--accent) 12%,transparent)}
+  .seed-bar button.warn{border-color:color-mix(in oklab,var(--reject) 55%,var(--line));color:var(--reject)}
+  .seed-bar button.warn:hover{background:color-mix(in oklab,var(--reject) 10%,transparent)}
+  #seed-status{font-size:12px;line-height:1.5;flex:1;min-width:220px}
+  #seed-status.ok2{color:var(--pass)} #seed-status.no2{color:var(--reject)}
+  .worldshot img{display:block;width:100%;max-width:860px;border-radius:13px;border:1px solid var(--line);box-shadow:var(--shadow)}
+</style>
+
+</head>
+<body>
+
+
+<header class="hero">
+  <canvas id="sky" aria-hidden="true"></canvas>
+  <div class="hero-grad"></div>
+  <div class="wrap">
+    <div class="kicker"><span class="dot"></span><span class="eyebrow">Architecture Anatomy · github.com/jrjohn/wasm-jit</span><a href="/index.zh.html" style="margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);border:0;letter-spacing:.05em">中文 ↗</a></div>
+    <h1>wasm-jit
+      <span class="sub">An anatomy of a multidimensional software world — the UI manifests from intent, runs the instant it is born, and can touch nothing it was not granted.</span>
+    </h1>
+    <p class="thesis">Store the <b>rule</b>, not the <b>net</b>. A seed script — a language small enough to be a seed — is compiled to WebAssembly at runtime and JIT-ed by the browser engine, and <b>the entire world that module can reach is the import table it declares</b>. A capability it was never granted, no generator can seize — however clever.</p>
+    <div class="hero-meta">
+      <span class="tag"><b>Rust</b> workspace · 5 crates</span>
+      <span class="tag">seed DSL → <b>wasm-encoder</b> → WebAssembly</span>
+      <span class="tag">~117 bytes · <b>1–3ms</b> compile · 0.03ms/frame</span>
+      <span class="tag">capability fence · <b>fetch() rejected</b></span>
+    </div>
+
+    
+    <div class="fence" id="seedpanel">
+      <div class="fence-head"><span><b>THE SEED</b> — everything moving above is this script, compiled to WASM in your browser right now. Edit it.</span><span>run(t, w, h)</span></div>
+      <div class="seed-wrap">
+        <textarea id="seed" spellcheck="false" aria-label="wasm-jit seed source">// arcana.boo homepage sky — a wasm-jit `draw` seed, compiled LIVE in your
+// browser by the wasm-jit compiler (itself Rust compiled to WASM).
+// Everything moving on this page is this one module. Its entire world is
+// 10 drawing primitives — it cannot fetch, cannot hold state, cannot read
+// the page. run(t, w, h), ~60 times a second.
+
+// the night itself — the seed paints its own sky, one world in every theme
+hsl(0.62, 0.42, 0.055);
+disc(w * 0.5, h * 0.5, w + h);
+
+let cx = w * 0.785;
+let cy = h * 0.38;
+let R  = w * 0.135;
+let am = w * 0.0075;
+let dd = w * 0.083;
+let D2 = dd * dd;
+let N  = 13.0;
+let GA = 2.39996;
+
+// ---- the moon: one luminary, water-blue, with its halo (glow) ----
+let mx = w * 0.84;
+let my = h * 0.16;
+let mr = h * 0.115;
+hsl(0.565, 0.6, 0.66);
+glow(mx, my, mr * 2.4);
+glow(mx, my, mr * 1.2);
+hsl(0.56, 0.55, 0.62);
+disc(mx, my, mr * 0.42);
+
+// ---- snow: a deterministic field, each flake its own fall ----
+let s = 0.0;
+while s &lt; 34.0 {
+  let px = sin(s * 12.9898) * 437.585;
+  px = px % 1.0;
+  if px &lt; 0.0 { px = px + 1.0; }
+  let vy = 0.018 + (s % 5.0) * 0.006;
+  let py = px * 3.7 + t * vy;
+  py = py % 1.0;
+  if py &lt; 0.0 { py = py + 1.0; }
+  let sx = px * w + sin(t * 0.4 + s) * 6.0;
+  hsl(0.58, 0.25, 0.6);
+  disc(sx, py * h, 0.9 + (s % 3.0) * 0.35);
+  s = s + 1.0;
+}
+
+// ---- links: transient binding between every near pair (繫緣) ----
+let i = 0.0;
+while i &lt; N {
+  let ai = i * GA;
+  let ri = R * (0.26 + 0.7 * i / N);
+  let xi = cx + cos(ai) * ri + sin(t * 0.3 + i) * am;
+  let yi = cy + sin(ai) * ri * 0.82 + cos(t * 0.24 + i * 1.7) * am * 0.82;
+  let j = i + 1.0;
+  while j &lt; N {
+    let aj = j * GA;
+    let rj = R * (0.26 + 0.7 * j / N);
+    let xj = cx + cos(aj) * rj + sin(t * 0.3 + j) * am;
+    let yj = cy + sin(aj) * rj * 0.82 + cos(t * 0.24 + j * 1.7) * am * 0.82;
+    let dx = xi - xj;
+    let dy = yi - yj;
+    let q = dx * dx + dy * dy;
+    if q &lt; D2 {
+      let cl = 1.0 - q / D2;
+      hsl(0.56, 0.5, 0.18 + cl * 0.3);
+      line(xi, yi, xj, yj);
+    }
+    j = j + 1.0;
+  }
+  i = i + 1.0;
+}
+
+// ---- beings: water-blue cells and ember souls, each with its halo ----
+let k = 0.0;
+while k &lt; N {
+  let ak = k * GA;
+  let rk = R * (0.26 + 0.7 * k / N);
+  let xk = cx + cos(ak) * rk + sin(t * 0.3 + k) * am;
+  let yk = cy + sin(ak) * rk * 0.82 + cos(t * 0.24 + k * 1.7) * am * 0.82;
+  let nh = 0.56;
+  let ns = 0.5;
+  let sv = k % 5.0;
+  if sv &gt; 1.5 {
+    if sv &lt; 2.5 {
+      nh = 0.07;
+      ns = 0.6;
+    }
+  }
+  let breath = 1.0 + 0.18 * sin(t * 0.9 + k * 2.1);
+  hsl(nh, ns, 0.55);
+  glow(xk, yk, 11.0 * breath);
+  hsl(nh, ns, 0.72);
+  disc(xk, yk, 2.4);
+  k = k + 1.0;
+}
+
+// ---- a light gliding being to being: beholding through shared light ----
+let hop = t * 0.5;
+let seg = hop % N;
+let fs = seg - (seg % 1.0);
+let pp = seg % 1.0;
+let ga = fs * GA;
+let ra = R * (0.26 + 0.7 * fs / N);
+let xa = cx + cos(ga) * ra + sin(t * 0.3 + fs) * am;
+let ya = cy + sin(ga) * ra * 0.82 + cos(t * 0.24 + fs * 1.7) * am * 0.82;
+let fb = fs + 1.0;
+let gb = fb * GA;
+let rb = R * (0.26 + 0.7 * fb / N);
+let xb = cx + cos(gb) * rb + sin(t * 0.3 + fb) * am;
+let yb = cy + sin(gb) * rb * 0.82 + cos(t * 0.24 + fb * 1.7) * am * 0.82;
+let lx = xa + (xb - xa) * pp;
+let ly = ya + (yb - ya) * pp;
+hsl(0.58, 0.7, 0.85);
+glow(lx, ly, 10.0);
+disc(lx, ly, 2.0);
+
+0.0</textarea>
+        <div class="seed-bar">
+          <button id="btn-run">Recompile ▸</button>
+          <button id="btn-violate" class="warn">Try to break out — fetch()</button>
+          <button id="btn-restore">Restore</button>
+          <span id="seed-status" class="mono"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section id="s1">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">01</span><h2 class="sec-zh">Composition</h2></div>
+    <div class="sec-en">A workspace with two runtimes</div>
+    <p class="lede">The whole system is a Rust workspace split into two runtimes — offline generation and the online world — joined by a single auditable seed.</p>
+    <div class="grid2">
+      <div class="card">
+        <h4>Core compiler</h4>
+        <div class="path">src/ · parser.rs · codegen.rs · audit.rs · lib.rs</div>
+        <p>The seed language's parser → codegen → <code>wasm-encoder</code>, exposing 7 compile targets and the capability audit. Home of the security model.</p>
+        <div class="loc">lib.rs 316 · audit.rs 211 LOC</div>
+      </div>
+      <div class="card">
+        <h4>Generation server</h4>
+        <div class="path">gen-server/ · main.rs (Rust / Axum)</div>
+        <p>Claude, in a sandboxed container, generates a schema + DSL scripts to a contract; the server compiles and validates every artifact <b>before</b> it manifests, with a self-repair loop on errors.</p>
+        <div class="loc">main.rs 1,183 LOC · :8646</div>
+      </div>
+      <div class="card">
+        <h4>The live world</h4>
+        <div class="path">gen-server/live-gen.html</div>
+        <p>Where the world actually lives: a 96×96 field, inhabitants, skins, minds. The browser instantiates each WASM cell, thirty times a second.</p>
+        <div class="loc">1,345 LOC · pure browser, no framework</div>
+      </div>
+      <div class="card soul">
+        <h4>Inhabitants &amp; skins</h4>
+        <div class="path">skins/ (Rust→wasm) · assemblyscript/ · inhabitants/</div>
+        <p>Skins in Rust, souls in AssemblyScript compiled externally — anything that emits WASM enters if it <b>passes the same audit</b>. The proof that the fence is language-agnostic.</p>
+        <div class="loc">language-agnostic · one wall, two doors</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="s2">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">02</span><h2 class="sec-zh">The code</h2></div>
+    <div class="sec-en">The seed pipeline &amp; the one wall</div>
+    <div class="body measure">
+      <p>How does a script run on the world? <b>The runtime compiles it into a tiny WASM module and hands it to the browser engine (V8 / JSC / SpiderMonkey) to JIT.</b> The same DSL runs three ways; the generated WASM ties the AOT Rust ceiling and ties hand-written JS, value bit-identical. The point isn't speed (that ties JS anyway) — it's that <b>"fast + sandboxed + synchronous" all hold at once.</b></p>
+    </div>
+    <figure class="indent"><div class="fence">
+      <div class="fence-head"><span>one wall, two doors — <b>audit(bytes, grants)</b></span><span>src/audit.rs</span></div>
+      <div class="fence-body">
+        <div class="imp"><span class="dim">module.imports</span><span class="dim">host grants (entity soul)</span></div>
+        <div class="imp"><span>env.sin</span><span class="ok">✓ sin</span></div>
+        <div class="imp"><span>env.mv</span><span class="ok">✓ mv &nbsp;<span class="dim">// requests a move, host clamps</span></span></div>
+        <div class="imp"><span>env.other</span><span class="ok">✓ other <span class="dim">// sense the nearest being</span></span></div>
+        <div class="imp"><span class="no">env.fetch</span><span class="no">✗ &nbsp;—&nbsp; not in grants → rejected at compile time</span></div>
+        <div class="imp"><span class="no">env.memory</span><span class="no">✗ &nbsp;not a func (wants a bigger world) → rejected</span></div>
+        <div class="verdict">Every import must be <b>(1) in grants</b> and <b>(2) a function</b>. It is <b>independent</b> of which language the generator used, or how clever it is — this wall audits bytes, not intent.</div>
+      </div>
+    </div></figure>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">The integrated pipeline — generate once, compile once, execute a million times</div>
+<pre><span class="c">condition (trigger)</span>
+    │
+    ▼  <span class="k">LLM</span> generates a DSL script ················· <span class="c">seconds, the only non-deterministic seam</span>
+    │   <span class="c">perfume: append the script's source into the ālaya ledger (store the cause)</span>
+    ▼  <span class="k">wasm-jit</span>  script → WASM cell ·············· <span class="c">1–3ms, cached by script hash</span>
+    │   <span class="g">audit: imports ⊆ grants</span>   <span class="s">~117 bytes</span>
+    ▼  <span class="k">WebAssembly.instantiate</span>  run per frame / event ·· <span class="c">~0.03ms/frame</span>
+    │   <span class="c">host imports grant only: read your slice, emit a patch</span>
+    ▼  reactive DAG propagation → GPU vector render ·· <span class="c">deterministic layer, not scripted</span></pre>
+      </div>
+      <figcaption>On reload, the entire behaviour layer is <b>recompiled and reattached</b> from the ledger, without asking the LLM again. The cause (text) is stored; the fruit (module) is regenerated from the cause at any time.</figcaption>
+    </figure>
+    <div class="body measure" style="margin-top:34px">
+      <p><b>One wall, two doors.</b> The home DSL is blocked at <code>codegen</code>; WASM compiled from any other language is blocked before <code>instantiate</code> by <code>audit()</code>. One security model, looking at one thing — a module's declared imports ⊆ the capabilities the host grants. That lets the language grow past what fits in a prompt while <b>the capability fence does not move an inch</b>.</p>
+    </div>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">7 compile targets + audit + fuel + deterministic replay — src/lib.rs</div>
+<pre><span class="k">pub fn</span> compile_to_wasm / compile_kernel_wasm / compile_draw_wasm
+        compile_ui_cell_wasm / compile_field_cell_wasm
+        compile_entity_wasm <span class="c">// soul  run(t, ex, ey)</span>
+        compile_skin_wasm   <span class="c">// skin  run(px, py, s, t, nx, ny)</span>
+
+<span class="k">pub fn</span> audit_entity_bytes(bytes)              <span class="c">// language-agnostic import audit</span>
+        compile_entity_wasm_grants(src, grants) <span class="c">// compile with only a subset of caps</span>
+        audit_entity_bytes_grants(bytes, grants)<span class="c">// audit against a subset (recursive begetting)</span>
+        compile_to_wasm_fueled(src, budget)     <span class="g">// fuel metering, ≈0% numeric overhead</span>
+        transpile_to_js(src)                    <span class="c">// the second lane (value-for-value oracle)</span></pre>
+      </div>
+      <figcaption>Multi-lane is the oracle pattern: the WASM and the JS-transpilation of the same AST run in parallel and compare values — promote only on agreement; disagreement is a compiler bug caught. Determinism lets a 121-frame world <b>replay bit-identically</b>.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="s3">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">03</span><h2 class="sec-zh">Extensibility</h2></div>
+    <div class="sec-en">Grow the vocabulary, never the reach</div>
+    <p class="lede">There are only four legal shapes to add. Each is an addition to the <b>capability vocabulary</b>; none is a new reach.</p>
+    <div class="caps">
+      <div class="caprow"><span class="who">soul · entity &nbsp; run(t, ex, ey)</span>
+        <span class="chip acc">sin</span><span class="chip acc">cos</span><span class="chip acc">get</span><span class="chip acc">set</span><span class="chip acc">fr</span><span class="chip acc">mv</span><span class="chip acc">unbind</span><span class="chip acc">rise</span><span class="chip acc">other</span>
+      </div>
+      <div class="caprow"><span class="who">skin &nbsp; run(px, py, s, t, nx, ny) &nbsp;— can only draw, cannot touch the world</span>
+        <span class="chip emb">sin</span><span class="chip emb">cos</span><span class="chip emb">hue</span><span class="chip emb">rgb</span><span class="chip emb">hsl</span><span class="chip emb">disc</span><span class="chip emb">ring</span><span class="chip emb">arc</span><span class="chip emb">line</span>
+      </div>
+      <div class="caprow"><span class="who">mind · reply — the fields one heartbeat may return</span>
+        <span class="chip">say</span><span class="chip">thought</span><span class="chip">behavior</span><span class="chip">intent</span><span class="chip">beget</span><span class="chip">skin</span><span class="chip">attrs</span><span class="chip">remember</span>
+      </div>
+    </div>
+    <div class="body measure" style="margin-top:32px">
+      <p>Adding a <b>compile target</b> = give it a set of PARAMS + IMPORTS and audit it against a grant list; adding a <b>capability</b> = add a host import, and it will only ever be one of four kinds — <b>data</b> (attrs), <b>sensing</b> (other / perception), <b>appearance</b> (skin), or <b>bounded generation</b> (beget). Language-agnosticism comes for free: any language that compiles to WASM can be a soul — the audit reads only bytes. AssemblyScript souls have already walked through this door.</p>
+    </div>
+  </div>
+</section>
+
+<section id="s4">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">04</span><h2 class="sec-zh">Generativity</h2></div>
+    <div class="sec-en">The cost pyramid &amp; self-begetting worlds</div>
+    <p class="lede">The architectural work is pushing computation downward. Each level down is ~1000× cheaper — and each keeps its own karma-cache.</p>
+    <div class="pyramid">
+      <div class="rung r1"><span class="lab">generate</span><span class="cost">seconds</span></div>
+      <div class="rung r2"><span class="lab">compile</span><span class="cost">milliseconds</span><span class="mult">×1000 cheaper</span></div>
+      <div class="rung r3"><span class="lab">execute</span><span class="cost">microseconds · ×a million</span><span class="mult">×1000 cheaper</span></div>
+    </div>
+    <div class="body measure" style="margin-top:34px">
+      <p>The deeper generativity is <b>self-generation</b>: a being's mind can beget beings (the painter in the painting paints a painter). It obeys three host-enforced laws —</p>
+    </div>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">recursive begetting · three laws · the attenuation invariant</div>
+<pre>parent grants  { <span class="g">get set fr mv unbind rise other</span> }
+    │
+    └─ <span class="k">beget</span> child
+         ① grants ⊆ parent ······· <span class="r">over-reaching capabilities dropped</span>
+         ② birth budget: child = parent − 1 ··· <span class="c">the budget divides down, the tree is finite</span>
+         ③ child soul → <span class="g">the same audit</span>, against its <span class="k">subset</span>
+
+  ∴  capabilities are <span class="k">monotonically non-increasing</span> across generations. Creation itself attenuates.</pre>
+      </div>
+      <figcaption><b>Richness of self is unbounded; reach is fixed.</b> A being can grow without limit — rewrite its own reflex, repaint its own skin, name itself, remember its night, sense the others — yet cannot acquire a single capability it was not granted. Functional richness and confinement are orthogonal.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="s5">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">05</span><h2 class="sec-zh">World packaging</h2></div>
+    <div class="sec-en">A world is a seed</div>
+    <p class="lede">A world saves to a single JSON. It is not a screenshot, not a recording — it is a seed that <b>manifests instantly, with no regeneration</b>.</p>
+    <figure class="indent">
+      <div class="panel">
+        <div class="panel-label">worlds/moon3-spring.json — a living world of 19 inhabitants</div>
+<pre>{
+  <span class="k">"name"</span>: "moon3-spring",
+  <span class="k">"surface"</span>: "field",        <span class="c">// field | ui | draw</span>
+  <span class="k">"payload"</span>: {
+    <span class="k">"grid"</span>: 96,               <span class="c">// a 96×96 field</span>
+    <span class="k">"cells"</span>: [ … ],           <span class="c">// channels: 0 height · 1 water · 2 veg · 3 snow</span>
+    <span class="k">"entities"</span>: [             <span class="c">// 19 inhabitants</span>
+      { <span class="k">"id"</span>:"weng", <span class="k">"type"</span>:"fisherman", <span class="k">"at"</span>:[48,55],
+        <span class="k">"behavior"</span>:  <span class="s">"…DSL…"</span>,  <span class="c">// soul run(t,ex,ey)</span>
+        <span class="k">"skin_seed"</span>: <span class="s">"…DSL…"</span>,  <span class="c">// skin run(px,py,s,t,nx,ny)</span>
+        <span class="k">"persona"</span>:   <span class="s">"…"</span> }      <span class="c">// mind: a Claude heartbeat</span>
+    ],
+    <span class="k">"view"</span>: { … }             <span class="c">// the first-person camera</span>
+  },
+  <span class="k">"chat"</span>: [ … ]                <span class="c">// the dialogue trail, saved with the world</span>
+}</pre>
+      </div>
+      <figcaption>Three surfaces share one envelope: <code>field</code> (terrain + inhabitants), <code>ui</code> (interface), <code>draw</code> (canvas). Loading is <code>manifestSaved()</code> — milliseconds, because what's stored is a seed, not pixels.</figcaption>
+    </figure>
+    <figure class="indent worldshot">
+      <img src="/home-assets/world-moon3-spring.jpg" alt="The moon3-spring world: a fisherman on a river under a blue moon, birds and fish around" loading="lazy">
+      <figcaption>The seed above, manifested — <code>worlds/moon3-spring.json</code> loaded into the live world: the fisherman on the cold river, the water-blue moon, birds aloft and fish below. Every being is a sandboxed WASM cell (soul + skin); some carry a live mind.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="s6">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">06</span><h2 class="sec-zh">How to understand it</h2></div>
+    <div class="sec-en">The mental model — hold three things</div>
+    <div class="grid2">
+      <div class="card">
+        <h4>One sentence</h4>
+        <p style="color:var(--ink)"><b style="color:var(--accent)">The import table is the module's entire world.</b> A capability not placed in it is a boundary the module cannot reach past. The fence's force is independent of the generator's intelligence.</p>
+      </div>
+      <div class="card">
+        <h4>Three kinds of "real-time," 1000× apart</h4>
+        <p>Generate (s) / compile (ms) / execute (µs). Treat them as one and you misjudge cost; hold them apart and the architecture is clear.</p>
+      </div>
+      <div class="card">
+        <h4>Indra's net: store the rule, not the net</h4>
+        <p>The relations among N components aren't N² wires but "beholding one another through a shared principle." Store the rule; the net forms only at manifestation.</p>
+      </div>
+      <div class="card soul">
+        <h4>Substance &amp; principle: a soft thought riding a hard clock</h4>
+        <p>Underneath, one shared clock <code>t</code> (the fact); yet all of time can fold into a seed (the principle) — that folding stays host-side.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="s7">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">07</span><h2 class="sec-zh">Where this goes</h2></div>
+    <div class="sec-en">Future applications</div>
+    <div class="futures">
+      <div class="fut"><span class="n">Generative UI</span><h4>No fixed app</h4><p>The interface manifests from the user's intent in the moment, in milliseconds — and is safe by construction, because the generated code is confined.</p></div>
+      <div class="fut"><span class="n">Untrusted code</span><h4>Safely run AI-generated code</h4><p>Plugin marketplaces, an agent's tool sandbox, running generated code you don't have to trust — the fence doesn't weaken as the model gets stronger.</p></div>
+      <div class="fut"><span class="n">Souled worlds</span><h4>Every object has a soul</h4><p>Simulations, games, living documents whose inhabitants beget, repaint themselves, remember — each its own consciousness, none touching the ungranted.</p></div>
+      <div class="fut"><span class="n">Measurement</span><h4>Generation-validity under a fixed vocabulary</h4><p>An open, reproducible measurement: how reliably a model produces <em>valid</em> artifacts when confined to a fixed capability vocabulary.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="closing">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">§</span><h2 class="sec-zh">The Dharma-realm canvas — an honest footnote</h2></div>
+    <div class="sec-en">A note on the metaphor</div>
+    <blockquote>Store the rule, not the net; let all things behold one another through a shared light without ever touching — and that light, in the end, is the prediction you and the one you interact with are correcting together, right now.</blockquote>
+    <div class="body measure" style="margin-top:26px">
+      <p>This architecture borrows a Buddhist vocabulary — Indra's net, ālaya, six roots and six consciousnesses, beings each with their own mind. These are <b>coordinates, not proofs</b>: they help one see "collective karma," "store the cause not the fruit," "capabilities attenuate" faster — but the architecture's correctness stands on bytes and SQL, not on scripture. As a finger pointing at the moon, gladly; as a proof, held at the door.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>wasm-jit · Anatomy of a Multidimensional Software World</span>
+    <span>github.com/jrjohn/wasm-jit · MIT</span>
+  </div>
+</footer>
+
+
+
+<script type="module">
+import init, { compile_draw_wasm } from '/pkg/wasm_jit.js';
+const OK = (b,m)=>`wasm-jit compiled ${b} bytes in ${m} ms — this module's entire world: 10 drawing primitives. fetch() does not exist here.`;
+const ERR = e=>`refused at compile time: ${e}`;
+(async function(){
+  const c=document.getElementById('sky'); if(!c) return;
+  const ctx=c.getContext('2d');
+  const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+  let W=0,H=0; const dpr=Math.min(window.devicePixelRatio||1,2);
+  function size(){ const r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height;
+    c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+  let drawA=a=>`hsla(200,62%,62%,${a})`;
+  const env={ sin:Math.sin, cos:Math.cos,
+    hue:v=>{const Hh=(((v%1)+1)%1)*360;const s=`hsl(${Hh},62%,62%)`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`hsla(${Hh},62%,62%,${a})`;},
+    rgb:(r,g,b)=>{const R=Math.max(0,Math.min(255,r*255))|0,G=Math.max(0,Math.min(255,g*255))|0,B=Math.max(0,Math.min(255,b*255))|0;const s=`rgb(${R},${G},${B})`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`rgba(${R},${G},${B},${a})`;},
+    hsl:(hh,ss,ll)=>{const Hh=(((hh%1)+1)%1)*360,S=Math.max(0,Math.min(1,ss))*100,L=Math.max(0,Math.min(1,ll))*100;const s=`hsl(${Hh},${S}%,${L}%)`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`hsla(${Hh},${S}%,${L}%,${a})`;},
+    disc:(x,y,r)=>{ctx.beginPath();ctx.arc(x,y,Math.max(r,0),0,6.2832);ctx.fill();},
+    ring:(x,y,r)=>{ctx.beginPath();ctx.arc(x,y,Math.max(r,0),0,6.2832);ctx.stroke();},
+    arc:(x,y,r,a0,a1)=>{ctx.beginPath();ctx.arc(x,y,Math.max(r,0),a0,a1);ctx.stroke();},
+    line:(x1,y1,x2,y2)=>{ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();},
+    glow:(x,y,r)=>{r=Math.max(r,0); if(!r)return; const g=ctx.createRadialGradient(x,y,0,x,y,r);
+      g.addColorStop(0,drawA(0.55)); g.addColorStop(1,drawA(0)); const k=ctx.fillStyle;
+      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,6.2832); ctx.fill(); ctx.fillStyle=k; } };
+  const seedEl=document.getElementById('seed'), st=document.getElementById('seed-status');
+  const SEED0=seedEl?seedEl.value:'';
+  let run=null;
+  function compile(){
+    try{
+      const a=performance.now();
+      const bytes=compile_draw_wasm(seedEl.value);
+      const inst=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env});
+      run=inst.exports.run;
+      if(st){ st.textContent=OK(bytes.length,(performance.now()-a).toFixed(1)); st.className='mono ok2'; }
+    }catch(e){ if(st){ st.textContent=ERR(e && e.message ? e.message : String(e)); st.className='mono no2'; } }
+  }
+  await init(); size(); compile();
+  const t0=performance.now();
+  function frame(){ if(run){ ctx.clearRect(0,0,W,H); ctx.lineWidth=1.3; ctx.lineCap='round';
+    try{ run((performance.now()-t0)/1000+2.0, W, H); }catch(e){ run=null; } } }
+  function loop(){ frame(); if(!reduce) requestAnimationFrame(loop); }
+  if(reduce){ frame(); } else requestAnimationFrame(loop);
+  window.addEventListener('resize',()=>{ size(); if(reduce) frame(); });
+  const $=id=>document.getElementById(id);
+  if($('btn-run')) $('btn-run').onclick=()=>compile();
+  if($('btn-violate')) $('btn-violate').onclick=()=>{ seedEl.value='// a seed that reaches for the net\nfetch(t);\n0.0'; compile(); };
+  if($('btn-restore')) $('btn-restore').onclick=()=>{ seedEl.value=SEED0; compile(); };
+  if(!reduce && 'IntersectionObserver' in window){
+    document.querySelectorAll('section .wrap > *').forEach(el=>el.classList.add('reveal'));
+    const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:0.08,rootMargin:'0px 0px -8% 0px'});
+    document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+  }
+})();
+</script>
+</body>
+</html>
