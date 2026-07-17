@@ -35,10 +35,13 @@ if hero > 0.5 {
 }
 let D2 = D * D;
 
-// ---- the moon and its halo ----
+// ---- the moon and its halo: it breathes, and drifts gently ----
+// (the exclusion zone keeps using the STATIC mx,my,mm — no boundary flicker)
+let mya = my + sin(t * 0.13) * h * 0.012;
+let mma = mm * (1.0 + 0.06 * sin(t * 0.21));
 hsl(0.551, 0.58, 0.60);
-glow(mx, my, mm * 2.6);
-disc(mx, my, mm * 0.45);
+glow(mx, mya, mma * 2.6);
+disc(mx, mya, mma * 0.45);
 
 // ---- snow: density follows the canvas, each flake its own quiet fall ----
 let SN = w * h / 34000.0;
