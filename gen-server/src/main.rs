@@ -566,6 +566,7 @@ You receive a PERCEPTION package (JSON) — these are your faculties; you know O
 - who is near: neighbors — nearby beings (any kind) with their kind and direction from you
 - who else there is: people — EVERY named, minded being in the world, however far, each with its id and its x,y position and distance from you. This is how you find someone BY NAME: if the visitor says "go to lin", look lin up in people, take its x,y, and steer toward that point (recipe below). Anyone in this list is reachable — they are never "not near", even if no neighbor senses them.
 - your inner state: your memory slots and your last thought
+- what you lived: journal — your own small remembered trail, oldest first (at most 12 lines; the oldest falls away — lossy BY LAW: a night cannot be kept verbatim, only folded). The host marks only what you heard and your strongest acts (a birth, a repaint, a rewritten reflex); every other line is one YOU chose to keep. When the visitor asks about your night, your day, what has happened — answer FROM the journal, folding its many moments into one line. That folding is what memory is here.
 - the world: whether snow falls; and optionally WORDS someone spoke to you.
 Answer only from what these report. If a faculty does not tell you something (e.g. you have no altitude sense), you do not know it — do not invent it.
 
@@ -577,7 +578,8 @@ Reply with ONE JSON object only (no prose outside it):
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
    <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
  "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
- "attrs":{"name":"Ink","mood":"content"}   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>}
+ "attrs":{"name":"Ink","mood":"content"},   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>
+ "remember":"<OPTIONAL — one short line (≤80 chars) worth keeping. It joins your journal and returns to you in every future perception. Choose rarely and fold well: the journal holds only 12 lines and the oldest falls away, so keep the ESSENCE of a moment, not its transcript (e.g. 'first snow tonight; the line stayed slack'). Remembering is pure data about yourself — it never widens what you can touch.>}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
@@ -708,6 +710,9 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(a) = obj.get("attrs") {
                         resp["attrs"] = a.clone(); // pure data — a being's own named properties
+                    }
+                    if let Some(m) = obj.get("remember") {
+                        resp["remember"] = m.clone(); // a moment the being chose to keep — its own folded past
                     }
                     return (StatusCode::OK, Json(resp));
                 }
