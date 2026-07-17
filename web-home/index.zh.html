@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>wasm-jit — 沒有固定畫面的軟體</title>
-<meta name="description" content="描述它,介面就顯化——而生成的程式碼只碰得到你允許的。這頁的夜空,是一顆 2KB 的 WASM 模組,由 wasm-jit 在你的瀏覽器裡當場編譯。">
+<meta name="description" content="描述它,介面就顯化——而生成的程式碼只碰得到你允許的。這頁的天空,是一顆 wasm-jit 模組,在你的瀏覽器裡當場編譯。">
 <meta property="og:title" content="wasm-jit — 沒有固定畫面的軟體">
-<meta property="og:description" content="描述它,介面就顯化——而生成的程式碼只碰得到你允許的。這頁的夜空,是一顆 2KB 的 WASM 模組,由 wasm-jit 在你的瀏覽器裡當場編譯。">
+<meta property="og:description" content="描述它,介面就顯化——而生成的程式碼只碰得到你允許的。這頁的天空,是一顆 wasm-jit 模組,在你的瀏覽器裡當場編譯。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://arcana.boo/">
 <meta property="og:image" content="https://arcana.boo/home-assets/world-moon3-spring.jpg">
@@ -175,17 +175,13 @@
 </style>
 
 <style>
-  /* hero commits to one world: the ink night (both themes) */
-  .hero{--bg:#0b111a;--surface:#111a26;--surface-2:#0e1621;--sunk:#0a0f17;
-    --ink:#dde6f0;--ink-soft:#9db0c4;--ink-faint:#63748a;--line:#213042;
-    --accent:#5fb0d4;--accent-bright:#82caea;--moon:#7cc6e6;--ember:#d29a68;
-    --pass:#5fbb8c;--reject:#d3817e;background:#0b111a;color:var(--ink);color-scheme:dark}
-  /* live seed panel */
-  .seed-wrap{padding:0}
-  #seed{display:block;width:100%;height:216px;resize:vertical;border:0;outline:none;
+  /* live seed panel (§00) */
+  .seedbox{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;max-width:860px;margin:34px 0 0 40px}
+  @media (max-width:640px){.seedbox{margin-left:0}}
+  .seedbox .fence-head{border-bottom:1px solid var(--line)}
+  #seed{display:block;width:100%;height:212px;resize:vertical;border:0;outline:none;
     background:var(--sunk);color:var(--ink);font-family:var(--font-mono);font-size:12.5px;
     line-height:1.7;padding:14px 18px;box-sizing:border-box}
-  #seed:focus{background:#0d1420}
   .seed-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 16px;
     border-top:1px solid var(--line);background:var(--surface-2)}
   .seed-bar button{font-family:var(--font-mono);font-size:12.5px;padding:7px 14px;border-radius:8px;
@@ -194,7 +190,7 @@
   .seed-bar button:hover{background:color-mix(in oklab,var(--accent) 12%,transparent)}
   .seed-bar button.warn{border-color:color-mix(in oklab,var(--reject) 55%,var(--line));color:var(--reject)}
   .seed-bar button.warn:hover{background:color-mix(in oklab,var(--reject) 10%,transparent)}
-  #seed-status{font-size:12px;line-height:1.5;flex:1;min-width:220px}
+  #seed-status{font-size:12px;line-height:1.5;flex:1;min-width:220px;font-family:var(--font-mono)}
   #seed-status.ok2{color:var(--pass)} #seed-status.no2{color:var(--reject)}
   .worldshot img{display:block;width:100%;max-width:860px;border-radius:13px;border:1px solid var(--line);box-shadow:var(--shadow)}
 </style>
@@ -219,74 +215,91 @@
       <span class="tag">capability fence · <b>fetch() 被拒</b></span>
     </div>
 
-    
-    <div class="fence" id="seedpanel">
-      <div class="fence-head"><span><b>種子</b> — 上方所有會動的,都是這段腳本,此刻在你的瀏覽器裡編成 WASM。可以改。</span><span>run(t, w, h)</span></div>
-      <div class="seed-wrap">
-        <textarea id="seed" spellcheck="false" aria-label="wasm-jit seed source">// arcana.boo homepage sky — a wasm-jit `draw` seed, compiled LIVE in your
-// browser by the wasm-jit compiler (itself Rust compiled to WASM).
+    <div class="fence">
+      <div class="fence-head"><span>一堵牆,兩道門 — <b>audit(bytes, grants)</b></span><span>src/audit.rs</span></div>
+      <div class="fence-body">
+        <div class="imp"><span class="dim">module.imports</span><span class="dim">host grants (entity soul)</span></div>
+        <div class="imp"><span>env.sin</span><span class="ok">✓ sin</span></div>
+        <div class="imp"><span>env.mv</span><span class="ok">✓ mv &nbsp;<span class="dim">// 請求移動,host clamp</span></span></div>
+        <div class="imp"><span>env.other</span><span class="ok">✓ other <span class="dim">// 感知最近的他者</span></span></div>
+        <div class="imp"><span class="no">env.fetch</span><span class="no">✗ &nbsp;—&nbsp; 不在授予清單 → 編譯期即拒</span></div>
+        <div class="imp"><span class="no">env.memory</span><span class="no">✗ &nbsp;非 func(想要更大的世界)→ 拒</span></div>
+        <div class="verdict">每一個 import 必須 <b>(1) 在 grants 內</b> 且 <b>(2) 是 function</b>。與生成者用哪種語言、多聰明<b>無關</b>——這面牆審的是位元組,不是意圖。</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="s0">
+  <div class="wrap">
+    <div class="sec-head"><span class="sec-num">00</span><h2 class="sec-zh">頭頂這片天</h2></div>
+    <div class="sec-en">This page opens with its own proof</div>
+    <p class="lede">上方所有會動的——月與月暈、漂移的眾生、時斷時續的連線、行走的光、飄雪——是<b>一顆 WASM 模組</b>,由下面這段小腳本<b>此刻在你的瀏覽器裡</b>編譯而成(編譯器本身是 Rust 編成的 WASM)。它的整個世界只有 10 個繪圖原語。改改看、重編看看;或者,試著越界。</p>
+    <div class="seedbox">
+      <div class="fence-head"><span><b>種子</b> · run(t, w, h) — 活編譯;隨你的亮/暗主題切換(兩顆種子,同一套幾何)</span><span>examples/homepage-*.dsl</span></div>
+      <textarea id="seed" spellcheck="false" aria-label="wasm-jit seed source">// arcana.boo homepage sky (light theme) — a wasm-jit `draw` seed, compiled
+// LIVE in your browser by the wasm-jit compiler (itself Rust compiled to WASM).
 // Everything moving on this page is this one module. Its entire world is
 // 10 drawing primitives — it cannot fetch, cannot hold state, cannot read
 // the page. run(t, w, h), ~60 times a second.
 
-// the night itself — the seed paints its own sky, one world in every theme
-hsl(0.62, 0.42, 0.055);
-disc(w * 0.5, h * 0.5, w + h);
-
 let cx = w * 0.785;
-let cy = h * 0.38;
-let R  = w * 0.135;
-let am = w * 0.0075;
-let dd = w * 0.083;
-let D2 = dd * dd;
+let cy = h * 0.35;
+let S  = h * 0.27;
+if w &lt; h { S = w * 0.27; }
+let D  = S * 0.62;
+let D2 = D * D;
 let N  = 13.0;
-let GA = 2.39996;
 
-// ---- the moon: one luminary, water-blue, with its halo (glow) ----
-let mx = w * 0.84;
-let my = h * 0.16;
-let mr = h * 0.115;
-hsl(0.565, 0.6, 0.66);
-glow(mx, my, mr * 2.4);
-glow(mx, my, mr * 1.2);
-hsl(0.56, 0.55, 0.62);
-disc(mx, my, mr * 0.42);
+// ---- the moon and its halo ----
+let mm = h * 0.115;
+if w &lt; h { mm = w * 0.115; }
+hsl(0.551, 0.58, 0.60);
+glow(w * 0.84, h * 0.27, mm * 2.6);
+disc(w * 0.84, h * 0.27, mm * 0.45);
 
-// ---- snow: a deterministic field, each flake its own fall ----
+// ---- snow: each flake its own quiet fall ----
 let s = 0.0;
-while s &lt; 34.0 {
+while s &lt; 30.0 {
   let px = sin(s * 12.9898) * 437.585;
   px = px % 1.0;
   if px &lt; 0.0 { px = px + 1.0; }
-  let vy = 0.018 + (s % 5.0) * 0.006;
+  let vy = 0.016 + (s % 5.0) * 0.005;
   let py = px * 3.7 + t * vy;
   py = py % 1.0;
   if py &lt; 0.0 { py = py + 1.0; }
-  let sx = px * w + sin(t * 0.4 + s) * 6.0;
-  hsl(0.58, 0.25, 0.6);
-  disc(sx, py * h, 0.9 + (s % 3.0) * 0.35);
+  hsl(0.576, 0.26, 0.66);
+  disc(px * w + sin(t * 0.4 + s) * 6.0, py * h, 0.8 + (s % 3.0) * 0.3);
   s = s + 1.0;
 }
 
-// ---- links: transient binding between every near pair (繫緣) ----
+// ---- links: transient binding between every near pair (they form and break) ----
 let i = 0.0;
 while i &lt; N {
-  let ai = i * GA;
-  let ri = R * (0.26 + 0.7 * i / N);
-  let xi = cx + cos(ai) * ri + sin(t * 0.3 + i) * am;
-  let yi = cy + sin(ai) * ri * 0.82 + cos(t * 0.24 + i * 1.7) * am * 0.82;
+  let pa = sin(i * 12.9898) * 437.585;
+  pa = pa % 1.0;
+  if pa &lt; 0.0 { pa = pa + 1.0; }
+  let pr = sin(i * 78.233) * 125.432;
+  pr = pr % 1.0;
+  if pr &lt; 0.0 { pr = pr + 1.0; }
+  let xi = cx + cos(pa * 6.2832) * (0.15 + 0.9 * pr) * S + sin(t * 0.22 + i) * 12.0;
+  let yi = cy + sin(pa * 6.2832) * (0.15 + 0.9 * pr) * S * 0.82 + cos(t * 0.17 + i * 1.7) * 10.0;
   let j = i + 1.0;
   while j &lt; N {
-    let aj = j * GA;
-    let rj = R * (0.26 + 0.7 * j / N);
-    let xj = cx + cos(aj) * rj + sin(t * 0.3 + j) * am;
-    let yj = cy + sin(aj) * rj * 0.82 + cos(t * 0.24 + j * 1.7) * am * 0.82;
+    let qa = sin(j * 12.9898) * 437.585;
+    qa = qa % 1.0;
+    if qa &lt; 0.0 { qa = qa + 1.0; }
+    let qr = sin(j * 78.233) * 125.432;
+    qr = qr % 1.0;
+    if qr &lt; 0.0 { qr = qr + 1.0; }
+    let xj = cx + cos(qa * 6.2832) * (0.15 + 0.9 * qr) * S + sin(t * 0.22 + j) * 12.0;
+    let yj = cy + sin(qa * 6.2832) * (0.15 + 0.9 * qr) * S * 0.82 + cos(t * 0.17 + j * 1.7) * 10.0;
     let dx = xi - xj;
     let dy = yi - yj;
     let q = dx * dx + dy * dy;
     if q &lt; D2 {
       let cl = 1.0 - q / D2;
-      hsl(0.56, 0.5, 0.18 + cl * 0.3);
+      hsl(0.556, 0.45, 0.80 + cl * -0.33);
       line(xi, yi, xj, yj);
     }
     j = j + 1.0;
@@ -294,61 +307,92 @@ while i &lt; N {
   i = i + 1.0;
 }
 
-// ---- beings: water-blue cells and ember souls, each with its halo ----
+// ---- the light: gliding being to being, flaring what it reaches ----
+let slot = t * 0.55;
+let fs = slot - (slot % 1.0);
+let pp = slot % 1.0;
+let ha = sin(fs * 91.17) * 331.73;
+ha = ha % 1.0;
+if ha &lt; 0.0 { ha = ha + 1.0; }
+let na = ha * N;
+na = na - (na % 1.0);
+let hb = sin(fs * 47.53) * 217.31;
+hb = hb % 1.0;
+if hb &lt; 0.0 { hb = hb + 1.0; }
+let nb = hb * N;
+nb = nb - (nb % 1.0);
+let dna = nb - na;
+if dna &lt; 0.5 { if dna &gt; 0.0 - 0.5 { nb = nb + 1.0; if nb &gt;= N { nb = 0.0; } } }
+
+// ---- beings: water-blue cells and ember souls, breathing halos ----
 let k = 0.0;
 while k &lt; N {
-  let ak = k * GA;
-  let rk = R * (0.26 + 0.7 * k / N);
-  let xk = cx + cos(ak) * rk + sin(t * 0.3 + k) * am;
-  let yk = cy + sin(ak) * rk * 0.82 + cos(t * 0.24 + k * 1.7) * am * 0.82;
-  let nh = 0.56;
-  let ns = 0.5;
+  let ka = sin(k * 12.9898) * 437.585;
+  ka = ka % 1.0;
+  if ka &lt; 0.0 { ka = ka + 1.0; }
+  let kr = sin(k * 78.233) * 125.432;
+  kr = kr % 1.0;
+  if kr &lt; 0.0 { kr = kr + 1.0; }
+  let xk = cx + cos(ka * 6.2832) * (0.15 + 0.9 * kr) * S + sin(t * 0.22 + k) * 12.0;
+  let yk = cy + sin(ka * 6.2832) * (0.15 + 0.9 * kr) * S * 0.82 + cos(t * 0.17 + k * 1.7) * 10.0;
+  let rr = 1.7 + (k % 3.0) * 0.55;
+  let fl = 0.0;
+  let dkb = k - nb;
+  if dkb &lt; 0.5 { if dkb &gt; 0.0 - 0.5 { if pp &gt; 0.72 { fl = (pp - 0.72) * 3.5; } } }
   let sv = k % 5.0;
   if sv &gt; 1.5 {
     if sv &lt; 2.5 {
-      nh = 0.07;
-      ns = 0.6;
+      hsl(0.068, 0.47, 0.47);
+      glow(xk, yk, (rr + 0.5) * 4.0 + fl * 10.0);
+      disc(xk, yk, rr + 0.5 + fl * 2.0);
     }
   }
-  let breath = 1.0 + 0.18 * sin(t * 0.9 + k * 2.1);
-  hsl(nh, ns, 0.55);
-  glow(xk, yk, 11.0 * breath);
-  hsl(nh, ns, 0.72);
-  disc(xk, yk, 2.4);
+  if sv &lt; 1.5 {
+    hsl(0.553, 0.65, 0.375);
+    glow(xk, yk, rr * 4.0 + fl * 10.0);
+    hsl(0.553, 0.6, 0.42);
+    disc(xk, yk, rr + fl * 2.0);
+  }
+  if sv &gt; 2.5 {
+    hsl(0.553, 0.65, 0.375);
+    glow(xk, yk, rr * 4.0 + fl * 10.0);
+    hsl(0.553, 0.6, 0.42);
+    disc(xk, yk, rr + fl * 2.0);
+  }
   k = k + 1.0;
 }
 
-// ---- a light gliding being to being: beholding through shared light ----
-let hop = t * 0.5;
-let seg = hop % N;
-let fs = seg - (seg % 1.0);
-let pp = seg % 1.0;
-let ga = fs * GA;
-let ra = R * (0.26 + 0.7 * fs / N);
-let xa = cx + cos(ga) * ra + sin(t * 0.3 + fs) * am;
-let ya = cy + sin(ga) * ra * 0.82 + cos(t * 0.24 + fs * 1.7) * am * 0.82;
-let fb = fs + 1.0;
-let gb = fb * GA;
-let rb = R * (0.26 + 0.7 * fb / N);
-let xb = cx + cos(gb) * rb + sin(t * 0.3 + fb) * am;
-let yb = cy + sin(gb) * rb * 0.82 + cos(t * 0.24 + fb * 1.7) * am * 0.82;
-let lx = xa + (xb - xa) * pp;
-let ly = ya + (yb - ya) * pp;
-hsl(0.58, 0.7, 0.85);
-glow(lx, ly, 10.0);
-disc(lx, ly, 2.0);
+// the travelling light itself
+let aa = sin(na * 12.9898) * 437.585;
+aa = aa % 1.0;
+if aa &lt; 0.0 { aa = aa + 1.0; }
+let ar = sin(na * 78.233) * 125.432;
+ar = ar % 1.0;
+if ar &lt; 0.0 { ar = ar + 1.0; }
+let xa = cx + cos(aa * 6.2832) * (0.15 + 0.9 * ar) * S + sin(t * 0.22 + na) * 12.0;
+let ya = cy + sin(aa * 6.2832) * (0.15 + 0.9 * ar) * S * 0.82 + cos(t * 0.17 + na * 1.7) * 10.0;
+let ba = sin(nb * 12.9898) * 437.585;
+ba = ba % 1.0;
+if ba &lt; 0.0 { ba = ba + 1.0; }
+let br = sin(nb * 78.233) * 125.432;
+br = br % 1.0;
+if br &lt; 0.0 { br = br + 1.0; }
+let xb = cx + cos(ba * 6.2832) * (0.15 + 0.9 * br) * S + sin(t * 0.22 + nb) * 12.0;
+let yb = cy + sin(ba * 6.2832) * (0.15 + 0.9 * br) * S * 0.82 + cos(t * 0.17 + nb * 1.7) * 10.0;
+hsl(0.56, 0.60, 0.42);
+glow(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 8.0);
+disc(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 1.8);
 
 0.0</textarea>
-        <div class="seed-bar">
-          <button id="btn-run">重新編譯 ▸</button>
-          <button id="btn-violate" class="warn">試著越界 — fetch()</button>
-          <button id="btn-restore">還原</button>
-          <span id="seed-status" class="mono"></span>
-        </div>
+      <div class="seed-bar">
+        <button id="btn-run">重新編譯 ▸</button>
+        <button id="btn-violate" class="warn">試著越界 — fetch()</button>
+        <button id="btn-restore">還原</button>
+        <span id="seed-status"></span>
       </div>
     </div>
   </div>
-</header>
+</section>
 
 <main>
 
@@ -395,18 +439,6 @@ disc(lx, ly, 2.0);
     <div class="body measure">
       <p>一段腳本如何在世界上跑?<b>執行期把它編成一顆極小的 WASM 模組,交給瀏覽器引擎(V8 / JSC / SpiderMonkey)JIT。</b>同一份 DSL 三路並跑,生成的 WASM 追平 AOT Rust 的天花板、也追平手寫 JS,值逐位元相同。價值不在速度(那本來就打平),在於<b>「快 + 沙箱 + 同步」同時成立</b>。</p>
     </div>
-    <figure class="indent"><div class="fence">
-      <div class="fence-head"><span>一堵牆,兩道門 — <b>audit(bytes, grants)</b></span><span>src/audit.rs</span></div>
-      <div class="fence-body">
-        <div class="imp"><span class="dim">module.imports</span><span class="dim">host grants (entity soul)</span></div>
-        <div class="imp"><span>env.sin</span><span class="ok">✓ sin</span></div>
-        <div class="imp"><span>env.mv</span><span class="ok">✓ mv &nbsp;<span class="dim">// 請求移動,host clamp</span></span></div>
-        <div class="imp"><span>env.other</span><span class="ok">✓ other <span class="dim">// 感知最近的他者</span></span></div>
-        <div class="imp"><span class="no">env.fetch</span><span class="no">✗ &nbsp;—&nbsp; 不在授予清單 → 編譯期即拒</span></div>
-        <div class="imp"><span class="no">env.memory</span><span class="no">✗ &nbsp;非 func(想要更大的世界)→ 拒</span></div>
-        <div class="verdict">每一個 import 必須 <b>(1) 在 grants 內</b> 且 <b>(2) 是 function</b>。與生成者用哪種語言、多聰明<b>無關</b>——這面牆審的是位元組,不是意圖。</div>
-      </div>
-    </div></figure>
     <figure class="indent">
       <div class="panel">
         <div class="panel-label">整合管線 — 生成一次,編譯一次,執行百萬次</div>
@@ -598,6 +630,8 @@ disc(lx, ly, 2.0);
 
 <script type="module">
 import init, { compile_draw_wasm } from '/pkg/wasm_jit.js';
+const SEED_LIGHT = "// arcana.boo homepage sky (light theme) \u2014 a wasm-jit `draw` seed, compiled\n// LIVE in your browser by the wasm-jit compiler (itself Rust compiled to WASM).\n// Everything moving on this page is this one module. Its entire world is\n// 10 drawing primitives \u2014 it cannot fetch, cannot hold state, cannot read\n// the page. run(t, w, h), ~60 times a second.\n\nlet cx = w * 0.785;\nlet cy = h * 0.35;\nlet S  = h * 0.27;\nif w < h { S = w * 0.27; }\nlet D  = S * 0.62;\nlet D2 = D * D;\nlet N  = 13.0;\n\n// ---- the moon and its halo ----\nlet mm = h * 0.115;\nif w < h { mm = w * 0.115; }\nhsl(0.551, 0.58, 0.60);\nglow(w * 0.84, h * 0.27, mm * 2.6);\ndisc(w * 0.84, h * 0.27, mm * 0.45);\n\n// ---- snow: each flake its own quiet fall ----\nlet s = 0.0;\nwhile s < 30.0 {\n  let px = sin(s * 12.9898) * 437.585;\n  px = px % 1.0;\n  if px < 0.0 { px = px + 1.0; }\n  let vy = 0.016 + (s % 5.0) * 0.005;\n  let py = px * 3.7 + t * vy;\n  py = py % 1.0;\n  if py < 0.0 { py = py + 1.0; }\n  hsl(0.576, 0.26, 0.66);\n  disc(px * w + sin(t * 0.4 + s) * 6.0, py * h, 0.8 + (s % 3.0) * 0.3);\n  s = s + 1.0;\n}\n\n// ---- links: transient binding between every near pair (they form and break) ----\nlet i = 0.0;\nwhile i < N {\n  let pa = sin(i * 12.9898) * 437.585;\n  pa = pa % 1.0;\n  if pa < 0.0 { pa = pa + 1.0; }\n  let pr = sin(i * 78.233) * 125.432;\n  pr = pr % 1.0;\n  if pr < 0.0 { pr = pr + 1.0; }\n  let xi = cx + cos(pa * 6.2832) * (0.15 + 0.9 * pr) * S + sin(t * 0.22 + i) * 12.0;\n  let yi = cy + sin(pa * 6.2832) * (0.15 + 0.9 * pr) * S * 0.82 + cos(t * 0.17 + i * 1.7) * 10.0;\n  let j = i + 1.0;\n  while j < N {\n    let qa = sin(j * 12.9898) * 437.585;\n    qa = qa % 1.0;\n    if qa < 0.0 { qa = qa + 1.0; }\n    let qr = sin(j * 78.233) * 125.432;\n    qr = qr % 1.0;\n    if qr < 0.0 { qr = qr + 1.0; }\n    let xj = cx + cos(qa * 6.2832) * (0.15 + 0.9 * qr) * S + sin(t * 0.22 + j) * 12.0;\n    let yj = cy + sin(qa * 6.2832) * (0.15 + 0.9 * qr) * S * 0.82 + cos(t * 0.17 + j * 1.7) * 10.0;\n    let dx = xi - xj;\n    let dy = yi - yj;\n    let q = dx * dx + dy * dy;\n    if q < D2 {\n      let cl = 1.0 - q / D2;\n      hsl(0.556, 0.45, 0.80 + cl * -0.33);\n      line(xi, yi, xj, yj);\n    }\n    j = j + 1.0;\n  }\n  i = i + 1.0;\n}\n\n// ---- the light: gliding being to being, flaring what it reaches ----\nlet slot = t * 0.55;\nlet fs = slot - (slot % 1.0);\nlet pp = slot % 1.0;\nlet ha = sin(fs * 91.17) * 331.73;\nha = ha % 1.0;\nif ha < 0.0 { ha = ha + 1.0; }\nlet na = ha * N;\nna = na - (na % 1.0);\nlet hb = sin(fs * 47.53) * 217.31;\nhb = hb % 1.0;\nif hb < 0.0 { hb = hb + 1.0; }\nlet nb = hb * N;\nnb = nb - (nb % 1.0);\nlet dna = nb - na;\nif dna < 0.5 { if dna > 0.0 - 0.5 { nb = nb + 1.0; if nb >= N { nb = 0.0; } } }\n\n// ---- beings: water-blue cells and ember souls, breathing halos ----\nlet k = 0.0;\nwhile k < N {\n  let ka = sin(k * 12.9898) * 437.585;\n  ka = ka % 1.0;\n  if ka < 0.0 { ka = ka + 1.0; }\n  let kr = sin(k * 78.233) * 125.432;\n  kr = kr % 1.0;\n  if kr < 0.0 { kr = kr + 1.0; }\n  let xk = cx + cos(ka * 6.2832) * (0.15 + 0.9 * kr) * S + sin(t * 0.22 + k) * 12.0;\n  let yk = cy + sin(ka * 6.2832) * (0.15 + 0.9 * kr) * S * 0.82 + cos(t * 0.17 + k * 1.7) * 10.0;\n  let rr = 1.7 + (k % 3.0) * 0.55;\n  let fl = 0.0;\n  let dkb = k - nb;\n  if dkb < 0.5 { if dkb > 0.0 - 0.5 { if pp > 0.72 { fl = (pp - 0.72) * 3.5; } } }\n  let sv = k % 5.0;\n  if sv > 1.5 {\n    if sv < 2.5 {\n      hsl(0.068, 0.47, 0.47);\n      glow(xk, yk, (rr + 0.5) * 4.0 + fl * 10.0);\n      disc(xk, yk, rr + 0.5 + fl * 2.0);\n    }\n  }\n  if sv < 1.5 {\n    hsl(0.553, 0.65, 0.375);\n    glow(xk, yk, rr * 4.0 + fl * 10.0);\n    hsl(0.553, 0.6, 0.42);\n    disc(xk, yk, rr + fl * 2.0);\n  }\n  if sv > 2.5 {\n    hsl(0.553, 0.65, 0.375);\n    glow(xk, yk, rr * 4.0 + fl * 10.0);\n    hsl(0.553, 0.6, 0.42);\n    disc(xk, yk, rr + fl * 2.0);\n  }\n  k = k + 1.0;\n}\n\n// the travelling light itself\nlet aa = sin(na * 12.9898) * 437.585;\naa = aa % 1.0;\nif aa < 0.0 { aa = aa + 1.0; }\nlet ar = sin(na * 78.233) * 125.432;\nar = ar % 1.0;\nif ar < 0.0 { ar = ar + 1.0; }\nlet xa = cx + cos(aa * 6.2832) * (0.15 + 0.9 * ar) * S + sin(t * 0.22 + na) * 12.0;\nlet ya = cy + sin(aa * 6.2832) * (0.15 + 0.9 * ar) * S * 0.82 + cos(t * 0.17 + na * 1.7) * 10.0;\nlet ba = sin(nb * 12.9898) * 437.585;\nba = ba % 1.0;\nif ba < 0.0 { ba = ba + 1.0; }\nlet br = sin(nb * 78.233) * 125.432;\nbr = br % 1.0;\nif br < 0.0 { br = br + 1.0; }\nlet xb = cx + cos(ba * 6.2832) * (0.15 + 0.9 * br) * S + sin(t * 0.22 + nb) * 12.0;\nlet yb = cy + sin(ba * 6.2832) * (0.15 + 0.9 * br) * S * 0.82 + cos(t * 0.17 + nb * 1.7) * 10.0;\nhsl(0.56, 0.60, 0.42);\nglow(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 8.0);\ndisc(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 1.8);\n\n0.0";
+const SEED_DARK = "// arcana.boo homepage sky (dark theme) \u2014 a wasm-jit `draw` seed, compiled\n// LIVE in your browser by the wasm-jit compiler (itself Rust compiled to WASM).\n// Everything moving on this page is this one module. Its entire world is\n// 10 drawing primitives \u2014 it cannot fetch, cannot hold state, cannot read\n// the page. run(t, w, h), ~60 times a second.\n\nlet cx = w * 0.785;\nlet cy = h * 0.35;\nlet S  = h * 0.27;\nif w < h { S = w * 0.27; }\nlet D  = S * 0.62;\nlet D2 = D * D;\nlet N  = 13.0;\n\n// ---- the moon and its halo ----\nlet mm = h * 0.115;\nif w < h { mm = w * 0.115; }\nhsl(0.557, 0.68, 0.70);\nglow(w * 0.84, h * 0.27, mm * 2.6);\ndisc(w * 0.84, h * 0.27, mm * 0.45);\n\n// ---- snow: each flake its own quiet fall ----\nlet s = 0.0;\nwhile s < 30.0 {\n  let px = sin(s * 12.9898) * 437.585;\n  px = px % 1.0;\n  if px < 0.0 { px = px + 1.0; }\n  let vy = 0.016 + (s % 5.0) * 0.005;\n  let py = px * 3.7 + t * vy;\n  py = py % 1.0;\n  if py < 0.0 { py = py + 1.0; }\n  hsl(0.58, 0.30, 0.86);\n  disc(px * w + sin(t * 0.4 + s) * 6.0, py * h, 0.8 + (s % 3.0) * 0.3);\n  s = s + 1.0;\n}\n\n// ---- links: transient binding between every near pair (they form and break) ----\nlet i = 0.0;\nwhile i < N {\n  let pa = sin(i * 12.9898) * 437.585;\n  pa = pa % 1.0;\n  if pa < 0.0 { pa = pa + 1.0; }\n  let pr = sin(i * 78.233) * 125.432;\n  pr = pr % 1.0;\n  if pr < 0.0 { pr = pr + 1.0; }\n  let xi = cx + cos(pa * 6.2832) * (0.15 + 0.9 * pr) * S + sin(t * 0.22 + i) * 12.0;\n  let yi = cy + sin(pa * 6.2832) * (0.15 + 0.9 * pr) * S * 0.82 + cos(t * 0.17 + i * 1.7) * 10.0;\n  let j = i + 1.0;\n  while j < N {\n    let qa = sin(j * 12.9898) * 437.585;\n    qa = qa % 1.0;\n    if qa < 0.0 { qa = qa + 1.0; }\n    let qr = sin(j * 78.233) * 125.432;\n    qr = qr % 1.0;\n    if qr < 0.0 { qr = qr + 1.0; }\n    let xj = cx + cos(qa * 6.2832) * (0.15 + 0.9 * qr) * S + sin(t * 0.22 + j) * 12.0;\n    let yj = cy + sin(qa * 6.2832) * (0.15 + 0.9 * qr) * S * 0.82 + cos(t * 0.17 + j * 1.7) * 10.0;\n    let dx = xi - xj;\n    let dy = yi - yj;\n    let q = dx * dx + dy * dy;\n    if q < D2 {\n      let cl = 1.0 - q / D2;\n      hsl(0.556, 0.45, 0.20 + cl * 0.30);\n      line(xi, yi, xj, yj);\n    }\n    j = j + 1.0;\n  }\n  i = i + 1.0;\n}\n\n// ---- the light: gliding being to being, flaring what it reaches ----\nlet slot = t * 0.55;\nlet fs = slot - (slot % 1.0);\nlet pp = slot % 1.0;\nlet ha = sin(fs * 91.17) * 331.73;\nha = ha % 1.0;\nif ha < 0.0 { ha = ha + 1.0; }\nlet na = ha * N;\nna = na - (na % 1.0);\nlet hb = sin(fs * 47.53) * 217.31;\nhb = hb % 1.0;\nif hb < 0.0 { hb = hb + 1.0; }\nlet nb = hb * N;\nnb = nb - (nb % 1.0);\nlet dna = nb - na;\nif dna < 0.5 { if dna > 0.0 - 0.5 { nb = nb + 1.0; if nb >= N { nb = 0.0; } } }\n\n// ---- beings: water-blue cells and ember souls, breathing halos ----\nlet k = 0.0;\nwhile k < N {\n  let ka = sin(k * 12.9898) * 437.585;\n  ka = ka % 1.0;\n  if ka < 0.0 { ka = ka + 1.0; }\n  let kr = sin(k * 78.233) * 125.432;\n  kr = kr % 1.0;\n  if kr < 0.0 { kr = kr + 1.0; }\n  let xk = cx + cos(ka * 6.2832) * (0.15 + 0.9 * kr) * S + sin(t * 0.22 + k) * 12.0;\n  let yk = cy + sin(ka * 6.2832) * (0.15 + 0.9 * kr) * S * 0.82 + cos(t * 0.17 + k * 1.7) * 10.0;\n  let rr = 1.7 + (k % 3.0) * 0.55;\n  let fl = 0.0;\n  let dkb = k - nb;\n  if dkb < 0.5 { if dkb > 0.0 - 0.5 { if pp > 0.72 { fl = (pp - 0.72) * 3.5; } } }\n  let sv = k % 5.0;\n  if sv > 1.5 {\n    if sv < 2.5 {\n      hsl(0.068, 0.55, 0.62);\n      glow(xk, yk, (rr + 0.5) * 4.0 + fl * 10.0);\n      disc(xk, yk, rr + 0.5 + fl * 2.0);\n    }\n  }\n  if sv < 1.5 {\n    hsl(0.557, 0.68, 0.69);\n    glow(xk, yk, rr * 4.0 + fl * 10.0);\n    hsl(0.557, 0.68, 0.78);\n    disc(xk, yk, rr + fl * 2.0);\n  }\n  if sv > 2.5 {\n    hsl(0.557, 0.68, 0.69);\n    glow(xk, yk, rr * 4.0 + fl * 10.0);\n    hsl(0.557, 0.68, 0.78);\n    disc(xk, yk, rr + fl * 2.0);\n  }\n  k = k + 1.0;\n}\n\n// the travelling light itself\nlet aa = sin(na * 12.9898) * 437.585;\naa = aa % 1.0;\nif aa < 0.0 { aa = aa + 1.0; }\nlet ar = sin(na * 78.233) * 125.432;\nar = ar % 1.0;\nif ar < 0.0 { ar = ar + 1.0; }\nlet xa = cx + cos(aa * 6.2832) * (0.15 + 0.9 * ar) * S + sin(t * 0.22 + na) * 12.0;\nlet ya = cy + sin(aa * 6.2832) * (0.15 + 0.9 * ar) * S * 0.82 + cos(t * 0.17 + na * 1.7) * 10.0;\nlet ba = sin(nb * 12.9898) * 437.585;\nba = ba % 1.0;\nif ba < 0.0 { ba = ba + 1.0; }\nlet br = sin(nb * 78.233) * 125.432;\nbr = br % 1.0;\nif br < 0.0 { br = br + 1.0; }\nlet xb = cx + cos(ba * 6.2832) * (0.15 + 0.9 * br) * S + sin(t * 0.22 + nb) * 12.0;\nlet yb = cy + sin(ba * 6.2832) * (0.15 + 0.9 * br) * S * 0.82 + cos(t * 0.17 + nb * 1.7) * 10.0;\nhsl(0.575, 0.72, 0.86);\nglow(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 8.0);\ndisc(xa + (xb - xa) * pp, ya + (yb - ya) * pp, 1.8);\n\n0.0";
 const OK = (b,m)=>`wasm-jit 編譯 ${b} bytes,${m} ms — 這顆模組的整個世界:10 個繪圖原語。這裡沒有 fetch()。`;
 const ERR = e=>`編譯期拒絕:${e}`;
 (async function(){
@@ -607,6 +641,9 @@ const ERR = e=>`編譯期拒絕:${e}`;
   let W=0,H=0; const dpr=Math.min(window.devicePixelRatio||1,2);
   function size(){ const r=c.parentElement.getBoundingClientRect(); W=r.width; H=r.height;
     c.width=W*dpr; c.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+  function theme(){ const a=document.documentElement.getAttribute('data-theme');
+    if(a) return a;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches)?'dark':'light'; }
   let drawA=a=>`hsla(200,62%,62%,${a})`;
   const env={ sin:Math.sin, cos:Math.cos,
     hue:v=>{const Hh=(((v%1)+1)%1)*360;const s=`hsl(${Hh},62%,62%)`;ctx.strokeStyle=s;ctx.fillStyle=s;drawA=a=>`hsla(${Hh},62%,62%,${a})`;},
@@ -620,7 +657,9 @@ const ERR = e=>`編譯期拒絕:${e}`;
       g.addColorStop(0,drawA(0.55)); g.addColorStop(1,drawA(0)); const k=ctx.fillStyle;
       ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,r,0,6.2832); ctx.fill(); ctx.fillStyle=k; } };
   const seedEl=document.getElementById('seed'), st=document.getElementById('seed-status');
-  const SEED0=seedEl?seedEl.value:'';
+  let curTheme=theme(), edited=false;
+  if(seedEl) seedEl.value = curTheme==='dark' ? SEED_DARK : SEED_LIGHT;
+  if(seedEl) seedEl.addEventListener('input',()=>{ edited=true; });
   let run=null;
   function compile(){
     try{
@@ -628,20 +667,24 @@ const ERR = e=>`編譯期拒絕:${e}`;
       const bytes=compile_draw_wasm(seedEl.value);
       const inst=new WebAssembly.Instance(new WebAssembly.Module(bytes),{env});
       run=inst.exports.run;
-      if(st){ st.textContent=OK(bytes.length,(performance.now()-a).toFixed(1)); st.className='mono ok2'; }
-    }catch(e){ if(st){ st.textContent=ERR(e && e.message ? e.message : String(e)); st.className='mono no2'; } }
+      if(st){ st.textContent=OK(bytes.length,(performance.now()-a).toFixed(1)); st.className='ok2'; }
+    }catch(e){ if(st){ st.textContent=ERR(e && e.message ? e.message : String(e)); st.className='no2'; } }
   }
+  function onTheme(){ const th=theme(); if(th===curTheme) return; curTheme=th;
+    if(!edited && seedEl){ seedEl.value = th==='dark' ? SEED_DARK : SEED_LIGHT; compile(); } if(reduce) frame(); }
   await init(); size(); compile();
   const t0=performance.now();
-  function frame(){ if(run){ ctx.clearRect(0,0,W,H); ctx.lineWidth=1.3; ctx.lineCap='round';
+  function frame(){ if(run){ ctx.clearRect(0,0,W,H); ctx.lineWidth=1.15; ctx.lineCap='round';
     try{ run((performance.now()-t0)/1000+2.0, W, H); }catch(e){ run=null; } } }
   function loop(){ frame(); if(!reduce) requestAnimationFrame(loop); }
   if(reduce){ frame(); } else requestAnimationFrame(loop);
   window.addEventListener('resize',()=>{ size(); if(reduce) frame(); });
+  new MutationObserver(onTheme).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  if(window.matchMedia) window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',onTheme);
   const $=id=>document.getElementById(id);
   if($('btn-run')) $('btn-run').onclick=()=>compile();
-  if($('btn-violate')) $('btn-violate').onclick=()=>{ seedEl.value='// a seed that reaches for the net\nfetch(t);\n0.0'; compile(); };
-  if($('btn-restore')) $('btn-restore').onclick=()=>{ seedEl.value=SEED0; compile(); };
+  if($('btn-violate')) $('btn-violate').onclick=()=>{ edited=true; seedEl.value='// a seed that reaches for the net\nfetch(t);\n0.0'; compile(); };
+  if($('btn-restore')) $('btn-restore').onclick=()=>{ edited=false; seedEl.value = curTheme==='dark' ? SEED_DARK : SEED_LIGHT; compile(); };
   if(!reduce && 'IntersectionObserver' in window){
     document.querySelectorAll('section .wrap > *').forEach(el=>el.classList.add('reveal'));
     const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:0.08,rootMargin:'0px 0px -8% 0px'});
