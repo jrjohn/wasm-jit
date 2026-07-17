@@ -61,19 +61,10 @@ const FIELD_FUEL: u32 = 2_000_000;
 /// Inhabitant (entity) ABI: run(t, ex, ey) -> f64, once per tick. The soul is
 /// a seed (JSON+DSL, fast loop); the skin is host sprite vocabulary (slow
 /// loop); the bounds are this grant template. `mv(dx,dy)` REQUESTS movement —
-/// position is host-owned state, clamped and bounded by the host.
-const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
-const ENTITY_IMPORTS: [HostFn; 9] = [
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "get", n_args: 1, returns: true },
-    HostFn { name: "set", n_args: 2, returns: false },
-    HostFn { name: "fr", n_args: 3, returns: true },
-    HostFn { name: "mv", n_args: 2, returns: false },
-    HostFn { name: "unbind", n_args: 0, returns: false }, // §19: the freedom to leave a condition
-    HostFn { name: "rise", n_args: 1, returns: false },   // the vertical faculty: aloft/descend (host clamps 0..1)
-    HostFn { name: "other", n_args: 2, returns: true },   // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
-];
+/// position is host-owned state, clamped and bounded by the host. Shared with
+/// the browser compiler via the crate so the two agree (bind/unbind included).
+const ENTITY_PARAMS: [&str; 3] = wasm_jit::ENTITY_PARAMS;
+const ENTITY_IMPORTS: [HostFn; 10] = wasm_jit::ENTITY_IMPORTS;
 const ENTITY_FUEL: u32 = 200_000;
 /// The curated skin registry — types the host draws with hand-tuned Rust skins.
 const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
@@ -1469,6 +1460,34 @@ mod tests {
             "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
                 "entities":[{"id":"x","type":"boat","at":[5,5],"behavior":"fetch(t)"}]}});
         assert!(validate(&bad_behavior).unwrap_err().contains("failed to compile"));
+    }
+
+    #[test]
+    fn entity_bind_behavior_validates() {
+        // §19 bind/unbind: a being that walks to the nearest thing and boards it
+        // (bind as a statement AND in an expression), then can leave (unbind)
+        let world = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[
+                    {"id":"boat","type":"boat","at":[50,50],"behavior":"mv(0.01,0.0);\n0.0"},
+                    {"id":"he","type":"person","at":[44,50],
+                     "behavior":"let d = other(0.0, 0.0);\nif d > 2.0 { mv(other(0.0,1.0) * 0.1, other(0.0,2.0) * 0.1); }\nif d <= 2.0 { let boarded = bind(0.0);\n if boarded < 0.5 { unbind(); } }\n0.0"}
+                ]}});
+        assert!(validate(&world).is_ok(), "{:?}", validate(&world));
+    }
+
+    #[test]
+    fn entity_abi_has_bind_paired_with_unbind() {
+        // the native validator and the browser compiler must share one entity ABI
+        assert_eq!(ENTITY_IMPORTS.len(), wasm_jit::ENTITY_IMPORTS.len());
+        for (a, b) in ENTITY_IMPORTS.iter().zip(wasm_jit::ENTITY_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        // §19 is complete only if both halves are present
+        assert!(ENTITY_IMPORTS.iter().any(|i| i.name == "bind"), "entity ABI missing bind");
+        assert!(ENTITY_IMPORTS.iter().any(|i| i.name == "unbind"), "entity ABI missing unbind");
+        let bind = ENTITY_IMPORTS.iter().find(|i| i.name == "bind").unwrap();
+        assert!(bind.returns && bind.n_args == 1, "bind(i) must take an index and return a verdict");
     }
 
     #[test]

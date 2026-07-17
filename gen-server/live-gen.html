@@ -624,6 +624,7 @@ function terrainColor(h, w, v, s = 0) {
 // ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
 let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
 const MAX_STEP = 0.5;    // host law: nobody teleports
+const BIND_REACH = 2.5;  // host law: you can only board what you can reach (§19 bind)
 
 function entityEnv(ent, g) { // one body, one slot store — reflex, packaged soul, and mind all share it
   return {
@@ -637,6 +638,23 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
     },
     mv: (dx, dy) => { ent.pending[0] += dx; ent.pending[1] += dy; }, // a REQUEST, not a move
     unbind: () => { if (ent.on) { ent.on = null; ent.freed = true; } }, // §19: leave the condition
+    bind: i => { // §19 (the other half): ENTER a condition — ride the i-th nearest being
+      i |= 0;
+      const list = [];
+      for (const o of ENTITIES) { if (o === ent) continue; list.push({ o, d: Math.hypot(o.x - ent.x, o.y - ent.y) }); }
+      list.sort((a, b) => a.d - b.d);
+      const pick = list[i];
+      if (!pick || pick.d > BIND_REACH) return 0;   // no such neighbour, or too far to board (夠近才能登)
+      const target = pick.o;
+      // host law: no ride cycle — the target must not (transitively) ride this being
+      let c = target, hops = 0;
+      while (c && c.on && hops <= ENTITIES.length) {
+        if (c.on === ent.id) return 0;
+        c = ENTITIES.find(e => e.id === c.on); hops++;
+      }
+      ent.on = target.id; ent.offset = [0, 0]; ent.freed = false; // become one with it; the carrier now carries
+      return 1;
+    },
     rise: dz => { ent.alt = Math.min(Math.max((ent.alt ?? 0) + dz, 0), 1); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
     other: (i, k) => { // real-time sense of other beings: (i,0)=dist to i-th nearest, (i,1)=dx, (i,2)=dy
       i |= 0; k |= 0;
@@ -653,7 +671,7 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
 // The grantable, world-touching capabilities (sin/cos are pure math, always
 // available). A being's `grants` is a subset of these; a begotten child's
 // grants must be ⊆ its parent's (docs §21 — monotonically non-increasing).
-const ENTITY_CAPS = ['get', 'set', 'fr', 'mv', 'unbind', 'rise', 'other'];
+const ENTITY_CAPS = ['get', 'set', 'fr', 'mv', 'unbind', 'bind', 'rise', 'other'];
 
 // Recursive begetting (docs §20.1/§21): a being's mind may bring a NEW being
 // into the world — a painter paints a painter — under three host-enforced laws:

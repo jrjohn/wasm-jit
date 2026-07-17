@@ -132,32 +132,38 @@ pub fn compile_field_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// The entity ABI, shared so the native validator (gen-server) and the browser
+/// compiler agree on the same capability set. `run(t, ex, ey) -> f64`; imports
+/// below. `bind`/`unbind` are §19's paired faculties: ENTER a condition — ride
+/// the i-th nearest being (host clamps reach, forbids ride cycles) — and LEAVE
+/// it. A rider's own mv() is ignored; the carrier carries.
+pub const ENTITY_PARAMS: [&str; 3] = ["t", "ex", "ey"];
+pub const ENTITY_IMPORTS: [codegen::HostFn; 10] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+    codegen::HostFn { name: "fr", n_args: 3, returns: true },
+    codegen::HostFn { name: "mv", n_args: 2, returns: false },
+    codegen::HostFn { name: "unbind", n_args: 0, returns: false }, // §19: leave the condition
+    codegen::HostFn { name: "bind", n_args: 1, returns: true },    // §19: enter one — ride the i-th nearest being (1.0 if boarded, 0.0 if refused)
+    codegen::HostFn { name: "rise", n_args: 1, returns: false },   // the vertical faculty: request a change in altitude (host clamps)
+    codegen::HostFn { name: "other", n_args: 2, returns: true },   // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
+];
+
 /// Inhabitant (entity) behavior for the Field: `run(t, ex, ey) -> f64`.
-/// Capabilities env.{sin, cos, get, set, fr, mv, unbind} — fr reads the shared
-/// field, mv REQUESTS movement (host clamps speed/bounds; position is
-/// host-owned), unbind() releases the being from whatever it rides (§19: the
-/// freedom to leave a condition, now in the being's own ABI).
+/// Capabilities env.{sin, cos, get, set, fr, mv, unbind, bind, rise, other} — fr
+/// reads the shared field, mv REQUESTS movement (host clamps speed/bounds;
+/// position is host-owned), bind()/unbind() enter and leave a riding condition
+/// (§19: the freedom to become one with a thing, and to leave it).
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
-    use codegen::HostFn;
-    const PARAMS: [&str; 3] = ["t", "ex", "ey"];
-    const IMPORTS: [HostFn; 9] = [
-        HostFn { name: "sin", n_args: 1, returns: true },
-        HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "get", n_args: 1, returns: true },
-        HostFn { name: "set", n_args: 2, returns: false },
-        HostFn { name: "fr", n_args: 3, returns: true },
-        HostFn { name: "mv", n_args: 2, returns: false },
-        HostFn { name: "unbind", n_args: 0, returns: false },
-        HostFn { name: "rise", n_args: 1, returns: false }, // the vertical faculty: request a change in altitude (host clamps)
-        HostFn { name: "other", n_args: 2, returns: true },  // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
-    ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
         &prog,
-        &PARAMS,
-        &IMPORTS,
+        &ENTITY_PARAMS,
+        &ENTITY_IMPORTS,
         codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))
@@ -203,7 +209,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 #[wasm_bindgen]
 pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
     use audit::Grant;
-    const GRANTS: [Grant; 9] = [
+    const GRANTS: [Grant; 10] = [
         Grant { module: "env", name: "sin" },
         Grant { module: "env", name: "cos" },
         Grant { module: "env", name: "get" },
@@ -211,6 +217,7 @@ pub fn audit_entity_bytes(bytes: &[u8]) -> Result<(), JsError> {
         Grant { module: "env", name: "fr" },
         Grant { module: "env", name: "mv" },
         Grant { module: "env", name: "unbind" },
+        Grant { module: "env", name: "bind" },
         Grant { module: "env", name: "rise" },
         Grant { module: "env", name: "other" },
     ];
@@ -239,6 +246,7 @@ pub fn compile_entity_wasm_grants(src: &str, grants: Vec<String>) -> Result<Vec<
     if g("fr") { imports.push(HostFn { name: "fr", n_args: 3, returns: true }); }
     if g("mv") { imports.push(HostFn { name: "mv", n_args: 2, returns: false }); }
     if g("unbind") { imports.push(HostFn { name: "unbind", n_args: 0, returns: false }); }
+    if g("bind") { imports.push(HostFn { name: "bind", n_args: 1, returns: true }); }
     if g("rise") { imports.push(HostFn { name: "rise", n_args: 1, returns: false }); }
     if g("other") { imports.push(HostFn { name: "other", n_args: 2, returns: true }); }
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
@@ -267,6 +275,7 @@ pub fn audit_entity_bytes_grants(bytes: &[u8], grants: Vec<String>) -> Result<()
     if g("fr") { allow.push(Grant { module: "env", name: "fr" }); }
     if g("mv") { allow.push(Grant { module: "env", name: "mv" }); }
     if g("unbind") { allow.push(Grant { module: "env", name: "unbind" }); }
+    if g("bind") { allow.push(Grant { module: "env", name: "bind" }); }
     if g("rise") { allow.push(Grant { module: "env", name: "rise" }); }
     if g("other") { allow.push(Grant { module: "env", name: "other" }); }
     audit::audit(bytes, &allow).map_err(|e| JsError::new(&e))

@@ -188,7 +188,12 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   entities {"type":"lotus"} with NO skin_seed — the host recalls the saved look by name.
 - at: [x,y] grid position; behavior (optional): DSL run(t, ex, ey) -> f64, runs every tick.
   Capabilities: sin cos get set (private slots) + fr(c,x,y) (read the field) + mv(dx,dy)
-  (REQUEST movement — the host clamps speed and bounds; position is host-owned).
+  (REQUEST movement — the host clamps speed and bounds; position is host-owned)
+  + other(i,k) (sense the i-th nearest being: k=0 dist, 1 dx, 2 dy) + rise(dz) (go aloft / descend)
+  + bind(i)/unbind() — §19's paired faculties: bind(i) boards the i-th nearest being IF it is
+  within reach (returns 1.0 if boarded, else 0.0); unbind() leaves. While riding, the being is
+  carried at its carrier's position and its own mv is ignored. e.g. walk to a boat, then board it:
+  "let d = other(0.0, 0.0);\nif d > 2.0 { mv(other(0.0,1.0) * 0.1, other(0.0,2.0) * 0.1); }\nif d <= 2.0 { bind(0.0); }\n0.0"
 - ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
 - OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
@@ -196,6 +201,8 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
 - "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
   every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
+  ("on" is the AUTHORED, initial ride; a being with a mind/behavior can also bind()/unbind() at
+  RUNTIME to board or leave by its own choice — same host law, chosen instead of declared.)
 - "mind":{"persona":"<one line of character>"} gives a being its OWN live mind (a separate
   Claude) that reacts to world events and answers when the user writes "@<id> ...". When a
   scene has a named or human character (a fisherman, a driver, a traveler), give that entity a
