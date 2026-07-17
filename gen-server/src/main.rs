@@ -35,18 +35,10 @@ const UI_IMPORTS: [HostFn; 4] = [
     HostFn { name: "get", n_args: 1, returns: true },
     HostFn { name: "set", n_args: 2, returns: false },
 ];
-const DRAW_IMPORTS: [HostFn; 10] = [
-    HostFn { name: "glow", n_args: 3, returns: false }, // soft radial halo (x,y,r) in the current colour
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "hue", n_args: 1, returns: false },
-    HostFn { name: "rgb", n_args: 3, returns: false },
-    HostFn { name: "hsl", n_args: 3, returns: false },
-    HostFn { name: "disc", n_args: 3, returns: false },
-    HostFn { name: "ring", n_args: 3, returns: false },
-    HostFn { name: "arc", n_args: 5, returns: false },
-    HostFn { name: "line", n_args: 4, returns: false },
-];
+// The draw ABI lives in the wasm-jit crate so the native validator here and the
+// browser's compile_draw_wasm mint byte-identical modules — no drift. It now
+// carries the interaction loop (mx/my/down + get/set); see wasm_jit::DRAW_IMPORTS.
+const DRAW_IMPORTS: [HostFn; 15] = wasm_jit::DRAW_IMPORTS;
 const UI_VOCAB: [&str; 11] = [
     "stack", "row", "label", "value", "button", "slider", "input",
     "barchart", "linechart", "piechart", "gauge",
@@ -1511,5 +1503,32 @@ mod tests {
         )
         .unwrap();
         assert!(validate(&obj).is_ok());
+    }
+
+    #[test]
+    fn interactive_draw_seed_validates() {
+        // §21 interaction loop: a draw that reads the pointer (mx/my/down) and
+        // remembers via the host data root (get/set) must compile natively, so
+        // the server never ships a seed the browser's new ABI can't instantiate.
+        let obj: Value = serde_json::from_str(
+            r#"{"surface":"draw","seed":"let px = get(0.0);\npx = px + (mx() - px) * 0.1;\nset(0.0, px);\nlet r = 8.0;\nif down() > 0.5 { r = 16.0; }\ndisc(px, my(), r);\n0.0"}"#,
+        )
+        .unwrap();
+        assert!(validate(&obj).is_ok(), "interactive draw seed should validate");
+    }
+
+    #[test]
+    fn draw_abi_matches_crate() {
+        // the native validator and the browser compiler must share one draw ABI
+        assert_eq!(DRAW_IMPORTS.len(), wasm_jit::DRAW_IMPORTS.len());
+        for (a, b) in DRAW_IMPORTS.iter().zip(wasm_jit::DRAW_IMPORTS.iter()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.n_args, b.n_args);
+            assert_eq!(a.returns, b.returns);
+        }
+        // the interaction faculties are present
+        for f in ["mx", "my", "down", "get", "set"] {
+            assert!(DRAW_IMPORTS.iter().any(|i| i.name == f), "draw ABI missing {f}");
+        }
     }
 }

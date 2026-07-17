@@ -1154,6 +1154,25 @@ window.__injectBadFieldCell = () => {
 const cv = $('cv'), ctx = cv.getContext('2d');
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
+
+// ---- the interaction loop (§21): events in, host-owned state ----
+// The host owns the mouse and the memory; the cell only SEES a pointer and
+// attenuates into a 32-slot data root. Reach fixed (it still can't fetch, read
+// the page, or capture events elsewhere); richness unbounded.
+const drawPtr = { x: -1, y: -1, down: 0 };  // pointer over the canvas, in device px (-1 = away)
+let drawRoot = new Float64Array(32);        // the host data root: survives a hot-patch, reset only on a fresh drawing
+function drawPtrAt(e) {
+  const r = cv.getBoundingClientRect(); const p = (e.touches && e.touches[0]) || e;
+  if (p.clientX == null) return;
+  drawPtr.x = (p.clientX - r.left) * (cv.width / r.width);
+  drawPtr.y = (p.clientY - r.top) * (cv.height / r.height);
+}
+cv.addEventListener('pointermove', drawPtrAt);
+cv.addEventListener('pointerdown', e => { drawPtr.down = 1; drawPtrAt(e); });
+window.addEventListener('pointerup', () => { drawPtr.down = 0; });
+cv.addEventListener('pointerleave', () => { drawPtr.x = drawPtr.y = -1; drawPtr.down = 0; });
+const slot = i => (((i | 0) % 32) + 32) % 32;
+
 const env = {
   sin: Math.sin, cos: Math.cos,
   hue: v => { const H = (((v % 1) + 1) % 1) * 360; const c = `hsl(${H},62%,62%)`; ctx.strokeStyle = c; ctx.fillStyle = c; drawA = a => `hsla(${H},62%,62%,${a})`; },
@@ -1164,9 +1183,16 @@ const env = {
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
   glow: (x, y, r) => { r = Math.max(r, 0); if (!r) return; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, drawA(0.55)); g.addColorStop(1, drawA(0)); const keep = ctx.fillStyle; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill(); ctx.fillStyle = keep; },
+  // interaction loop capabilities
+  mx: () => drawPtr.x, my: () => drawPtr.y, down: () => drawPtr.down,
+  get: i => drawRoot[slot(i)],
+  set: (i, v) => { drawRoot[slot(i)] = v; },
 };
-function manifestDraw(seed) {
+// keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
+// interaction it accumulated (a trail, a click count) survives the edit.
+function manifestDraw(seed, keepState) {
   fieldWorld = null;
+  if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
   const t0 = performance.now();
   const bytes = compile_draw_wasm(seed);
   const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env });
@@ -1174,12 +1200,18 @@ function manifestDraw(seed) {
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   $('stage-status').textContent =
-    `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms (7 primitives, no DOM, no net)`;
+    `manifested: ${bytes.length}-byte drawing cell in ${(performance.now() - t0).toFixed(1)}ms` +
+    ` — touch it: the pointer flows in, state lives in a host data root${keepState ? ' (kept across this patch)' : ''}`;
   lastManifest = { surface: 'draw', payload: seed };
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = seed;
   document.title = 'live-gen DRAW OK';
 }
+// patch 雛形: hot-swap the running cell with literal DSL, no LLM, state kept
+window.__patchDraw = src => manifestDraw(src, true);
+// the data root is the HOST's: it can read it any time (here, for inspection/e2e)
+window.__drawRoot = () => Array.from(drawRoot);
+window.__manifestDraw = (src, keep) => manifestDraw(src, keep);
 (function loop(now) {
   if (drawRun) {
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -1212,6 +1244,15 @@ async function send() {
   // a leading ! forces a fresh generation, bypassing the ālaya ledger
   let fresh = false;
   if (prompt.startsWith('!') && !prompt.startsWith('!@')) { fresh = true; prompt = prompt.slice(1).trim(); }
+  if (prompt.startsWith('~')) { // patch 雛形: hot-swap the RUNNING draw cell with literal DSL — no LLM, state kept
+    const src = prompt.slice(1).trim();
+    $('prompt').value = '';
+    say('user', prompt);
+    if (!drawRun) { say('err', 'patch applies to a running drawing — generate one first, then ~ to edit it in place'); return; }
+    try { window.__patchDraw(src); say('ai', '⌁ patched the running cell in place (no LLM) — the host data root survived the swap'); }
+    catch (e) { say('err', 'patch refused by the compiler: ' + (e.message ?? e)); }
+    return;
+  }
   if (prompt.startsWith('@')) { // speak TO a being: its own mind answers
     const sp = prompt.indexOf(' ');
     const name = sp < 0 ? prompt.slice(1) : prompt.slice(1, sp);

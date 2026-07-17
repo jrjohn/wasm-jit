@@ -56,8 +56,15 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
 === surface "draw" ===
 "seed" = one DSL script, signature run(t, w, h) -> f64, called every animation frame.
 - t = seconds (animate with it), w/h = canvas size in px
-- capabilities: sin(x) cos(x) hue(v) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2)
+- capabilities: sin(x) cos(x) hue(v) rgb(r,g,b) hsl(h,s,l) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2) glow(x,y,r)
 - hue(v): v in 0..1 sets the current color; disc = filled circle; ring = outlined circle; arc angles in radians
+- INTERACTION (make a drawing you can TOUCH — prefer this when the ask implies input):
+  - mx() my() = pointer position in canvas px; both are -1 when the pointer is away (guard with `if mx() > 0 {...}`)
+  - down() = 1.0 while the pointer is pressed, else 0.0
+  - get(slot) set(slot,v) = a 32-slot (0..31) f64 store the HOST owns and keeps
+    across edits — use it to REMEMBER between frames (a trail of past pointer
+    positions, a click counter, a smoothed value). e.g. ease a dot toward the
+    cursor: `let px = get(0.0); px = px + (mx() - px) * 0.1; set(0.0, px); disc(px, my(), 8.0);`
 - compose EVERYTHING from these primitives; end with `0.0`
 
 === example 1: single input chain (surface "ui") ===
