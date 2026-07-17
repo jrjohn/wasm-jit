@@ -1,5 +1,5 @@
 <!doctype html><html lang="x"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
-<title>wasm-jit — 多維度軟體架構的解剖</title>
+<title>wasm-jit — Anatomy of a Multidimensional Software World</title>
 <style>
   :root {
     --bg:#eceff3; --surface:#f7f9fb; --surface-2:#e5eaef; --sunk:#e9edf1;
@@ -167,29 +167,29 @@
   <canvas id="sky" aria-hidden="true"></canvas>
   <div class="hero-grad"></div>
   <div class="wrap">
-    <div class="kicker"><span class="dot"></span><span class="eyebrow">Architecture Anatomy · github.com/jrjohn/wasm-jit</span><a href="architecture-anatomy.en.html" style="margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);border:0;letter-spacing:.05em">EN ↗</a></div>
+    <div class="kicker"><span class="dot"></span><span class="eyebrow">Architecture Anatomy · github.com/jrjohn/wasm-jit</span><a href="architecture-anatomy.html" style="margin-left:auto;font-family:var(--font-mono);font-size:12px;color:var(--ink-faint);border:0;letter-spacing:.05em">中文 ↗</a></div>
     <h1>wasm-jit
-      <span class="sub">一個「多維度軟體世界」的解剖——AI 隨想即生、即刻執行,卻碰不到它沒被授予的任何東西。</span>
+      <span class="sub">An anatomy of a multidimensional software world — the UI manifests from intent, runs the instant it is born, and can touch nothing it was not granted.</span>
     </h1>
-    <p class="thesis">把<b>規則</b>存起來,不是把<b>網</b>存起來。一段語言微小到能當種子的腳本,在執行期編成 WebAssembly、由瀏覽器引擎 JIT——<b>而那個模組能觸及的整個世界,就是它宣告的 import 表</b>。沒被授予的能力,再強的生成者也拿不到。</p>
+    <p class="thesis">Store the <b>rule</b>, not the <b>net</b>. A seed script — a language small enough to be a seed — is compiled to WebAssembly at runtime and JIT-ed by the browser engine, and <b>the entire world that module can reach is the import table it declares</b>. A capability it was never granted, no generator can seize — however clever.</p>
     <div class="hero-meta">
       <span class="tag"><b>Rust</b> workspace · 5 crates</span>
       <span class="tag">seed DSL → <b>wasm-encoder</b> → WebAssembly</span>
       <span class="tag">~117 bytes · <b>1–3ms</b> compile · 0.03ms/frame</span>
-      <span class="tag">capability fence · <b>fetch() 被拒</b></span>
-      <span class="tag">↗ 右上這張網 = wasm-jit 編的 <b>1,529B</b> WASM · 9 原語 · 碰不到網路</span>
+      <span class="tag">capability fence · <b>fetch() rejected</b></span>
+      <span class="tag">↗ the net, top-right = a <b>1,529 B</b> WASM module wasm-jit compiled · 9 primitives · no network</span>
     </div>
 
     <div class="fence">
-      <div class="fence-head"><span>一堵牆,兩道門 — <b>audit(bytes, grants)</b></span><span>src/audit.rs</span></div>
+      <div class="fence-head"><span>one wall, two doors — <b>audit(bytes, grants)</b></span><span>src/audit.rs</span></div>
       <div class="fence-body">
         <div class="imp"><span class="dim">module.imports</span><span class="dim">host grants (entity soul)</span></div>
         <div class="imp"><span>env.sin</span><span class="ok">✓ sin</span></div>
-        <div class="imp"><span>env.mv</span><span class="ok">✓ mv &nbsp;<span class="dim">// 請求移動,host clamp</span></span></div>
-        <div class="imp"><span>env.other</span><span class="ok">✓ other <span class="dim">// 感知最近的他者</span></span></div>
-        <div class="imp"><span class="no">env.fetch</span><span class="no">✗ &nbsp;—&nbsp; 不在授予清單 → 編譯期即拒</span></div>
-        <div class="imp"><span class="no">env.memory</span><span class="no">✗ &nbsp;非 func(想要更大的世界)→ 拒</span></div>
-        <div class="verdict">每一個 import 必須 <b>(1) 在 grants 內</b> 且 <b>(2) 是 function</b>。與生成者用哪種語言、多聰明<b>無關</b>——這面牆審的是位元組,不是意圖。</div>
+        <div class="imp"><span>env.mv</span><span class="ok">✓ mv &nbsp;<span class="dim">// requests a move, host clamps</span></span></div>
+        <div class="imp"><span>env.other</span><span class="ok">✓ other <span class="dim">// sense the nearest being</span></span></div>
+        <div class="imp"><span class="no">env.fetch</span><span class="no">✗ &nbsp;—&nbsp; not in grants → rejected at compile time</span></div>
+        <div class="imp"><span class="no">env.memory</span><span class="no">✗ &nbsp;not a func (wants a bigger world) → rejected</span></div>
+        <div class="verdict">Every import must be <b>(1) in grants</b> and <b>(2) a function</b>. It is <b>independent</b> of which language the generator used, or how clever it is — this wall audits bytes, not intent.</div>
       </div>
     </div>
   </div>
@@ -197,219 +197,211 @@
 
 <main>
 
-<!-- 1 組成 -->
 <section id="s1">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">01</span><h2 class="sec-zh">組成</h2></div>
-    <div class="sec-en">Composition — a workspace with two runtimes</div>
-    <p class="lede">整個系統是一個 Rust workspace,分成「離線生成」與「線上世界」兩個運行面——中間唯一的接縫,是一顆可稽核的種子。</p>
+    <div class="sec-head"><span class="sec-num">01</span><h2 class="sec-zh">Composition</h2></div>
+    <div class="sec-en">A workspace with two runtimes</div>
+    <p class="lede">The whole system is a Rust workspace split into two runtimes — offline generation and the online world — joined by a single auditable seed.</p>
     <div class="grid2">
       <div class="card">
-        <h4>核心編譯器</h4>
+        <h4>Core compiler</h4>
         <div class="path">src/ · parser.rs · codegen.rs · audit.rs · lib.rs</div>
-        <p>種子語言的 parser → codegen → <code>wasm-encoder</code>,對外 7 個編譯出口與能力稽核。安全機制的家。</p>
+        <p>The seed language's parser → codegen → <code>wasm-encoder</code>, exposing 7 compile targets and the capability audit. Home of the security model.</p>
         <div class="loc">lib.rs 316 · audit.rs 211 LOC</div>
       </div>
       <div class="card">
-        <h4>生成伺服器</h4>
+        <h4>Generation server</h4>
         <div class="path">gen-server/ · main.rs (Rust / Axum)</div>
-        <p>沙箱容器裡的 Claude 依「合約」生出 schema + DSL 腳本;伺服器在顯化<b>之前</b>編譯並驗證每一件產物,錯了就自我修復重試。</p>
+        <p>Claude, in a sandboxed container, generates a schema + DSL scripts to a contract; the server compiles and validates every artifact <b>before</b> it manifests, with a self-repair loop on errors.</p>
         <div class="loc">main.rs 1,183 LOC · :8646</div>
       </div>
       <div class="card">
-        <h4>線上世界</h4>
+        <h4>The live world</h4>
         <div class="path">gen-server/live-gen.html</div>
-        <p>世界真正活著的地方:96×96 的場、住民、皮、心跳。瀏覽器端 instantiate 每一顆 WASM 細胞,每秒三十次。</p>
-        <div class="loc">1,345 LOC · 純瀏覽器,無框架</div>
+        <p>Where the world actually lives: a 96×96 field, inhabitants, skins, minds. The browser instantiates each WASM cell, thirty times a second.</p>
+        <div class="loc">1,345 LOC · pure browser, no framework</div>
       </div>
       <div class="card soul">
-        <h4>住民與皮</h4>
+        <h4>Inhabitants &amp; skins</h4>
         <div class="path">skins/ (Rust→wasm) · assemblyscript/ · inhabitants/</div>
-        <p>皮用 Rust、魂可用 AssemblyScript 外部編譯——只要能出 WASM,<b>過同一道 audit</b> 就能進場。語言無關的證明。</p>
-        <div class="loc">語言無關 · 一牆兩門</div>
+        <p>Skins in Rust, souls in AssemblyScript compiled externally — anything that emits WASM enters if it <b>passes the same audit</b>. The proof that the fence is language-agnostic.</p>
+        <div class="loc">language-agnostic · one wall, two doors</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- 2 程式碼分析 -->
 <section id="s2">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">02</span><h2 class="sec-zh">程式碼分析</h2></div>
-    <div class="sec-en">Code — the seed pipeline &amp; the one wall</div>
+    <div class="sec-head"><span class="sec-num">02</span><h2 class="sec-zh">The code</h2></div>
+    <div class="sec-en">The seed pipeline &amp; the one wall</div>
     <div class="body measure">
-      <p>一段腳本如何在世界上跑?<b>執行期把它編成一顆極小的 WASM 模組,交給瀏覽器引擎(V8 / JSC / SpiderMonkey)JIT。</b>同一份 DSL 三路並跑,生成的 WASM 追平 AOT Rust 的天花板、也追平手寫 JS,值逐位元相同。價值不在速度(那本來就打平),在於<b>「快 + 沙箱 + 同步」同時成立</b>。</p>
+      <p>How does a script run on the world? <b>The runtime compiles it into a tiny WASM module and hands it to the browser engine (V8 / JSC / SpiderMonkey) to JIT.</b> The same DSL runs three ways; the generated WASM ties the AOT Rust ceiling and ties hand-written JS, value bit-identical. The point isn't speed (that ties JS anyway) — it's that <b>"fast + sandboxed + synchronous" all hold at once.</b></p>
     </div>
     <figure class="indent">
       <div class="panel">
-        <div class="panel-label">整合管線 — 生成一次,編譯一次,執行百萬次</div>
-<pre><span class="c">condition (觸發)</span>
+        <div class="panel-label">The integrated pipeline — generate once, compile once, execute a million times</div>
+<pre><span class="c">condition (trigger)</span>
     │
-    ▼  <span class="k">LLM</span> 生一段 DSL 腳本 ······················· <span class="c">秒級,唯一的非確定接縫</span>
-    │   <span class="c">熏習:把「腳本原文」寫進 ālaya 帳本(存因,不存果)</span>
-    ▼  <span class="k">wasm-jit</span>  script → WASM cell ·············· <span class="c">1–3ms,依 script hash 快取</span>
+    ▼  <span class="k">LLM</span> generates a DSL script ················· <span class="c">seconds, the only non-deterministic seam</span>
+    │   <span class="c">perfume: append the script's source into the ālaya ledger (store the cause)</span>
+    ▼  <span class="k">wasm-jit</span>  script → WASM cell ·············· <span class="c">1–3ms, cached by script hash</span>
     │   <span class="g">audit: imports ⊆ grants</span>   <span class="s">~117 bytes</span>
-    ▼  <span class="k">WebAssembly.instantiate</span>  每格 / 每事件執行 ··· <span class="c">~0.03ms/frame</span>
-    │   <span class="c">host imports 只給:讀自己的切片、吐 patch</span>
-    ▼  reactive DAG 傳播 → GPU 向量渲染 ············· <span class="c">確定性層,不進腳本</span></pre>
+    ▼  <span class="k">WebAssembly.instantiate</span>  run per frame / event ·· <span class="c">~0.03ms/frame</span>
+    │   <span class="c">host imports grant only: read your slice, emit a patch</span>
+    ▼  reactive DAG propagation → GPU vector render ·· <span class="c">deterministic layer, not scripted</span></pre>
       </div>
-      <figcaption>重載世界時,整個行為層從帳本<b>重新編譯、重新掛上</b>,不必再問一次 LLM。存的是因(文本),果(模組)隨時從因再生。</figcaption>
+      <figcaption>On reload, the entire behaviour layer is <b>recompiled and reattached</b> from the ledger, without asking the LLM again. The cause (text) is stored; the fruit (module) is regenerated from the cause at any time.</figcaption>
     </figure>
     <div class="body measure" style="margin-top:34px">
-      <p><b>一堵牆,兩道門。</b>家用 DSL 在 <code>codegen</code> 就把未授權的函式擋掉;外部語言編來的 WASM,在 <code>instantiate</code> 之前由 <code>audit()</code> 擋掉。同一個安全模型只看一件事——模組宣告的 import ⊆ host 授予的能力清單。這讓語言可以長到不再塞得進一個 prompt,而<b>能力圍欄一寸不移</b>。</p>
+      <p><b>One wall, two doors.</b> The home DSL is blocked at <code>codegen</code>; WASM compiled from any other language is blocked before <code>instantiate</code> by <code>audit()</code>. One security model, looking at one thing — a module's declared imports ⊆ the capabilities the host grants. That lets the language grow past what fits in a prompt while <b>the capability fence does not move an inch</b>.</p>
     </div>
     <figure class="indent">
       <div class="panel">
-        <div class="panel-label">對外 7 個編譯出口 + 稽核 + 燃料 + 確定性重放 — src/lib.rs</div>
+        <div class="panel-label">7 compile targets + audit + fuel + deterministic replay — src/lib.rs</div>
 <pre><span class="k">pub fn</span> compile_to_wasm / compile_kernel_wasm / compile_draw_wasm
         compile_ui_cell_wasm / compile_field_cell_wasm
-        compile_entity_wasm <span class="c">// 魂  run(t, ex, ey)</span>
-        compile_skin_wasm   <span class="c">// 皮  run(px, py, s, t, nx, ny)</span>
+        compile_entity_wasm <span class="c">// soul  run(t, ex, ey)</span>
+        compile_skin_wasm   <span class="c">// skin  run(px, py, s, t, nx, ny)</span>
 
-<span class="k">pub fn</span> audit_entity_bytes(bytes)              <span class="c">// 語言無關的 import 稽核</span>
-        compile_entity_wasm_grants(src, grants) <span class="c">// 只給子集能力編譯</span>
-        audit_entity_bytes_grants(bytes, grants)<span class="c">// 對子集稽核(遞歸生育用)</span>
-        compile_to_wasm_fueled(src, budget)     <span class="g">// 燃料計量,≈0% 數值開銷</span>
-        transpile_to_js(src)                    <span class="c">// 多路對照的第二車道(值逐位對拍)</span></pre>
+<span class="k">pub fn</span> audit_entity_bytes(bytes)              <span class="c">// language-agnostic import audit</span>
+        compile_entity_wasm_grants(src, grants) <span class="c">// compile with only a subset of caps</span>
+        audit_entity_bytes_grants(bytes, grants)<span class="c">// audit against a subset (recursive begetting)</span>
+        compile_to_wasm_fueled(src, budget)     <span class="g">// fuel metering, ≈0% numeric overhead</span>
+        transpile_to_js(src)                    <span class="c">// the second lane (value-for-value oracle)</span></pre>
       </div>
-      <figcaption>多車道即「神諭」模式:同一 AST 的 WASM 與 JS 轉譯並行、比值,一致才晉升——不一致就是抓到一個編譯器 bug。確定性讓一段 121 幀的世界能<b>位元不差地重放</b>。</figcaption>
+      <figcaption>Multi-lane is the oracle pattern: the WASM and the JS-transpilation of the same AST run in parallel and compare values — promote only on agreement; disagreement is a compiler bug caught. Determinism lets a 121-frame world <b>replay bit-identically</b>.</figcaption>
     </figure>
   </div>
 </section>
 
-<!-- 3 擴充分析 -->
 <section id="s3">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">03</span><h2 class="sec-zh">擴充分析</h2></div>
-    <div class="sec-en">Extensibility — grow the vocabulary, never the reach</div>
-    <p class="lede">要加東西,只有四種合法形狀。每一種都是<b>能力詞彙</b>的加法;沒有一種是「新的觸及」。</p>
+    <div class="sec-head"><span class="sec-num">03</span><h2 class="sec-zh">Extensibility</h2></div>
+    <div class="sec-en">Grow the vocabulary, never the reach</div>
+    <p class="lede">There are only four legal shapes to add. Each is an addition to the <b>capability vocabulary</b>; none is a new reach.</p>
     <div class="caps">
-      <div class="caprow"><span class="who">魂 · entity soul &nbsp; run(t, ex, ey)</span>
+      <div class="caprow"><span class="who">soul · entity &nbsp; run(t, ex, ey)</span>
         <span class="chip acc">sin</span><span class="chip acc">cos</span><span class="chip acc">get</span><span class="chip acc">set</span><span class="chip acc">fr</span><span class="chip acc">mv</span><span class="chip acc">unbind</span><span class="chip acc">rise</span><span class="chip acc">other</span>
       </div>
-      <div class="caprow"><span class="who">皮 · skin &nbsp; run(px, py, s, t, nx, ny) &nbsp;— 只能畫,碰不到世界</span>
+      <div class="caprow"><span class="who">skin &nbsp; run(px, py, s, t, nx, ny) &nbsp;— can only draw, cannot touch the world</span>
         <span class="chip emb">sin</span><span class="chip emb">cos</span><span class="chip emb">hue</span><span class="chip emb">rgb</span><span class="chip emb">hsl</span><span class="chip emb">disc</span><span class="chip emb">ring</span><span class="chip emb">arc</span><span class="chip emb">line</span>
       </div>
-      <div class="caprow"><span class="who">心 · mind reply — 一次心跳能回傳的欄位</span>
+      <div class="caprow"><span class="who">mind · reply — the fields one heartbeat may return</span>
         <span class="chip">say</span><span class="chip">thought</span><span class="chip">behavior</span><span class="chip">intent</span><span class="chip">beget</span><span class="chip">skin</span><span class="chip">attrs</span><span class="chip">remember</span>
       </div>
     </div>
     <div class="body measure" style="margin-top:32px">
-      <p>加一個<b>編譯出口</b>=給它一組 PARAMS + IMPORTS,再照 audit 授一份 grant;加一個<b>能力</b>=加一個 host import,而它只會是四類之一——<b>資料</b>(attrs)、<b>感知</b>(other / perception)、<b>外觀</b>(skin)、<b>有界生成</b>(beget)。語言無關則是天生的:任何能編到 WASM 的語言都能當魂,audit 只認位元組。AssemblyScript 的魂,已經走過這道門。</p>
+      <p>Adding a <b>compile target</b> = give it a set of PARAMS + IMPORTS and audit it against a grant list; adding a <b>capability</b> = add a host import, and it will only ever be one of four kinds — <b>data</b> (attrs), <b>sensing</b> (other / perception), <b>appearance</b> (skin), or <b>bounded generation</b> (beget). Language-agnosticism comes for free: any language that compiles to WASM can be a soul — the audit reads only bytes. AssemblyScript souls have already walked through this door.</p>
     </div>
   </div>
 </section>
 
-<!-- 4 延伸性 -->
 <section id="s4">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">04</span><h2 class="sec-zh">延伸性</h2></div>
-    <div class="sec-en">Generativity — the cost pyramid &amp; self-begetting worlds</div>
-    <p class="lede">架構的功夫,是把計算往下推。每往下一層,便宜約一千倍;而每一層都有自己的業力快取。</p>
+    <div class="sec-head"><span class="sec-num">04</span><h2 class="sec-zh">Generativity</h2></div>
+    <div class="sec-en">The cost pyramid &amp; self-begetting worlds</div>
+    <p class="lede">The architectural work is pushing computation downward. Each level down is ~1000× cheaper — and each keeps its own karma-cache.</p>
     <div class="pyramid">
-      <div class="rung r1"><span class="lab">生成 · generate</span><span class="cost">秒級 · seconds</span></div>
-      <div class="rung r2"><span class="lab">編譯 · compile</span><span class="cost">毫秒 · ms</span><span class="mult">×1000 cheaper</span></div>
-      <div class="rung r3"><span class="lab">執行 · execute</span><span class="cost">微秒 · µs · ×百萬</span><span class="mult">×1000 cheaper</span></div>
+      <div class="rung r1"><span class="lab">generate</span><span class="cost">seconds</span></div>
+      <div class="rung r2"><span class="lab">compile</span><span class="cost">milliseconds</span><span class="mult">×1000 cheaper</span></div>
+      <div class="rung r3"><span class="lab">execute</span><span class="cost">microseconds · ×a million</span><span class="mult">×1000 cheaper</span></div>
     </div>
     <div class="body measure" style="margin-top:34px">
-      <p>更深的延伸性是<b>自我生成</b>:一個住民的心,能再生出住民(畫裡的工畫師又在裡面畫)。而它守三條由 host 強制的律——</p>
+      <p>The deeper generativity is <b>self-generation</b>: a being's mind can beget beings (the painter in the painting paints a painter). It obeys three host-enforced laws —</p>
     </div>
     <figure class="indent">
       <div class="panel">
-        <div class="panel-label">遞歸生育 · 三律 · 遞減不變量</div>
+        <div class="panel-label">recursive begetting · three laws · the attenuation invariant</div>
 <pre>parent grants  { <span class="g">get set fr mv unbind rise other</span> }
     │
     └─ <span class="k">beget</span> child
-         ① grants ⊆ parent ······· <span class="r">越界的能力被丟棄</span>
-         ② birth budget: child = parent − 1 ··· <span class="c">生育額度分下去,樹必有限</span>
-         ③ child soul → <span class="g">同一道 audit</span>,對它的<span class="k">子集</span>受審
+         ① grants ⊆ parent ······· <span class="r">over-reaching capabilities dropped</span>
+         ② birth budget: child = parent − 1 ··· <span class="c">the budget divides down, the tree is finite</span>
+         ③ child soul → <span class="g">the same audit</span>, against its <span class="k">subset</span>
 
-  ∴  能力跨世代<span class="k">單調不增</span>。創造本身,也遞減。</pre>
+  ∴  capabilities are <span class="k">monotonically non-increasing</span> across generations. Creation itself attenuates.</pre>
       </div>
-      <figcaption><b>內在無界,觸及有界。</b>住民能無界地長——改自己的反射、重畫自己的皮、給自己命名、記自己的一夜、感知彼此——卻拿不到一個沒被授予的能力。豐富與圍限,正交。</figcaption>
+      <figcaption><b>Richness of self is unbounded; reach is fixed.</b> A being can grow without limit — rewrite its own reflex, repaint its own skin, name itself, remember its night, sense the others — yet cannot acquire a single capability it was not granted. Functional richness and confinement are orthogonal.</figcaption>
     </figure>
   </div>
 </section>
 
-<!-- 5 世界打包格式 -->
 <section id="s5">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">05</span><h2 class="sec-zh">世界打包格式</h2></div>
-    <div class="sec-en">World packaging — a world is a seed</div>
-    <p class="lede">一個世界存成一個 JSON。它不是一張截圖、不是一段錄影,而是一顆能<b>即刻顯化、不需重新生成</b>的種子。</p>
+    <div class="sec-head"><span class="sec-num">05</span><h2 class="sec-zh">World packaging</h2></div>
+    <div class="sec-en">A world is a seed</div>
+    <p class="lede">A world saves to a single JSON. It is not a screenshot, not a recording — it is a seed that <b>manifests instantly, with no regeneration</b>.</p>
     <figure class="indent">
       <div class="panel">
-        <div class="panel-label">worlds/moon3-spring.json — 19 位住民的活世界</div>
+        <div class="panel-label">worlds/moon3-spring.json — a living world of 19 inhabitants</div>
 <pre>{
   <span class="k">"name"</span>: "moon3-spring",
   <span class="k">"surface"</span>: "field",        <span class="c">// field | ui | draw</span>
   <span class="k">"payload"</span>: {
-    <span class="k">"grid"</span>: 96,               <span class="c">// 96×96 的場</span>
-    <span class="k">"cells"</span>: [ … ],           <span class="c">// 通道 0 height · 1 water · 2 veg · 3 snow</span>
-    <span class="k">"entities"</span>: [             <span class="c">// 19 位住民</span>
+    <span class="k">"grid"</span>: 96,               <span class="c">// a 96×96 field</span>
+    <span class="k">"cells"</span>: [ … ],           <span class="c">// channels: 0 height · 1 water · 2 veg · 3 snow</span>
+    <span class="k">"entities"</span>: [             <span class="c">// 19 inhabitants</span>
       { <span class="k">"id"</span>:"weng", <span class="k">"type"</span>:"fisherman", <span class="k">"at"</span>:[48,55],
-        <span class="k">"behavior"</span>:  <span class="s">"…DSL…"</span>,  <span class="c">// 魂 run(t,ex,ey)</span>
-        <span class="k">"skin_seed"</span>: <span class="s">"…DSL…"</span>,  <span class="c">// 皮 run(px,py,s,t,nx,ny)</span>
-        <span class="k">"persona"</span>:   <span class="s">"…"</span> }      <span class="c">// 心 一顆 Claude 心跳</span>
+        <span class="k">"behavior"</span>:  <span class="s">"…DSL…"</span>,  <span class="c">// soul run(t,ex,ey)</span>
+        <span class="k">"skin_seed"</span>: <span class="s">"…DSL…"</span>,  <span class="c">// skin run(px,py,s,t,nx,ny)</span>
+        <span class="k">"persona"</span>:   <span class="s">"…"</span> }      <span class="c">// mind: a Claude heartbeat</span>
     ],
-    <span class="k">"view"</span>: { … }             <span class="c">// 第一人稱鏡位</span>
+    <span class="k">"view"</span>: { … }             <span class="c">// the first-person camera</span>
   },
-  <span class="k">"chat"</span>: [ … ]                <span class="c">// 對話軌,與世界同存</span>
+  <span class="k">"chat"</span>: [ … ]                <span class="c">// the dialogue trail, saved with the world</span>
 }</pre>
       </div>
-      <figcaption>三種 surface 共用同一個封裝:<code>field</code>(地景 + 住民)、<code>ui</code>(介面)、<code>draw</code>(畫布)。載入即 <code>manifestSaved()</code> 顯化,毫秒完成——因為存的是種子,不是像素。</figcaption>
+      <figcaption>Three surfaces share one envelope: <code>field</code> (terrain + inhabitants), <code>ui</code> (interface), <code>draw</code> (canvas). Loading is <code>manifestSaved()</code> — milliseconds, because what's stored is a seed, not pixels.</figcaption>
     </figure>
   </div>
 </section>
 
-<!-- 6 讓人如何理解 -->
 <section id="s6">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">06</span><h2 class="sec-zh">讓人如何理解這架構</h2></div>
+    <div class="sec-head"><span class="sec-num">06</span><h2 class="sec-zh">How to understand it</h2></div>
     <div class="sec-en">The mental model — hold three things</div>
     <div class="grid2">
       <div class="card">
-        <h4>一句話</h4>
-        <p style="color:var(--ink)"><b style="color:var(--accent)">import 表就是模組的整個世界。</b>沒放進去的能力,就是它伸手也摸不到的邊界。圍欄的效力,與生成者的智力無關。</p>
+        <h4>One sentence</h4>
+        <p style="color:var(--ink)"><b style="color:var(--accent)">The import table is the module's entire world.</b> A capability not placed in it is a boundary the module cannot reach past. The fence's force is independent of the generator's intelligence.</p>
       </div>
       <div class="card">
-        <h4>三種「即時」,相差千倍</h4>
-        <p>生成(秒)/ 編譯(毫秒)/ 執行(微秒)。把它們當同一件事,就會誤判成本;分開看,架構就清楚了。</p>
+        <h4>Three kinds of "real-time," 1000× apart</h4>
+        <p>Generate (s) / compile (ms) / execute (µs). Treat them as one and you misjudge cost; hold them apart and the architecture is clear.</p>
       </div>
       <div class="card">
-        <h4>因陀羅網:存規則,不存網</h4>
-        <p>N 個組件的相互關聯不是 N² 條線,而是「透過同一道理」互相映照。存的是規則,顯化時才成網。</p>
+        <h4>Indra's net: store the rule, not the net</h4>
+        <p>The relations among N components aren't N² wires but "beholding one another through a shared principle." Store the rule; the net forms only at manifestation.</p>
       </div>
       <div class="card soul">
-        <h4>事與理:硬鐘上騎著軟念</h4>
-        <p>世界底層一口共享的時鐘 <code>t</code>(事);而整段時間可折進一顆種子(理),延促自在留在宿主手裡。</p>
+        <h4>Substance &amp; principle: a soft thought riding a hard clock</h4>
+        <p>Underneath, one shared clock <code>t</code> (the fact); yet all of time can fold into a seed (the principle) — that folding stays host-side.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- 7 未來應用 -->
 <section id="s7">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">07</span><h2 class="sec-zh">未來應用</h2></div>
-    <div class="sec-en">Where this goes</div>
+    <div class="sec-head"><span class="sec-num">07</span><h2 class="sec-zh">Where this goes</h2></div>
+    <div class="sec-en">Future applications</div>
     <div class="futures">
-      <div class="fut"><span class="n">Generative UI</span><h4>沒有固定的 App</h4><p>介面隨使用者當下的意圖顯化,毫秒成形——而且天生安全,因為生成的碼被構造性地圍住。</p></div>
-      <div class="fut"><span class="n">Untrusted code</span><h4>安全執行不可信的 AI 產物</h4><p>外掛市集、Agent 的工具沙箱、跑「你不必信任」的生成碼——圍欄的效力不隨模型變強而失效。</p></div>
-      <div class="fut"><span class="n">Souled worlds</span><h4>每個物件都有靈魂</h4><p>能自我繁衍、自畫其皮、自記其憶的模擬、遊戲、活文件——住民各有其識,卻碰不到未授之物。</p></div>
-      <div class="fut"><span class="n">Measurement</span><h4>固定詞彙下的生成合法率</h4><p>一個開放、可重現的量測:模型被限定在固定能力詞彙時,產出「合法」產物的可靠度有多高。</p></div>
+      <div class="fut"><span class="n">Generative UI</span><h4>No fixed app</h4><p>The interface manifests from the user's intent in the moment, in milliseconds — and is safe by construction, because the generated code is confined.</p></div>
+      <div class="fut"><span class="n">Untrusted code</span><h4>Safely run AI-generated code</h4><p>Plugin marketplaces, an agent's tool sandbox, running generated code you don't have to trust — the fence doesn't weaken as the model gets stronger.</p></div>
+      <div class="fut"><span class="n">Souled worlds</span><h4>Every object has a soul</h4><p>Simulations, games, living documents whose inhabitants beget, repaint themselves, remember — each its own consciousness, none touching the ungranted.</p></div>
+      <div class="fut"><span class="n">Measurement</span><h4>Generation-validity under a fixed vocabulary</h4><p>An open, reproducible measurement: how reliably a model produces <em>valid</em> artifacts when confined to a fixed capability vocabulary.</p></div>
     </div>
   </div>
 </section>
 
-<!-- closing -->
 <section class="closing">
   <div class="wrap">
-    <div class="sec-head"><span class="sec-num">§</span><h2 class="sec-zh">法界畫布 — 一個誠實的註腳</h2></div>
+    <div class="sec-head"><span class="sec-num">§</span><h2 class="sec-zh">The Dharma-realm canvas — an honest footnote</h2></div>
     <div class="sec-en">A note on the metaphor</div>
-    <blockquote>存規則,不存網;讓萬物透過同一道光互相映照而彼此不觸——而那道光,終究是你與所交涉者,在當下共同校正的預測。</blockquote>
+    <blockquote>Store the rule, not the net; let all things behold one another through a shared light without ever touching — and that light, in the end, is the prediction you and the one you interact with are correcting together, right now.</blockquote>
     <div class="body measure" style="margin-top:26px">
-      <p>這套架構用了佛學的語彙——因陀羅網、阿賴耶、六根六識、眾生各有其識。這些是<b>座標,不是證明</b>:它們幫人把「共業場」「存因不存果」「能力遞減」看得更快,但架構的正確性只靠位元組與 SQL 站著,不靠經典背書。譬喻當指月看,隨喜;當證明看,便攔一下。</p>
+      <p>This architecture borrows a Buddhist vocabulary — Indra's net, ālaya, six roots and six consciousnesses, beings each with their own mind. These are <b>coordinates, not proofs</b>: they help one see "collective karma," "store the cause not the fruit," "capabilities attenuate" faster — but the architecture's correctness stands on bytes and SQL, not on scripture. As a finger pointing at the moon, gladly; as a proof, held at the door.</p>
     </div>
   </div>
 </section>
@@ -418,7 +410,7 @@
 
 <footer>
   <div class="wrap">
-    <span>wasm-jit · 多維度軟體架構的解剖</span>
+    <span>wasm-jit · Anatomy of a Multidimensional Software World</span>
     <span>github.com/jrjohn/wasm-jit · MIT</span>
   </div>
 </footer>
