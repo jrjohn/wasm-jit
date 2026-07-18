@@ -205,6 +205,11 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   faster the being actually moves (the world's speed cap is its light speed; at the cap its
   clock stands still). A rider ages at its carrier's rate. A still being's t flows ≈ world time.
   Terrain/world cells stay on the shared world clock.
+- "lifespan": seconds (optional, > 0) — 老死 as host law: when the being's OWN t reaches its
+  lifespan, the host ends the body (it vanishes from the world; anything riding it is set free).
+  Neither its behavior nor its mind can change this. Omit for a deathless being. Note the
+  relativity: a being moving near the speed cap ages slower, so the SAME lifespan lasts longer
+  in world time — mortality makes speed meaningful (a mayfly that flies fast outlives its twin).
 - OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
   (the boat drifts with the current, the fisherman breathes) — write behavior only to override it.
 - "innate":[n1,n2,...] (optional, up to 8 finite numbers) — the being's BIRTH SEEDS, planted

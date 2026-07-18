@@ -668,6 +668,14 @@ fn validate(obj: &Value) -> Result<(), String> {
                             ));
                         }
                     }
+                    // 老死 as host law: a lifespan is seconds of the being's OWN τ
+                    if let Some(ls) = ent.get("lifespan") {
+                        if !ls.as_f64().is_some_and(|v| v.is_finite() && v > 0.0) {
+                            return Err(format!(
+                                "entity '{id}': \"lifespan\" must be a positive number of seconds (of its own time)"
+                            ));
+                        }
+                    }
                     if let Some(m) = ent.get("mind") {
                         let persona = m
                             .get("persona")
@@ -1526,6 +1534,21 @@ mod tests {
             "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
                 "entities":[{"id":"x","type":"person","at":[5,5],"innate":0.7}]}});
         assert!(validate(&not_array).unwrap_err().contains("array"));
+    }
+
+    #[test]
+    fn entity_lifespan_validates() {
+        // 老死 as host law: a positive τ-lifespan validates; zero/negative/non-number rejected
+        let ok = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"mayfly","type":"person","at":[40,40],"lifespan":12.5,"behavior":"0.0"}]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        for bad in [serde_json::json!(0), serde_json::json!(-3.0), serde_json::json!("short")] {
+            let w = serde_json::json!({
+                "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                    "entities":[{"id":"x","type":"person","at":[5,5],"lifespan":bad}]}});
+            assert!(validate(&w).unwrap_err().contains("lifespan"), "should reject {bad}");
+        }
     }
 
     #[test]
