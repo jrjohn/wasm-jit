@@ -145,7 +145,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
 await initSkins();
@@ -416,6 +416,95 @@ function redrawCharts() {
   for (const c of charts) CHART_DRAW[c.node.type](c.node, c.cvs);
 }
 
+// ---- 詞彙自生成 (grown widgets): a control the vocabulary lacks enters as a
+// fenced cell — the same gate a grown skin walks through. It draws on its OWN
+// small canvas every frame; its only wires into the app are bv(i) in (host-fed
+// bound values) and emit(v) out (host fires its on_input, one voice per frame).
+// Grown once, archived in the ālaya (/api/widgets), recallable by bare name. ----
+let WIDGETS = [];        // {node, cvs, g, W, H, run, slots, ptr, binds, emitPending, lastEmit, fails, quarantined}
+const WIDGET_LIB = {};   // type -> widget_seed (in-memory cache of the library)
+function saveGrownWidget(type, seed) {
+  if (WIDGET_LIB[type] === seed) return;
+  WIDGET_LIB[type] = seed;
+  fetch('/api/widgets', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type, widget_seed: seed }) }).catch(() => {});
+}
+function widgetEnv(wd) {
+  const g = wd.g;
+  let dA = a => `hsla(210,62%,62%,${a})`;
+  const setC = (c, mk) => { g.strokeStyle = c; g.fillStyle = c; dA = mk; };
+  return {
+    sin: Math.sin, cos: Math.cos,
+    hue: v => { const H = (((v % 1) + 1) % 1) * 360; setC(`hsl(${H},62%,62%)`, a => `hsla(${H},62%,62%,${a})`); },
+    rgb: (r, gg, b) => { const R = Math.max(0, Math.min(255, r * 255)) | 0, G = Math.max(0, Math.min(255, gg * 255)) | 0, B = Math.max(0, Math.min(255, b * 255)) | 0; setC(`rgb(${R},${G},${B})`, a => `rgba(${R},${G},${B},${a})`); },
+    hsl: (h, s, l) => { const H = (((h % 1) + 1) % 1) * 360, S = Math.max(0, Math.min(1, s)) * 100, L = Math.max(0, Math.min(1, l)) * 100; setC(`hsl(${H},${S}%,${L}%)`, a => `hsla(${H},${S}%,${L}%,${a})`); },
+    disc: (x, y, r) => { g.beginPath(); g.arc(x, y, Math.max(r, 0), 0, 6.2832); g.fill(); },
+    ring: (x, y, r) => { g.beginPath(); g.arc(x, y, Math.max(r, 0), 0, 6.2832); g.stroke(); },
+    arc: (x, y, r, a0, a1) => { g.beginPath(); g.arc(x, y, Math.max(r, 0), a0, a1); g.stroke(); },
+    line: (x1, y1, x2, y2) => { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); },
+    glow: (x, y, r) => { r = Math.max(r, 0); if (!r) return; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, dA(0.55)); gr.addColorStop(1, dA(0)); const k = g.fillStyle; g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill(); g.fillStyle = k; },
+    mx: () => wd.ptr.x, my: () => wd.ptr.y, down: () => wd.ptr.down,
+    get: i => wd.slots[i & 31] ?? 0,
+    set: (i, v) => { wd.slots[i & 31] = v; },
+    bv: i => { const id = wd.binds[i | 0]; return id != null ? (outputs[id] ?? 0) : 0; },
+    emit: v => { wd.emitPending = v; }, // collected after run — one voice per frame
+  };
+}
+function makeCustomWidget(node) {
+  const W = Math.min(Math.max(Number(node.w) || 260, 80), 680);
+  const H = Math.min(Math.max(Number(node.h) || 120, 48), 400);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cvs = document.createElement('canvas');
+  cvs.width = W * dpr; cvs.height = H * dpr;
+  cvs.style.cssText = `width:${W}px;height:${H}px;display:block;background:#0d1117;` +
+    `border:1px solid #30363d;border-radius:10px;touch-action:none;cursor:pointer`;
+  const g = cvs.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const wd = { node, cvs, g, W, H, run: null, slots: new Float64Array(32),
+               ptr: { x: -1, y: -1, down: 0 },
+               binds: [node.bind, ...(Array.isArray(node.bind_values) ? node.bind_values : [])].filter(b => b != null),
+               emitPending: null, lastEmit: null, fails: 0, quarantined: false };
+  const at = e => { const r = cvs.getBoundingClientRect(); const p = (e.touches && e.touches[0]) || e;
+    if (p.clientX == null) return;
+    wd.ptr.x = (p.clientX - r.left) * (W / r.width); wd.ptr.y = (p.clientY - r.top) * (H / r.height); };
+  cvs.addEventListener('pointermove', at);
+  cvs.addEventListener('pointerdown', e => { wd.ptr.down = 1; at(e); try { cvs.setPointerCapture(e.pointerId); } catch (_) {} });
+  cvs.addEventListener('pointerup', () => { wd.ptr.down = 0; });
+  cvs.addEventListener('pointerleave', () => { if (!wd.ptr.down) { wd.ptr.x = wd.ptr.y = -1; } });
+  const arm = seed => {
+    try {
+      const bytes = compile_widget_wasm(seed); // the fence: same審計 as every cell
+      wd.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: widgetEnv(wd) }).exports.run;
+      saveGrownWidget(node.type, seed);        // → the ālaya: grown once, remembered
+    } catch (e) { $('stage-status').textContent = `widget '${node.type}' refused by the fence: ${e.message ?? e}`; }
+  };
+  if (node.widget_seed) arm(node.widget_seed);
+  else { // bare novel type: recall the grown widget by name
+    (async () => {
+      let seed = WIDGET_LIB[node.type];
+      if (!seed) { try { const r = await fetch(`/api/widgets/${node.type}`); if (r.ok) seed = await r.text(); } catch (e) {} }
+      if (seed) { WIDGET_LIB[node.type] = seed; arm(seed); }
+      else $('stage-status').textContent = `unknown widget '${node.type}' and nothing grown by that name`;
+    })();
+  }
+  WIDGETS.push(wd);
+  return cvs;
+}
+function tickWidgets(t) {
+  for (const wd of WIDGETS) {
+    if (!wd.run || wd.quarantined) continue;
+    wd.g.clearRect(0, 0, wd.W, wd.H);
+    wd.g.lineWidth = 2; wd.g.lineCap = 'round';
+    wd.emitPending = null;
+    try { wd.run(t, wd.W, wd.H); wd.fails = 0; }
+    catch (e) { if (++wd.fails >= 3) { wd.quarantined = true; $('stage-status').textContent = `widget '${wd.node.type}' trapped — quarantined`; } continue; }
+    if (wd.emitPending != null && wd.emitPending !== wd.lastEmit) {
+      wd.lastEmit = wd.emitPending;
+      fire(wd.node.on_input, wd.emitPending); // through the same budgeted cascade as every event
+    }
+  }
+}
+window.__widgetState = () => WIDGETS.map(w => ({ type: w.node.type, armed: !!w.run, quarantined: w.quarantined, lastEmit: w.lastEmit }));
+
 function render(node) {
   switch (node.type) {
     case 'stack': case 'row': {
@@ -459,22 +548,21 @@ function render(node) {
     }
     case 'barchart': case 'linechart': case 'piechart': case 'gauge':
       return makeChart(node);
-    default: {
-      const d = document.createElement('div');
-      d.className = 'quar'; d.textContent = `unknown node '${node.type}'`;
-      return d;
-    }
+    default: // 詞彙自生成: an unknown type grows its own look (widget_seed) or recalls a grown one
+      return makeCustomWidget(node);
   }
 }
 
 function manifestUi(schema) {
   drawRun = null;
   fieldWorld = null;
+  D3.run = null;
   $('cv').style.display = 'none';
   const t0 = performance.now();
   compileCells(schema.cells);
   wires = schema.wires ?? [];
   charts = [];
+  WIDGETS = []; // a new UI = fresh grown-widget instances (the library remembers the looks)
   const stage = $('stage');
   stage.innerHTML = '';
   stage.appendChild(render(schema.tree));
@@ -1190,6 +1278,7 @@ function renderField() {
 
 function manifestField(world) {
   drawRun = null;
+  D3.run = null;
   const t0 = performance.now();
   const compiled = compileWorldCells(world);
   ENTITIES = compileEntities(world, compiled.grid);
@@ -1500,6 +1589,7 @@ const env = {
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
   fieldWorld = null;
+  D3.run = null;
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
   const t0 = performance.now();
   const bytes = compile_draw_wasm(seed);
@@ -1523,6 +1613,226 @@ window.__patchDraw = src => manifestDraw(src, true);
 // the data root is the HOST's: it can read it any time (here, for inspection/e2e)
 window.__drawRoot = () => Array.from(drawRoot);
 window.__manifestDraw = (src, keep) => manifestDraw(src, keep);
+
+// ---------------- draw3d surface (§22): the seed writes the SCENE ----------------
+// The cell composes primitives in world coordinates every frame; the host owns
+// everything geometric that could go wrong — camera, projection, depth, light.
+// Same fence, one dimension up: a seed can never write a matrix, so the model
+// never has to. Rendering is instanced WebGL2 (one draw per primitive kind).
+const D3 = { run: null, gl: null };
+const D3_MAX = { sph: 8000, box: 8000, tri: 4000 };
+function hsl2rgbF(h, s, l) {
+  h = ((h % 1) + 1) % 1; s = Math.min(Math.max(s, 0), 1); l = Math.min(Math.max(l, 0), 1);
+  const a = s * Math.min(l, 1 - l);
+  const f = k => { const x = (k + h * 12) % 12; return l - a * Math.max(-1, Math.min(x - 3, Math.min(9 - x, 1))); };
+  return [f(0), f(8), f(4)];
+}
+function initD3() {
+  try {
+    const gcv = document.createElement('canvas');
+    gcv.width = cv.width; gcv.height = cv.height;
+    const gl = gcv.getContext('webgl2', { antialias: true, alpha: true, depth: true });
+    if (!gl) return false;
+    const FS = `#version 300 es
+precision highp float;
+uniform vec3 ldir;
+in vec3 vn; in vec3 vc; in float vd; out vec4 frag;
+void main(){
+  float lit = 0.35 + 0.65 * max(dot(normalize(vn), -normalize(ldir)), 0.0);
+  vec3 c = vc * lit;
+  c = mix(c, vec3(0.075, 0.11, 0.18), smoothstep(60.0, 160.0, vd)); // depth fog into the sky
+  frag = vec4(c, 1.0);
+}`;
+    const VS_INST = `#version 300 es
+in vec3 p; in vec3 n; in vec3 ipos; in vec3 iscl; in vec3 icol;
+uniform mat4 vp;
+out vec3 vn; out vec3 vc; out float vd;
+void main(){
+  vec3 w = p * iscl + ipos;
+  vn = normalize(n / iscl); // scales are host-clamped > 0, so this is the exact normal transform
+  vc = icol;
+  vec4 cp = vp * vec4(w, 1.0);
+  vd = cp.w; gl_Position = cp;
+}`;
+    const VS_TRI = `#version 300 es
+in vec3 p; in vec3 n; in vec3 col;
+uniform mat4 vp;
+out vec3 vn; out vec3 vc; out float vd;
+void main(){ vn = n; vc = col; vec4 cp = vp * vec4(p, 1.0); vd = cp.w; gl_Position = cp; }`;
+    const mk = (vs, fs) => {
+      const sh = (ty, src) => { const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+      const pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, fs));
+      gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+      return pr;
+    };
+    const progI = mk(VS_INST, FS), progT = mk(VS_TRI, FS);
+    // unit sphere (lat-long) and unit cube [-0.5, 0.5], with normals
+    const sv = [], si = [];
+    const LAT = 14, LON = 20;
+    for (let a = 0; a <= LAT; a++) {
+      const th = a / LAT * Math.PI, st = Math.sin(th), ct = Math.cos(th);
+      for (let b = 0; b <= LON; b++) {
+        const ph = b / LON * 2 * Math.PI;
+        const x = st * Math.cos(ph), y = ct, z = st * Math.sin(ph);
+        sv.push(x, y, z, x, y, z);
+      }
+    }
+    for (let a = 0; a < LAT; a++) for (let b = 0; b < LON; b++) {
+      const i0 = a * (LON + 1) + b, i1 = i0 + LON + 1;
+      si.push(i0, i1, i0 + 1, i1, i1 + 1, i0 + 1);
+    }
+    const CV = [], CI = [];
+    const faces = [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]];
+    faces.forEach(([nx, ny, nz], f) => {
+      const vv = nz ? [0, 1, 0] : (ny ? [0, 0, 1] : [0, 1, 0]);
+      const uu = ny ? [1, 0, 0] : (nz ? [1, 0, 0] : [0, 0, 1]);
+      const base = f * 4;
+      for (const [s1, s2] of [[-1,-1],[1,-1],[1,1],[-1,1]]) {
+        CV.push(nx*0.5 + (uu[0]*s1 + vv[0]*s2)*0.5, ny*0.5 + (uu[1]*s1 + vv[1]*s2)*0.5, nz*0.5 + (uu[2]*s1 + vv[2]*s2)*0.5, nx, ny, nz);
+      }
+      CI.push(base, base+1, base+2, base, base+2, base+3);
+    });
+    const meshVAO = (verts, idx, instBuf) => {
+      const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+      const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(verts), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+      const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, instBuf);
+      for (let k = 0; k < 3; k++) { // ipos, iscl, icol — stride 9 floats
+        gl.enableVertexAttribArray(2 + k);
+        gl.vertexAttribPointer(2 + k, 3, gl.FLOAT, false, 36, k * 12);
+        gl.vertexAttribDivisor(2 + k, 1);
+      }
+      gl.bindVertexArray(null);
+      return { vao, count: idx.length };
+    };
+    // bind attribute names to fixed locations before linking is cleaner, but the
+    // programs were linked already — relink with explicit locations instead:
+    for (const pr of [progI, progT]) {
+      gl.bindAttribLocation(pr, 0, 'p'); gl.bindAttribLocation(pr, 1, 'n');
+      if (pr === progI) { gl.bindAttribLocation(pr, 2, 'ipos'); gl.bindAttribLocation(pr, 3, 'iscl'); gl.bindAttribLocation(pr, 4, 'icol'); }
+      else gl.bindAttribLocation(pr, 2, 'col');
+      gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+    }
+    const sphInstB = gl.createBuffer(), boxInstB = gl.createBuffer();
+    const sph = meshVAO(sv, si, sphInstB), box = meshVAO(CV, CI, boxInstB);
+    // triangle path: plain vertex buffer, stride 9 (pos3 nrm3 col3)
+    const triVAO = gl.createVertexArray(); gl.bindVertexArray(triVAO);
+    const triB = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, triB);
+    for (let k = 0; k < 3; k++) { gl.enableVertexAttribArray(k); gl.vertexAttribPointer(k, 3, gl.FLOAT, false, 36, k * 12); }
+    gl.bindVertexArray(null);
+    Object.assign(D3, {
+      gl, gcv, progI, progT, sph, box, sphInstB, boxInstB, triVAO, triB,
+      sphD: new Float32Array(D3_MAX.sph * 9), boxD: new Float32Array(D3_MAX.box * 9),
+      triD: new Float32Array(D3_MAX.tri * 27),
+      ns: 0, nb: 0, nt: 0, col: [0.55, 0.66, 0.9], camv: null, lightv: null,
+      uVpI: gl.getUniformLocation(progI, 'vp'), uLdI: gl.getUniformLocation(progI, 'ldir'),
+      uVpT: gl.getUniformLocation(progT, 'vp'), uLdT: gl.getUniformLocation(progT, 'ldir'),
+    });
+    return true;
+  } catch (e) { return false; }
+}
+function d3env() {
+  const R = D3;
+  const setc = (r, g, b) => { R.col = [r, g, b]; };
+  return {
+    sin: Math.sin, cos: Math.cos,
+    hue: v => { const c = hsl2rgbF(v, 0.62, 0.62); setc(c[0], c[1], c[2]); },
+    rgb: (r, g, b) => setc(Math.min(Math.max(r, 0), 1), Math.min(Math.max(g, 0), 1), Math.min(Math.max(b, 0), 1)),
+    hsl: (h, s, l) => { const c = hsl2rgbF(h, s, l); setc(c[0], c[1], c[2]); },
+    cam: (x, y, z, tx, ty, tz) => { R.camv = [x, y, z, tx, ty, tz]; },
+    light: (dx, dy, dz) => { R.lightv = [dx, dy, dz]; },
+    sphere: (x, y, z, r) => { if (R.ns >= D3_MAX.sph) return; const o = R.ns * 9, d = R.sphD;
+      d[o] = x; d[o+1] = y; d[o+2] = z; d[o+3] = d[o+4] = d[o+5] = Math.max(r, 0.001);
+      d[o+6] = R.col[0]; d[o+7] = R.col[1]; d[o+8] = R.col[2]; R.ns++; },
+    box: (x, y, z, sx, sy, sz) => { if (R.nb >= D3_MAX.box) return; const o = R.nb * 9, d = R.boxD;
+      d[o] = x; d[o+1] = y; d[o+2] = z; d[o+3] = Math.max(sx, 0.001); d[o+4] = Math.max(sy, 0.001); d[o+5] = Math.max(sz, 0.001);
+      d[o+6] = R.col[0]; d[o+7] = R.col[1]; d[o+8] = R.col[2]; R.nb++; },
+    tri: (x1, y1, z1, x2, y2, z2, x3, y3, z3) => { if (R.nt >= D3_MAX.tri) return;
+      const ax = x2 - x1, ay = y2 - y1, az = z2 - z1, bx = x3 - x1, by = y3 - y1, bz = z3 - z1;
+      let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      const o = R.nt * 27, d = R.triD, C = R.col;
+      const put = (i, x, y, z) => { d[o + i] = x; d[o + i + 1] = y; d[o + i + 2] = z;
+        d[o + i + 3] = nx; d[o + i + 4] = ny; d[o + i + 5] = nz; d[o + i + 6] = C[0]; d[o + i + 7] = C[1]; d[o + i + 8] = C[2]; };
+      put(0, x1, y1, z1); put(9, x2, y2, z2); put(18, x3, y3, z3); R.nt++; },
+  };
+}
+function m4persp(fovy, asp, n, f) {
+  const t = 1 / Math.tan(fovy / 2);
+  return new Float32Array([t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0]);
+}
+function m4look(ex, ey, ez, tx, ty, tz) {
+  let zx = ex - tx, zy = ey - ty, zz = ez - tz;
+  const zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+  let xx = zz, xy = 0, xz = -zx; // up=(0,1,0) × z
+  const xl = Math.hypot(xx, xy, xz);
+  if (xl < 1e-4) { xx = 1; xy = 0; xz = 0; } else { xx /= xl; xz /= xl; }
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  return new Float32Array([xx, yx, zx, 0, xy, yy, zy, 0, xz, yz, zz, 0,
+    -(xx * ex + xy * ey + xz * ez), -(yx * ex + yy * ey + yz * ez), -(zx * ex + zy * ey + zz * ez), 1]);
+}
+function m4mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
+    o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  return o;
+}
+function renderD3(t) {
+  const R = D3, gl = R.gl;
+  R.ns = 0; R.nb = 0; R.nt = 0; R.camv = null; R.lightv = null; R.col = [0.55, 0.66, 0.9];
+  try { R.run(t, cv.width, cv.height); }
+  catch (e) { R.run = null; $('stage-status').textContent = 'draw3d cell trapped: ' + e; return; }
+  if (R.gcv.width !== cv.width) { R.gcv.width = cv.width; R.gcv.height = cv.height; }
+  gl.viewport(0, 0, R.gcv.width, R.gcv.height);
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const c = R.camv ?? [12, 8, 15, 0, 1, 0];
+  const L = R.lightv ?? [-0.5, -1, -0.35];
+  const vp = m4mul(m4persp(0.96, R.gcv.width / R.gcv.height, 0.1, 400), m4look(c[0], c[1], c[2], c[3], c[4], c[5]));
+  gl.useProgram(R.progI);
+  gl.uniformMatrix4fv(R.uVpI, false, vp); gl.uniform3f(R.uLdI, L[0], L[1], L[2]);
+  if (R.ns) { gl.bindVertexArray(R.sph.vao); gl.bindBuffer(gl.ARRAY_BUFFER, R.sphInstB);
+    gl.bufferData(gl.ARRAY_BUFFER, R.sphD.subarray(0, R.ns * 9), gl.DYNAMIC_DRAW);
+    gl.drawElementsInstanced(gl.TRIANGLES, R.sph.count, gl.UNSIGNED_SHORT, 0, R.ns); }
+  if (R.nb) { gl.bindVertexArray(R.box.vao); gl.bindBuffer(gl.ARRAY_BUFFER, R.boxInstB);
+    gl.bufferData(gl.ARRAY_BUFFER, R.boxD.subarray(0, R.nb * 9), gl.DYNAMIC_DRAW);
+    gl.drawElementsInstanced(gl.TRIANGLES, R.box.count, gl.UNSIGNED_SHORT, 0, R.nb); }
+  if (R.nt) { gl.useProgram(R.progT);
+    gl.uniformMatrix4fv(R.uVpT, false, vp); gl.uniform3f(R.uLdT, L[0], L[1], L[2]);
+    gl.bindVertexArray(R.triVAO); gl.bindBuffer(gl.ARRAY_BUFFER, R.triB);
+    gl.bufferData(gl.ARRAY_BUFFER, R.triD.subarray(0, R.nt * 27), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, R.nt * 3); }
+  gl.bindVertexArray(null);
+  const sky = ctx.createLinearGradient(0, 0, 0, cv.height);
+  sky.addColorStop(0, '#0b1526'); sky.addColorStop(1, '#1a2740');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(R.gcv, 0, 0, cv.width, cv.height);
+}
+function manifestDraw3d(seed) {
+  drawRun = null; fieldWorld = null; WIDGETS = [];
+  if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
+  const t0 = performance.now();
+  const bytes = compile_draw3d_wasm(seed);
+  D3.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: d3env() }).exports.run;
+  $('stage').innerHTML = '';
+  cv.style.display = 'block';
+  $('stage-status').textContent =
+    `manifested: ${bytes.length}-byte 3D scene cell in ${(performance.now() - t0).toFixed(1)}ms — the seed writes the scene; matrices are host law`;
+  lastManifest = { surface: 'draw3d', payload: seed };
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = seed;
+  document.title = 'live-gen DRAW3D OK';
+}
+window.__manifestDraw3d = s => manifestDraw3d(s);
+window.__d3Counts = () => ({ ns: D3.ns, nb: D3.nb, nt: D3.nt, running: !!D3.run });
 (function loop(now) {
   if (drawRun) {
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -1542,6 +1852,10 @@ window.__manifestDraw = (src, keep) => manifestDraw(src, keep);
       updateCam(dt);
       renderFieldFP();
     }
+  } else if (D3.run) {
+    renderD3(now / 1000); // §22: the seed writes the scene, 60fps
+  } else if (WIDGETS.length) {
+    tickWidgets(now / 1000); // grown widgets live at frame rate: pointer felt, bv read, emit routed
   }
   lastRaf = now;
   requestAnimationFrame(loop);
@@ -1602,6 +1916,7 @@ async function send() {
     }
     if (d.surface === 'ui') manifestUi(d.schema);
     else if (d.surface === 'field') manifestField(d.world);
+    else if (d.surface === 'draw3d') manifestDraw3d(d.seed);
     else manifestDraw(d.seed);
   };
   try {
@@ -1730,6 +2045,7 @@ function manifestSaved(bundle) {
   if (!bundle || !bundle.surface) return;
   if (bundle.surface === 'ui') manifestUi(bundle.payload);
   else if (bundle.surface === 'field') manifestField(bundle.payload);
+  else if (bundle.surface === 'draw3d') manifestDraw3d(bundle.payload);
   else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
   restoreChat(bundle.chat);
   say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);

@@ -75,6 +75,12 @@ const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
 // Shared with the browser compiler via the crate (st included) so the two agree.
 const SKIN_PARAMS: [&str; 6] = wasm_jit::SKIN_PARAMS;
 const SKIN_IMPORTS: [HostFn; 10] = wasm_jit::SKIN_IMPORTS;
+// Grown-widget ABI (詞彙自生成), shared with the browser for the same reason.
+const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
+const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
+// Draw3d ABI (§22 — the seed writes the scene), shared likewise.
+const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
+const DRAW3D_IMPORTS: [HostFn; 10] = wasm_jit::DRAW3D_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -421,7 +427,35 @@ fn validate_tree(node: &Value, cell_ids: &[String]) -> Result<(), String> {
         .and_then(|v| v.as_str())
         .ok_or("tree node lacks \"type\"")?;
     if !UI_VOCAB.contains(&t) {
-        return Err(format!("node type '{t}' not in vocabulary [{}]", UI_VOCAB.join(", ")));
+        // 詞彙自生成: an unknown widget type is legal IF it grows its own look —
+        // a widget_seed compiled against the fenced widget ABI (draw primitives
+        // + its own pointer + private slots + bv in / emit out). Same gate as a
+        // grown skin: richness generated, reach unchanged.
+        let Some(seed) = node.get("widget_seed").and_then(|s| s.as_str()) else {
+            return Err(format!(
+                "node type '{t}' not in vocabulary [{}] and no \"widget_seed\" to grow one",
+                UI_VOCAB.join(", ")
+            ));
+        };
+        compile_check(seed, &WIDGET_PARAMS, &WIDGET_IMPORTS, 300_000)
+            .map_err(|e| format!("widget '{t}' widget_seed failed to compile: {e}"))?;
+        // its wires into the app must reference real cells
+        for key in ["bind"] {
+            if let Some(b) = node.get(key).and_then(|b| b.as_str()) {
+                if !cell_ids.iter().any(|i| i == b) {
+                    return Err(format!("widget '{t}': {key} references unknown cell '{b}'"));
+                }
+            }
+        }
+        if let Some(bvs) = node.get("bind_values").and_then(|b| b.as_array()) {
+            for b in bvs {
+                let id = b.as_str().unwrap_or("");
+                if !cell_ids.iter().any(|i| i == id) {
+                    return Err(format!("widget '{t}': bind_values references unknown cell '{id}'"));
+                }
+            }
+        }
+        // on_input checked by the shared event loop below; children make no sense here
     }
     validate_chart(t, node, cell_ids)?;
     for ev in ["on_click", "on_input"] {
@@ -539,6 +573,16 @@ fn validate(obj: &Value) -> Result<(), String> {
                 .ok_or("surface \"draw\" lacks \"seed\"")?;
             compile_check(seed, &["t", "w", "h"], &DRAW_IMPORTS, 5_000_000)
                 .map_err(|e| format!("draw seed failed to compile: {e}"))
+        }
+        Some("draw3d") => {
+            // §22: the seed writes the SCENE — world-space primitives only;
+            // camera/projection/light are host law, so no seed touches a matrix
+            let seed = obj
+                .get("seed")
+                .and_then(|s| s.as_str())
+                .ok_or("surface \"draw3d\" lacks \"seed\"")?;
+            compile_check(seed, &DRAW3D_PARAMS, &DRAW3D_IMPORTS, 5_000_000)
+                .map_err(|e| format!("draw3d seed failed to compile: {e}"))
         }
         Some("field") => {
             let world = obj.get("world").ok_or("surface \"field\" lacks \"world\"")?;
@@ -874,6 +918,54 @@ struct SkinSave {
     #[serde(rename = "type")]
     ty: String,
     skin_seed: String,
+}
+
+#[derive(Deserialize)]
+struct WidgetSave {
+    #[serde(rename = "type")]
+    ty: String,
+    widget_seed: String,
+}
+
+/// 詞彙自生成的阿賴耶: grown widgets are archived by name, like grown skins —
+/// grown once, remembered forever, recallable by a bare {"type":"knob"}.
+async fn widget_list() -> impl IntoResponse {
+    let mut names = Vec::new();
+    if let Ok(mut rd) = tokio::fs::read_dir("widgets-grown").await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            if let Some(n) = e.file_name().to_str().and_then(|n| n.strip_suffix(".dsl")) {
+                names.push(n.to_string());
+            }
+        }
+    }
+    Json(json!({ "widgets": names }))
+}
+async fn widget_save(Json(req): Json<WidgetSave>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !skin_type_ok(&req.ty) {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad widget type".to_string());
+    }
+    if UI_VOCAB.contains(&req.ty.as_str()) {
+        return (StatusCode::CONFLICT, [(CONTENT_TYPE, "text/plain")], "that name is a curated widget".to_string());
+    }
+    if let Err(e) = compile_check(&req.widget_seed, &WIDGET_PARAMS, &WIDGET_IMPORTS, 300_000) {
+        return (StatusCode::UNPROCESSABLE_ENTITY, [(CONTENT_TYPE, "text/plain")], format!("widget_seed failed to compile: {e}"));
+    }
+    let _ = tokio::fs::create_dir_all("widgets-grown").await;
+    match tokio::fs::write(format!("widgets-grown/{}.dsl", req.ty), &req.widget_seed).await {
+        Ok(()) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], format!("saved widget '{}'", req.ty)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [(CONTENT_TYPE, "text/plain")], format!("save failed: {e}")),
+    }
+}
+async fn widget_get(axum::extract::Path(ty): axum::extract::Path<String>) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    if !skin_type_ok(&ty) {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], String::new());
+    }
+    match tokio::fs::read_to_string(format!("widgets-grown/{ty}.dsl")).await {
+        Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], s),
+        Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
+    }
 }
 
 /// The demo page, served with no-store so an edit to live-gen.html (where all
@@ -1249,13 +1341,23 @@ async fn main() {
         .route("/api/mind", post(mind))
         .route("/api/skins", get(skin_list).post(skin_save))
         .route("/api/skins/{ty}", get(skin_get))
+        .route("/api/widgets", get(widget_list).post(widget_save))
+        .route("/api/widgets/{ty}", get(widget_get))
         .route("/api/worlds", get(world_list).post(world_save))
         .route("/api/worlds/{name}", get(world_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route("/", get(index))
         .nest_service("/pkg", ServeDir::new("pkg"))
-        .nest_service("/pkg-skins", ServeDir::new("pkg-skins"));
+        .nest_service("/pkg-skins", ServeDir::new("pkg-skins"))
+        // version-skew guard: the page is no-store but /pkg used to be
+        // heuristically cached — a fresh HTML importing a new export from a
+        // stale pkg kills the whole module (dead buttons). no-cache = may
+        // cache, MUST revalidate (304s stay fast, skew becomes impossible).
+        .layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache"),
+        ));
     tokio::spawn(async { ensure_container().await; }); // warm the generator before the first prompt
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8646").await.unwrap();
     println!("gen-server: http://127.0.0.1:8646  (generator container: agent-task-node:local, override GEN_IMAGE)");
@@ -1534,6 +1636,74 @@ mod tests {
             "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
                 "entities":[{"id":"x","type":"person","at":[5,5],"innate":0.7}]}});
         assert!(validate(&not_array).unwrap_err().contains("array"));
+    }
+
+    #[test]
+    fn grown_widget_validates_and_rejects() {
+        // 詞彙自生成: an unknown widget type is legal iff it grows a fenced look
+        let knob = "let v = bv(0.0);\nif down() > 0.5 { let f = 1.0 - my() / h;\n if f < 0.0 { f = 0.0; }\n if f > 1.0 { f = 1.0; }\n v = f * 100.0;\n emit(v); }\nlet frac = v / 100.0;\nhsl(0.58, 0.7, 0.55);\narc(w * 0.5, h * 0.55, h * 0.34, 2.35, 2.35 + 4.71 * frac);\n0.0";
+        let ok = serde_json::json!({
+            "surface":"ui","schema":{
+                "cells":[{"id":"vol","params":["x"],"script":"set(0.0, x);\nx"}],
+                "tree":{"type":"stack","children":[
+                    {"type":"knob","widget_seed":knob,"bind":"vol","on_input":{"cell":"vol"},"w":150,"h":150},
+                    {"type":"value","bind":"vol"}]},
+                "wires":[]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+
+        let bare = serde_json::json!({
+            "surface":"ui","schema":{"cells":[{"id":"a","params":["x"],"script":"x"}],
+                "tree":{"type":"stack","children":[{"type":"sparkline"}]},"wires":[]}});
+        assert!(validate(&bare).unwrap_err().contains("widget_seed"));
+
+        let overreach = serde_json::json!({
+            "surface":"ui","schema":{"cells":[{"id":"a","params":["x"],"script":"x"}],
+                "tree":{"type":"stack","children":[{"type":"knob","widget_seed":"fetch(t)"}]},"wires":[]}});
+        assert!(validate(&overreach).unwrap_err().contains("failed to compile"));
+
+        let ghost_bind = serde_json::json!({
+            "surface":"ui","schema":{"cells":[{"id":"a","params":["x"],"script":"x"}],
+                "tree":{"type":"stack","children":[
+                    {"type":"knob","widget_seed":"disc(w*0.5, h*0.5, 9.0);\n0.0","bind":"nothing"}]},"wires":[]}});
+        assert!(validate(&ghost_bind).unwrap_err().contains("unknown cell"));
+    }
+
+    #[test]
+    fn draw3d_seed_validates_and_rejects() {
+        // §22: a scene of ground + orbiting spheres + a tri validates end to end
+        let ok = serde_json::json!({"surface":"draw3d","seed":
+            "cam(cos(t * 0.2) * 16.0, 9.0, sin(t * 0.2) * 16.0, 0.0, 1.0, 0.0);\nrgb(0.2, 0.22, 0.2);\nbox(0.0, 0.0 - 0.6, 0.0, 30.0, 1.2, 30.0);\nlet k = 0.0;\nwhile k < 12.0 {\n let a = k * 0.5236;\n hsl(k / 12.0, 0.7, 0.55);\n sphere(cos(a) * 8.0, 2.0 + sin(t + k) * 0.6, sin(a) * 8.0, 0.9);\n k = k + 1.0;\n}\ntri(0.0, 0.0, 0.0, 4.0, 6.0, 0.0, 0.0 - 4.0, 6.0, 0.0);\n0.0"});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        let overreach = serde_json::json!({"surface":"draw3d","seed":"disc(1.0, 2.0, 3.0);\n0.0"});
+        assert!(validate(&overreach).unwrap_err().contains("failed to compile"),
+            "2D-only verbs must not exist in the 3D fence");
+        let missing = serde_json::json!({"surface":"draw3d"});
+        assert!(validate(&missing).unwrap_err().contains("lacks"));
+    }
+
+    #[test]
+    fn draw3d_abi_matches_crate() {
+        assert_eq!(DRAW3D_IMPORTS.len(), wasm_jit::DRAW3D_IMPORTS.len());
+        for (a, b) in DRAW3D_IMPORTS.iter().zip(wasm_jit::DRAW3D_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        // world-space primitives only — no matrix-shaped import may ever appear
+        for f in ["sphere", "box", "tri", "cam", "light"] {
+            assert!(DRAW3D_IMPORTS.iter().any(|i| i.name == f), "draw3d ABI missing {f}");
+        }
+    }
+
+    #[test]
+    fn widget_abi_matches_crate() {
+        assert_eq!(WIDGET_IMPORTS.len(), wasm_jit::WIDGET_IMPORTS.len());
+        for (a, b) in WIDGET_IMPORTS.iter().zip(wasm_jit::WIDGET_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        // the two wires into the app are present, and only these two
+        let bv = WIDGET_IMPORTS.iter().find(|i| i.name == "bv").expect("widget ABI missing bv");
+        assert!(bv.returns && bv.n_args == 1);
+        let emit = WIDGET_IMPORTS.iter().find(|i| i.name == "emit").expect("widget ABI missing emit");
+        assert!(!emit.returns && emit.n_args == 1);
     }
 
     #[test]
