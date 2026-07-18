@@ -213,17 +213,46 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// — camera matrices, depth, projection, lighting are host law, so a seed can
 /// never write a matrix and the model never has to. y is up.
 pub const DRAW3D_PARAMS: [&str; 3] = ["t", "w", "h"];
-pub const DRAW3D_IMPORTS: [codegen::HostFn; 10] = [
+pub const DRAW3D_IMPORTS: [codegen::HostFn; 29] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "hue", n_args: 1, returns: false },  // colour verbs — same names as 2D
     codegen::HostFn { name: "rgb", n_args: 3, returns: false },
     codegen::HostFn { name: "hsl", n_args: 3, returns: false },
-    codegen::HostFn { name: "cam", n_args: 6, returns: false },  // eye (x,y,z) looking at (tx,ty,tz)
+    codegen::HostFn { name: "cam", n_args: 6, returns: false },  // eye (x,y,z) looking at (tx,ty,tz); omit → host orbit camera
     codegen::HostFn { name: "light", n_args: 3, returns: false },// directional light (dx,dy,dz)
+    // ── primitives, drawn in the CURRENT FRAME (see the transform stack) ──
     codegen::HostFn { name: "sphere", n_args: 4, returns: false },// (x,y,z,r)
     codegen::HostFn { name: "box", n_args: 6, returns: false },  // (x,y,z, sx,sy,sz) full sizes
     codegen::HostFn { name: "tri", n_args: 9, returns: false },  // arbitrary triangle — the escape hatch
+    codegen::HostFn { name: "cyl", n_args: 2, returns: false },  // (r,h) standing at the frame origin, +y up
+    codegen::HostFn { name: "cone", n_args: 2, returns: false }, // (r,h) same stance
+    // ── the transform stack (3D-1): hierarchy without matrices — the host
+    //    composes frames; a seed can only push/move/turn/scale and pop back.
+    //    The stack resets every frame; overflow is ignored; pop on empty is a
+    //    no-op (an unbalanced seed cannot corrupt the world). depth ≤ 64. ──
+    codegen::HostFn { name: "push", n_args: 0, returns: false },
+    codegen::HostFn { name: "pop", n_args: 0, returns: false },
+    codegen::HostFn { name: "move", n_args: 3, returns: false },
+    codegen::HostFn { name: "rotx", n_args: 1, returns: false }, // radians
+    codegen::HostFn { name: "roty", n_args: 1, returns: false },
+    codegen::HostFn { name: "rotz", n_args: 1, returns: false },
+    codegen::HostFn { name: "scale", n_args: 1, returns: false },// uniform
+    // ── matter (3D-2): how the current colour meets light ──
+    codegen::HostFn { name: "shine", n_args: 1, returns: false },// 0..1 specular strength
+    codegen::HostFn { name: "lum", n_args: 1, returns: false },  // 0..1 self-luminous (a sun, a lantern)
+    codegen::HostFn { name: "pat", n_args: 1, returns: false },  // 0 solid · 1 checker · 2 stripes · 3 speckle
+    // ── the interaction loop (3D-2), same faculties the 2D draw has ──
+    codegen::HostFn { name: "mx", n_args: 0, returns: true },
+    codegen::HostFn { name: "my", n_args: 0, returns: true },
+    codegen::HostFn { name: "down", n_args: 0, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+    // ── the app wires (3D-3): a 3D scene as a LIVE PANEL inside a UI. In a
+    //    scene3d node bv(i) reads bound cell outputs and emit(v) fires the
+    //    node's on_input; standalone, bv reads 0 and emit is a no-op. ──
+    codegen::HostFn { name: "bv", n_args: 1, returns: true },
+    codegen::HostFn { name: "emit", n_args: 1, returns: false },
 ];
 
 /// Compile a 3D scene seed against the draw3d ABI.

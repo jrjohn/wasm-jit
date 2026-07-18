@@ -60,6 +60,12 @@ knob sketch: while down(), map my() to a value and emit(v); when idle show bv(0.
 arc for the level and a needle. Grown widgets are remembered by name (like grown skins):
 later schemas may write a bare {"type":"knob"} and the host recalls the look.
 
+3D PANEL in a UI — {"type":"scene3d","seed":"<draw3d script>","bind":"cellId","bind_values":[...],
+"on_input":{"cell":"id"},"w":420,"h":260}: a LIVE 3D scene inside the UI (full draw3d verbs,
+drag-orbit, shadows) whose seed also gets bv(i) — read bound cell outputs (i=0 is "bind",
+then "bind_values") — and emit(v) — fire this node's on_input. PREFER scene3d for 3D data
+visualization: a box-bar per value scaled by bv(i), a sphere sized by a live reading.
+
 optional "init": [{"cell":"id","arg":40}] — fired once right after the UI
 manifests (in order), so bound values/gauges/charts show numbers immediately
 instead of "—". Always init cells whose outputs are displayed at start.
@@ -161,16 +167,28 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
 
 === surface "draw3d" — the seed writes the SCENE ===
 "seed" = one DSL script, run(t, w, h) -> f64, called every animation frame. You COMPOSE the
-scene each frame in WORLD coordinates; the host owns camera matrices, depth, projection and
-shading — you never write a matrix. y is UP. Keep scenes within roughly ±40 units of origin.
-- cam(x,y,z, tx,ty,tz): put the eye at (x,y,z) looking at (tx,ty,tz). Call once per frame for
-  a moving camera (e.g. a slow orbit: cam(cos(t*0.2)*16, 9.0, sin(t*0.2)*16, 0.0, 1.0, 0.0));
-  omit entirely for a sensible default view.
-- light(dx,dy,dz): directional light (default overhead-left). hue(v)/rgb(r,g,b)/hsl(h,s,l)
-  set the CURRENT colour, same as 2D.
-- sphere(x,y,z,r) · box(x,y,z, sx,sy,sz) (full sizes) · tri(x1,y1,z1,x2,y2,z2,x3,y3,z3)
-  — add one primitive in the current colour. Loops of primitives compose anything: a ground
-  is a large flat box; a tree is a box trunk + sphere crown; a ring is 40 spheres on a circle.
+scene each frame; the host owns camera matrices, depth, projection, shading and SHADOWS —
+you never write a matrix. y is UP. Keep scenes within roughly ±40 units of origin.
+- cam(x,y,z, tx,ty,tz): eye at (x,y,z) looking at (tx,ty,tz), once per frame for a moving
+  camera. OMIT it and the host gives an orbit camera the user can DRAG and WHEEL-ZOOM — omit unless the ask
+  needs a specific viewpoint.
+- light(dx,dy,dz): directional light (default overhead-left; shadows are automatic).
+- colour/matter state (applies to primitives that follow): hue(v) rgb(r,g,b) hsl(h,s,l) ·
+  shine(k) 0..1 specular · lum(k) 0..1 self-luminous (a sun, a lantern — unlit glow) ·
+  pat(k) 0 solid, 1 checker, 2 stripes, 3 speckle.
+- primitives, drawn in the CURRENT FRAME: sphere(x,y,z,r) · box(x,y,z, sx,sy,sz) (full sizes)
+  · cyl(r,h) and cone(r,h) (standing AT the frame origin, +y up — position them with the
+  stack) · tri(x1..z3) (escape hatch).
+- THE TRANSFORM STACK — hierarchy without matrices (like Logo's turtle / glPushMatrix):
+  push() copy the frame · pop() return · move(x,y,z) · rotx/roty/rotz(a) radians · scale(s).
+  The stack resets each frame; unbalanced push/pop cannot break anything (host law).
+  e.g. a windmill rotor: push(); move(0.0, 8.0, 1.0); rotz(t * 1.5);
+       let k = 0.0; while k < 4.0 { push(); rotz(k * 1.5708); box(0.0, 2.6, 0.0, 0.7, 5.2, 0.12); pop(); k = k + 1.0; }
+       pop();
+- interaction, same as the 2D draw: mx()/my() pointer px (-1 away), down() pressed,
+  get/set 32 private slots that persist across frames — a scene you can touch.
+- bv(i)/emit(v) also exist for when this scene runs as a PANEL inside a UI (see scene3d in
+  the ui surface); standalone they read 0 / do nothing.
 - budget: keep it under ~8000 primitives per frame (the host clamps).
 
 === surface "field" — a living world ===
