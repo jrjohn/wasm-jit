@@ -78,6 +78,9 @@ const SKIN_IMPORTS: [HostFn; 10] = wasm_jit::SKIN_IMPORTS;
 // Grown-widget ABI (詞彙自生成), shared with the browser for the same reason.
 const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
+// Draw3d ABI (§22 — the seed writes the scene), shared likewise.
+const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
+const DRAW3D_IMPORTS: [HostFn; 10] = wasm_jit::DRAW3D_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -570,6 +573,16 @@ fn validate(obj: &Value) -> Result<(), String> {
                 .ok_or("surface \"draw\" lacks \"seed\"")?;
             compile_check(seed, &["t", "w", "h"], &DRAW_IMPORTS, 5_000_000)
                 .map_err(|e| format!("draw seed failed to compile: {e}"))
+        }
+        Some("draw3d") => {
+            // §22: the seed writes the SCENE — world-space primitives only;
+            // camera/projection/light are host law, so no seed touches a matrix
+            let seed = obj
+                .get("seed")
+                .and_then(|s| s.as_str())
+                .ok_or("surface \"draw3d\" lacks \"seed\"")?;
+            compile_check(seed, &DRAW3D_PARAMS, &DRAW3D_IMPORTS, 5_000_000)
+                .map_err(|e| format!("draw3d seed failed to compile: {e}"))
         }
         Some("field") => {
             let world = obj.get("world").ok_or("surface \"field\" lacks \"world\"")?;
@@ -1645,6 +1658,31 @@ mod tests {
                 "tree":{"type":"stack","children":[
                     {"type":"knob","widget_seed":"disc(w*0.5, h*0.5, 9.0);\n0.0","bind":"nothing"}]},"wires":[]}});
         assert!(validate(&ghost_bind).unwrap_err().contains("unknown cell"));
+    }
+
+    #[test]
+    fn draw3d_seed_validates_and_rejects() {
+        // §22: a scene of ground + orbiting spheres + a tri validates end to end
+        let ok = serde_json::json!({"surface":"draw3d","seed":
+            "cam(cos(t * 0.2) * 16.0, 9.0, sin(t * 0.2) * 16.0, 0.0, 1.0, 0.0);\nrgb(0.2, 0.22, 0.2);\nbox(0.0, 0.0 - 0.6, 0.0, 30.0, 1.2, 30.0);\nlet k = 0.0;\nwhile k < 12.0 {\n let a = k * 0.5236;\n hsl(k / 12.0, 0.7, 0.55);\n sphere(cos(a) * 8.0, 2.0 + sin(t + k) * 0.6, sin(a) * 8.0, 0.9);\n k = k + 1.0;\n}\ntri(0.0, 0.0, 0.0, 4.0, 6.0, 0.0, 0.0 - 4.0, 6.0, 0.0);\n0.0"});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        let overreach = serde_json::json!({"surface":"draw3d","seed":"disc(1.0, 2.0, 3.0);\n0.0"});
+        assert!(validate(&overreach).unwrap_err().contains("failed to compile"),
+            "2D-only verbs must not exist in the 3D fence");
+        let missing = serde_json::json!({"surface":"draw3d"});
+        assert!(validate(&missing).unwrap_err().contains("lacks"));
+    }
+
+    #[test]
+    fn draw3d_abi_matches_crate() {
+        assert_eq!(DRAW3D_IMPORTS.len(), wasm_jit::DRAW3D_IMPORTS.len());
+        for (a, b) in DRAW3D_IMPORTS.iter().zip(wasm_jit::DRAW3D_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        // world-space primitives only — no matrix-shaped import may ever appear
+        for f in ["sphere", "box", "tri", "cam", "light"] {
+            assert!(DRAW3D_IMPORTS.iter().any(|i| i.name == f), "draw3d ABI missing {f}");
+        }
     }
 
     #[test]

@@ -207,6 +207,39 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// The DRAW3D ABI (§22 — the seed writes the SCENE): 3D composed the way 2D is,
+/// one dimension up. `run(t, w, h)` every frame; the cell places primitives in
+/// WORLD coordinates and the host owns everything geometric that could go wrong
+/// — camera matrices, depth, projection, lighting are host law, so a seed can
+/// never write a matrix and the model never has to. y is up.
+pub const DRAW3D_PARAMS: [&str; 3] = ["t", "w", "h"];
+pub const DRAW3D_IMPORTS: [codegen::HostFn; 10] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "hue", n_args: 1, returns: false },  // colour verbs — same names as 2D
+    codegen::HostFn { name: "rgb", n_args: 3, returns: false },
+    codegen::HostFn { name: "hsl", n_args: 3, returns: false },
+    codegen::HostFn { name: "cam", n_args: 6, returns: false },  // eye (x,y,z) looking at (tx,ty,tz)
+    codegen::HostFn { name: "light", n_args: 3, returns: false },// directional light (dx,dy,dz)
+    codegen::HostFn { name: "sphere", n_args: 4, returns: false },// (x,y,z,r)
+    codegen::HostFn { name: "box", n_args: 6, returns: false },  // (x,y,z, sx,sy,sz) full sizes
+    codegen::HostFn { name: "tri", n_args: 9, returns: false },  // arbitrary triangle — the escape hatch
+];
+
+/// Compile a 3D scene seed against the draw3d ABI.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_draw3d_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &DRAW3D_PARAMS,
+        &DRAW3D_IMPORTS,
+        codegen::CompileOpts { fuel: Some(5_000_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
 /// The GROWN-WIDGET ABI (詞彙自生成): a widget the fixed vocabulary lacks — a
 /// knob, a clock, a heatmap cell — enters as a fenced cell through the same
 /// drawing-primitive gate as a grown skin. `run(t, w, h)` every frame on its

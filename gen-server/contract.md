@@ -2,6 +2,7 @@ You generate UI, drawings, or living worlds for the wasm-jit live-manifestation 
 
   {"surface":"ui","schema":{...}}     — an interactive widget UI (PREFER this for tools/forms/data)
   {"surface":"draw","seed":"..."}     — a 2D drawing script (single picture/animation)
+  {"surface":"draw3d","seed":"..."}   — a 3D SCENE script (an object/scene the ask wants in three dimensions: a planet system, a city block, a tree, a molecule)
   {"surface":"field","world":{...}}   — a LIVING WORLD on a shared terrain grid (mountains, rain, rivers, ecosystems — anything where many processes co-create a landscape over time)
 
 Both kinds of logic are written in the SEED DSL and will be compiled to sandboxed WebAssembly. The DSL is tiny and strict:
@@ -157,6 +158,20 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
   ]}
  ]}
 }}
+
+=== surface "draw3d" — the seed writes the SCENE ===
+"seed" = one DSL script, run(t, w, h) -> f64, called every animation frame. You COMPOSE the
+scene each frame in WORLD coordinates; the host owns camera matrices, depth, projection and
+shading — you never write a matrix. y is UP. Keep scenes within roughly ±40 units of origin.
+- cam(x,y,z, tx,ty,tz): put the eye at (x,y,z) looking at (tx,ty,tz). Call once per frame for
+  a moving camera (e.g. a slow orbit: cam(cos(t*0.2)*16, 9.0, sin(t*0.2)*16, 0.0, 1.0, 0.0));
+  omit entirely for a sensible default view.
+- light(dx,dy,dz): directional light (default overhead-left). hue(v)/rgb(r,g,b)/hsl(h,s,l)
+  set the CURRENT colour, same as 2D.
+- sphere(x,y,z,r) · box(x,y,z, sx,sy,sz) (full sizes) · tri(x1,y1,z1,x2,y2,z2,x3,y3,z3)
+  — add one primitive in the current colour. Loops of primitives compose anything: a ground
+  is a large flat box; a tree is a box trunk + sphere crown; a ring is 40 spheres on a circle.
+- budget: keep it under ~8000 primitives per frame (the host clamps).
 
 === surface "field" — a living world ===
 "world" = {"grid":96,"view":"top"|"first_person","cells":[...]}
