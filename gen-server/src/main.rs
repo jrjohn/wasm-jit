@@ -1349,7 +1349,15 @@ async fn main() {
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route("/", get(index))
         .nest_service("/pkg", ServeDir::new("pkg"))
-        .nest_service("/pkg-skins", ServeDir::new("pkg-skins"));
+        .nest_service("/pkg-skins", ServeDir::new("pkg-skins"))
+        // version-skew guard: the page is no-store but /pkg used to be
+        // heuristically cached — a fresh HTML importing a new export from a
+        // stale pkg kills the whole module (dead buttons). no-cache = may
+        // cache, MUST revalidate (304s stay fast, skew becomes impossible).
+        .layer(tower_http::set_header::SetResponseHeaderLayer::if_not_present(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-cache"),
+        ));
     tokio::spawn(async { ensure_container().await; }); // warm the generator before the first prompt
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8646").await.unwrap();
     println!("gen-server: http://127.0.0.1:8646  (generator container: agent-task-node:local, override GEN_IMAGE)");
