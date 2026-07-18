@@ -23,8 +23,13 @@
   .chatbar { display: flex; gap: .4rem; padding: .5rem; border-top: 1px solid #30363d; }
   .chatbar input[type=text] { flex: 1; font: inherit; font-size: .82rem; padding: .4rem .6rem;
     border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: inherit; }
-  button { font: inherit; font-size: .82rem; padding: .4rem .8rem; border-radius: 6px; border: none;
-           background: #1f6feb; color: #fff; cursor: pointer; }
+  button { font: inherit; font-size: .82rem; padding: .4rem .8rem; border-radius: 6px;
+           border: 1px solid #58a6ff33; background: linear-gradient(180deg, #2a7bff, #1a63d8);
+           color: #fff; cursor: pointer;
+           transition: transform .12s ease, box-shadow .12s ease, filter .12s ease; }
+  button:hover { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 3px 10px #0006; }
+  button:active { transform: translateY(0); filter: brightness(.95); box-shadow: none; }
+  button:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
   button:disabled { opacity: .5; cursor: wait; }
   select { font: inherit; font-size: .78rem; padding: .3rem; border-radius: 6px;
            border: 1px solid #30363d; background: #161b22; color: inherit; }
@@ -33,13 +38,30 @@
   #stage { display: flex; flex-direction: column; gap: .8rem; }
   canvas { width: 100%; border: 1px solid #30363d; border-radius: 8px; background: #010409; display: none; }
   /* manifested widget styles */
-  .w-stack { display: flex; flex-direction: column; gap: .7rem; }
-  .w-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
-  .w-label { margin: 0; font-size: .9rem; }
-  .w-value { font-size: .9rem; opacity: .85; } .w-value b { color: #58a6ff; }
-  .w-slider { width: 200px; }
-  .w-input { font: inherit; font-size: .82rem; padding: .3rem .5rem; border-radius: 6px;
-             border: 1px solid #30363d; background: #161b22; color: inherit; width: 110px; }
+  .w-stack { display: flex; flex-direction: column; gap: .75rem; }
+  .w-row { display: flex; gap: .9rem; align-items: center; flex-wrap: wrap; }
+  .w-label { margin: 0; font-size: .9rem; color: #c9d1d9; }
+  #stage > .w-stack > .w-label:first-child { font-size: 1.06rem; font-weight: 600; color: #e6edf3; letter-spacing: .01em; }
+  .w-value { font-size: .88rem; color: #8b949e; display: inline-flex; align-items: baseline; gap: .35rem;
+             background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px; padding: .22rem .7rem; }
+  .w-value b { color: #79b8ff; font-family: ui-monospace, SFMono-Regular, monospace;
+               font-variant-numeric: tabular-nums; font-size: .95rem; }
+  .w-slider { appearance: none; -webkit-appearance: none; width: 230px; height: 22px;
+              background: transparent; cursor: pointer; }
+  .w-slider::-webkit-slider-runnable-track { height: 6px; border-radius: 999px;
+              background: linear-gradient(180deg, #262c36, #30363d); }
+  .w-slider::-webkit-slider-thumb { -webkit-appearance: none; margin-top: -5px; width: 16px; height: 16px;
+              border-radius: 50%; background: #58a6ff; border: 2px solid #0d1117;
+              box-shadow: 0 0 0 1px #58a6ff55, 0 2px 6px #0008; transition: box-shadow .15s; }
+  .w-slider:hover::-webkit-slider-thumb { box-shadow: 0 0 0 5px #58a6ff2e, 0 2px 6px #0008; }
+  .w-slider::-moz-range-track { height: 6px; border-radius: 999px; background: #30363d; }
+  .w-slider::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #58a6ff;
+              border: 2px solid #0d1117; box-shadow: 0 0 0 1px #58a6ff55; }
+  .w-input { font: inherit; font-size: .84rem; padding: .38rem .6rem; border-radius: 8px;
+             border: 1px solid #30363d; background: #0d1117; color: inherit; width: 120px;
+             font-variant-numeric: tabular-nums; transition: border-color .15s, box-shadow .15s; }
+  .w-input:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  .w-input::placeholder { color: #6e7681; }
   .quar { color: #f85149; font-size: .75rem; }
   .hint { font-size: .75rem; opacity: .55; }
   .chat { position: relative; }
@@ -216,104 +238,175 @@ function chartVals(node) {
   return node.bind_values ? node.bind_values.map(id => outputs[id] ?? 0) : (node.values ?? []);
 }
 
+// DPR-aware logical-coordinate context: charts render at device resolution
+// (no more CSS-stretched blur) but draw in the same logical 680-wide space.
+function chartG(cvs) {
+  const dpr = Number(cvs.dataset.dpr || 1);
+  const g = cvs.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { g, W: cvs.width / dpr, H: cvs.height / dpr };
+}
+function chartTitle(g, node, x) {
+  if (!node.title) return;
+  g.font = '600 15px system-ui, sans-serif'; g.fillStyle = TXT; g.textAlign = 'left';
+  g.fillText(node.title, x, 22);
+}
 function drawBar(node, cvs) {
-  const g = cvs.getContext('2d'), W = cvs.width, labels = node.labels, vals = chartVals(node);
-  g.clearRect(0, 0, W, cvs.height);
-  g.font = '15px ui-monospace'; g.fillStyle = TXT;
-  if (node.title) g.fillText(node.title, 10, 20);
-  const maxv = Math.max(...vals, 1e-9), x0 = 170, bw = W - x0 - 90;
+  const { g, W, H } = chartG(cvs);
+  g.clearRect(0, 0, W, H);
+  chartTitle(g, node, 14);
+  const labels = node.labels, vals = chartVals(node);
+  const maxv = Math.max(...vals, 1e-9), x0 = 172, bw = W - x0 - 96, bh = 18;
+  g.font = '13px ui-monospace';
   labels.forEach((lb, i) => {
-    const y = 40 + i * 30;
+    const y = 44 + i * 32;
     g.fillStyle = DIM; g.textAlign = 'right'; g.fillText(String(lb), x0 - 12, y + 14);
     g.textAlign = 'left';
-    g.fillStyle = GRID; g.fillRect(x0, y, bw, 18);
-    g.fillStyle = palette(0); g.fillRect(x0, y, Math.max(bw * (vals[i] / maxv), 0), 18);
-    g.fillStyle = TXT; g.fillText(fmtN(vals[i]) + (node.unit ?? ''), x0 + bw + 8, y + 14);
+    g.fillStyle = '#30363d66';
+    g.beginPath(); g.roundRect(x0, y, bw, bh, 9); g.fill();
+    const w = Math.max(bw * (vals[i] / maxv), 0);
+    if (w > 0.5) {
+      const grad = g.createLinearGradient(x0, 0, x0 + bw, 0);
+      grad.addColorStop(0, 'hsl(210,72%,52%)'); grad.addColorStop(1, 'hsl(210,82%,64%)');
+      g.fillStyle = grad;
+      g.beginPath(); g.roundRect(x0, y, Math.max(w, bh * 0.6), bh, 9); g.fill();
+    }
+    g.fillStyle = TXT; g.font = '13px ui-monospace';
+    g.fillText(fmtN(vals[i]) + (node.unit ?? ''), x0 + bw + 10, y + 14);
   });
 }
 
+function smoothTo(g, pts) { // Catmull-Rom → bezier: measured points become a felt curve
+  g.moveTo(pts[0].x, pts[0].y);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(i - 1, 0)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(i + 2, pts.length - 1)];
+    g.bezierCurveTo(p1.x + (p2.x - p0.x) / 6, p1.y + (p2.y - p0.y) / 6,
+                    p2.x - (p3.x - p1.x) / 6, p2.y - (p3.y - p1.y) / 6, p2.x, p2.y);
+  }
+}
 function drawLine(node, cvs) {
-  const g = cvs.getContext('2d'), W = cvs.width, H = cvs.height, labels = node.labels;
+  const { g, W, H } = chartG(cvs);
   g.clearRect(0, 0, W, H);
-  g.font = '14px ui-monospace'; g.fillStyle = TXT;
-  if (node.title) g.fillText(node.title, 10, 20);
+  chartTitle(g, node, 14);
+  const labels = node.labels;
   const all = node.series.flatMap(s => s.values);
   const lo = Math.min(...all, 0), hi = Math.max(...all, 1e-9);
-  const L = 55, R = W - 15, T = 34, B = H - 28;
-  g.strokeStyle = GRID; g.fillStyle = DIM; g.textAlign = 'right';
+  const L = 58, R = W - 18, T = 38, B = H - 30;
+  const X = i => L + (R - L) * i / Math.max(labels.length - 1, 1);
+  const Y = v => B - (B - T) * ((v - lo) / (hi - lo || 1));
+  g.font = '12px ui-monospace'; g.strokeStyle = '#30363d80'; g.fillStyle = DIM; g.textAlign = 'right';
   for (let k = 0; k <= 4; k++) {
     const y = B - (B - T) * k / 4;
     g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke();
-    g.fillText(fmtN(lo + (hi - lo) * k / 4), L - 6, y + 4);
+    g.fillText(fmtN(lo + (hi - lo) * k / 4), L - 8, y + 4);
   }
   g.textAlign = 'center';
-  labels.forEach((lb, i) => g.fillText(String(lb), L + (R - L) * i / Math.max(labels.length - 1, 1), B + 18));
+  labels.forEach((lb, i) => g.fillText(String(lb), X(i), B + 19));
   node.series.forEach((s, si) => {
-    g.strokeStyle = g.fillStyle = palette(si); g.lineWidth = 2;
-    g.beginPath();
-    s.values.forEach((v, i) => {
-      const x = L + (R - L) * i / Math.max(labels.length - 1, 1);
-      const y = B - (B - T) * ((v - lo) / (hi - lo || 1));
-      i ? g.lineTo(x, y) : g.moveTo(x, y);
+    const pts = s.values.map((v, i) => ({ x: X(i), y: Y(v) }));
+    if (si === 0 && pts.length > 1) { // the first series carries a soft area fill
+      const grad = g.createLinearGradient(0, T, 0, B);
+      grad.addColorStop(0, 'hsla(210,62%,58%,.28)'); grad.addColorStop(1, 'hsla(210,62%,58%,0)');
+      g.beginPath(); smoothTo(g, pts);
+      g.lineTo(pts[pts.length - 1].x, B); g.lineTo(pts[0].x, B); g.closePath();
+      g.fillStyle = grad; g.fill();
+    }
+    g.strokeStyle = palette(si); g.lineWidth = 2.4; g.lineJoin = 'round';
+    g.beginPath(); smoothTo(g, pts); g.stroke();
+    g.fillStyle = palette(si);
+    pts.forEach((p, i) => {
+      g.beginPath(); g.arc(p.x, p.y, i === pts.length - 1 ? 4.2 : 2.6, 0, 6.2832); g.fill();
     });
-    g.stroke();
-    s.values.forEach((v, i) => {
-      const x = L + (R - L) * i / Math.max(labels.length - 1, 1);
-      const y = B - (B - T) * ((v - lo) / (hi - lo || 1));
-      g.beginPath(); g.arc(x, y, 3, 0, 6.2832); g.fill();
-    });
-    g.textAlign = 'left';
-    g.fillText(s.name ?? `s${si}`, L + 8 + si * 90, T - 6);
+    // legend chips live top-right, clear of the title
+    const lx = R - (node.series.length - si) * 100;
+    g.beginPath(); g.arc(lx, 18, 4, 0, 6.2832); g.fill();
+    g.fillStyle = TXT; g.textAlign = 'left'; g.font = '12px ui-monospace';
+    g.fillText(s.name ?? `s${si}`, lx + 9, 22);
   });
 }
 
-function drawPie(node, cvs) {
-  const g = cvs.getContext('2d'), H = cvs.height, vals = chartVals(node);
-  g.clearRect(0, 0, cvs.width, H);
-  g.font = '14px ui-monospace'; g.fillStyle = TXT; g.textAlign = 'left';
-  if (node.title) g.fillText(node.title, 10, 20);
+function drawPie(node, cvs) { // a donut now: slices breathe, the total sits in the hole
+  const { g, W, H } = chartG(cvs);
+  g.clearRect(0, 0, W, H);
+  chartTitle(g, node, 14);
+  const vals = chartVals(node);
   const total = vals.reduce((a, b) => a + Math.max(b, 0), 0) || 1;
-  const cx = 130, cy = (H + 24) / 2, r = Math.min(H / 2 - 34, 95);
+  const cx = 135, cy = (H + 26) / 2, r = Math.min(H / 2 - 38, 92), ri = r * 0.62;
+  const gap = 0.028; // radians of quiet between slices
   let a = -1.5708;
   vals.forEach((v, i) => {
     const da = Math.max(v, 0) / total * 6.2832;
-    g.fillStyle = palette(i);
-    g.beginPath(); g.moveTo(cx, cy); g.arc(cx, cy, r, a, a + da); g.closePath(); g.fill();
+    if (da > gap * 1.5) {
+      g.fillStyle = palette(i);
+      g.beginPath();
+      g.arc(cx, cy, r, a + gap / 2, a + da - gap / 2);
+      g.arc(cx, cy, ri, a + da - gap / 2, a + gap / 2, true);
+      g.closePath(); g.fill();
+    }
     a += da;
-    g.fillRect(260, 36 + i * 24, 12, 12);
-    g.fillStyle = TXT;
-    g.fillText(`${node.labels[i]}  ${fmtN(v)}${node.unit ?? ''}`, 280, 47 + i * 24);
+    g.fillStyle = palette(i);
+    g.beginPath(); g.roundRect(266, 38 + i * 26, 12, 12, 3); g.fill();
+    g.fillStyle = TXT; g.font = '13px ui-monospace'; g.textAlign = 'left';
+    g.fillText(`${node.labels[i]}`, 286, 49 + i * 26);
+    g.fillStyle = DIM; g.textAlign = 'right';
+    const pct = Math.round(v / total * 100);
+    // when the values ARE percentages, don't say the same number twice
+    const tail = node.unit === '%' ? `${fmtN(v)}%` : `${fmtN(v)}${node.unit ?? ''} · ${pct}%`;
+    g.fillText(tail, Math.min(W - 20, 560), 49 + i * 26);
+    g.textAlign = 'left';
   });
+  g.fillStyle = TXT; g.textAlign = 'center'; g.font = '600 18px ui-monospace';
+  g.fillText(fmtN(total), cx, cy + 1);
+  g.fillStyle = DIM; g.font = '11px ui-monospace';
+  g.fillText('total' + (node.unit ? ` ${node.unit}` : ''), cx, cy + 17);
 }
 
 function drawGauge(node, cvs) {
-  const g = cvs.getContext('2d'), W = cvs.width, H = cvs.height;
+  const { g, W, H } = chartG(cvs);
   g.clearRect(0, 0, W, H);
   const v = node.bind ? (outputs[node.bind] ?? 0) : (node.value ?? 0);
   const min = node.min ?? 0, max = node.max ?? 100;
   const frac = Math.min(Math.max((v - min) / (max - min || 1), 0), 1);
-  const cx = W / 2, cy = H - 24, r = Math.min(H - 46, W / 2 - 20);
-  g.lineWidth = 14; g.lineCap = 'round';
-  g.strokeStyle = GRID;
+  const cx = W / 2, cy = H - 30, r = Math.min(H - 58, W / 2 - 24);
+  g.lineWidth = 16; g.lineCap = 'round';
+  g.strokeStyle = '#30363d99';
   g.beginPath(); g.arc(cx, cy, r, Math.PI, 2 * Math.PI); g.stroke();
-  g.strokeStyle = palette(0);
-  g.beginPath(); g.arc(cx, cy, r, Math.PI, Math.PI * (1 + frac)); g.stroke();
-  g.fillStyle = TXT; g.textAlign = 'center'; g.font = 'bold 22px ui-monospace';
-  g.fillText(fmtN(v) + (node.unit ?? ''), cx, cy - 8);
-  g.font = '13px ui-monospace'; g.fillStyle = DIM;
-  if (node.title) g.fillText(node.title, cx, 16);
+  if (frac > 0.001) {
+    const grad = g.createLinearGradient(cx - r, 0, cx + r, 0);
+    grad.addColorStop(0, 'hsl(210,72%,50%)'); grad.addColorStop(1, 'hsl(190,75%,58%)');
+    g.strokeStyle = grad;
+    g.beginPath(); g.arc(cx, cy, r, Math.PI, Math.PI * (1 + frac)); g.stroke();
+  }
+  g.lineWidth = 2; g.strokeStyle = '#8b949e55'; // quiet ticks
+  for (let k = 0; k <= 4; k++) {
+    const ang = Math.PI * (1 + k / 4);
+    g.beginPath();
+    g.moveTo(cx + Math.cos(ang) * (r - 14), cy + Math.sin(ang) * (r - 14));
+    g.lineTo(cx + Math.cos(ang) * (r - 20), cy + Math.sin(ang) * (r - 20));
+    g.stroke();
+  }
+  g.fillStyle = TXT; g.textAlign = 'center';
+  g.font = '600 26px ui-monospace';
+  g.fillText(fmtN(v) + (node.unit ?? ''), cx, cy - 10);
+  g.font = '12px ui-monospace'; g.fillStyle = DIM;
+  if (node.title) g.fillText(node.title, cx, 18);
+  g.textAlign = 'left'; g.fillText(fmtN(min), cx - r - 4, cy + 18);
+  g.textAlign = 'right'; g.fillText(fmtN(max) + (node.unit ?? ''), cx + r + 4, cy + 18);
 }
 
 const CHART_DRAW = { barchart: drawBar, linechart: drawLine, piechart: drawPie, gauge: drawGauge };
 
 function makeChart(node) {
   const cvs = document.createElement('canvas');
-  cvs.width = 680;
-  cvs.height = node.type === 'barchart' ? 46 + node.labels.length * 30
-             : node.type === 'gauge' ? 150
-             : node.type === 'piechart' ? Math.max(220, 46 + node.labels.length * 24)
-             : 240;
-  cvs.style.cssText = 'width:100%;max-width:680px;display:block;background:transparent;border:none';
+  const W = 680;
+  const H = node.type === 'barchart' ? 52 + node.labels.length * 32
+          : node.type === 'gauge' ? 168
+          : node.type === 'piechart' ? Math.max(232, 52 + node.labels.length * 26)
+          : 252;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // crisp on retina, capped
+  cvs.dataset.dpr = dpr;
+  cvs.width = W * dpr; cvs.height = H * dpr;
+  cvs.style.cssText = `width:100%;max-width:${W}px;display:block;background:transparent;border:none`;
   charts.push({ node, cvs });
   CHART_DRAW[node.type](node, cvs);
   return cvs;
@@ -1326,6 +1419,7 @@ setInterval(() => {
 
 // e2e hooks: deterministic manifestation + direct audit access
 window.__manifestWorld = w => manifestField(w);
+window.__manifestUi = s => manifestUi(s); // e2e/compose: manifest a UI schema directly
 window.__sampleF = (c, x, y) => sampleF(c, x, y); // e2e: verify smooth ground
 window.__auditEntity = bytes => audit_entity_bytes(new Uint8Array(bytes));
 window.__compileDraw = src => compile_draw_wasm(src); // e2e: mint a wrong-ABI module locally
