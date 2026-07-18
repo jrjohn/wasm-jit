@@ -469,22 +469,21 @@ function renderFieldFP() {
   sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
   const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
-  const horizon = H * 0.42, focal = H * 0.95, fov = 1.0, step = 3;
+  const horizon = H * 0.42, focal = H * 0.95, fov = 1.0, step = 2;
   const maxD = g * 1.15;
   const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
+  const smp = CPU_SMP;
   for (let sx = 0; sx < W; sx += step) {
     const off = (sx / W - 0.5) * fov;
     const dx = sinY + off * cosY, dz = cosY - off * sinY;
     let minY = H;
     for (let d = 1.6; d < maxD; d += 0.35 + d * 0.014) {
       const wx = cam.px + dx * d, wz = cam.pz + dz * d;
-      const xi = wx | 0, zi = wz | 0;
       let h = 0, w = 2.5, v = 0, sn = 0;            // beyond the field: the sea
-      if (xi >= 0 && xi < g && zi >= 0 && zi < g) {
-        h = FIELD[zi * g + xi];
-        w = FIELD[(g + zi) * g + xi];
-        v = FIELD[(2 * g + zi) * g + xi];
-        sn = FIELD[(3 * g + zi) * g + xi];
+      if (wx >= 0 && wx < g && wz >= 0 && wz < g) {
+        // bilinear, not `| 0`: the hills become curves instead of terraces
+        sampleFieldAll(wx, wz, g, smp);
+        h = smp[0]; w = smp[1]; v = smp[2]; sn = smp[3];
       }
       const surf = (h + Math.min(w, 3) * 0.6) * K;
       const sy = horizon + ((eye - surf) * focal) / d;
@@ -943,35 +942,152 @@ function drawSnowfall(nowSec, W, H) { // host weather effect — pure rendering,
   }
 }
 
-function renderField() {
-  const g = fieldWorld.grid;
-  if (!fieldCanvas || fieldCanvas.width !== g) {
+// ---- the eye, upgraded (畫質: the data was never blocky — only the renderer) ----
+// FIELD is a continuous f64 lattice; the Minecraft look was 1 cell = 1 fat pixel
+// + smoothing off. Two better eyes, same world, zero sandbox change:
+//   Phase B: a WebGL fragment shader — bilinear terrain, slope light, soft seams
+//   Phase A: a CPU supersampled fallback with the same look, if WebGL is absent
+function sampleFieldAll(x, y, g, out) { // one weight computation, all 4 planes
+  const fx = Math.min(Math.max(x, 0), g - 1.001), fy = Math.min(Math.max(y, 0), g - 1.001);
+  const x0 = fx | 0, y0 = fy | 0, tx = fx - x0, ty = fy - y0;
+  const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+  const n = g * g, r0 = y0 * g + x0;
+  for (let c = 0; c < 4; c++) {
+    const b = c * n + r0;
+    out[c] = FIELD[b] * w00 + FIELD[b + 1] * w10 + FIELD[b + g] * w01 + FIELD[b + g + 1] * w11;
+  }
+  return out;
+}
+let glT = null; // WebGL terrain: null = untried, false = unavailable (CPU path)
+function initGLTerrain() {
+  try {
+    const cvgl = document.createElement('canvas');
+    cvgl.width = cvgl.height = 768;
+    const gl = cvgl.getContext('webgl2', { antialias: false, depth: false });
+    if (!gl) return false;
+    const VS = `#version 300 es
+in vec2 p; out vec2 uv;
+void main(){ uv = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5); gl_Position = vec4(p, 0.0, 1.0); }`;
+    const FS = `#version 300 es
+precision highp float;
+uniform sampler2D field; uniform float grid;
+in vec2 uv; out vec4 frag;
+vec4 tx(int x, int y){
+  int gi = int(grid) - 1;
+  return texelFetch(field, ivec2(clamp(x, 0, gi), clamp(y, 0, gi)), 0);
+}
+vec4 bil(vec2 gp){ // manual bilinear over the f32 lattice — no filtering extensions needed
+  vec2 q = gp - 0.5; vec2 f = fract(q); ivec2 b = ivec2(floor(q));
+  return mix(mix(tx(b.x, b.y), tx(b.x + 1, b.y), f.x),
+             mix(tx(b.x, b.y + 1), tx(b.x + 1, b.y + 1), f.x), f.y);
+}
+vec3 palette(vec4 s){ // terrainColor, with soft seams instead of hard isolines
+  float h = s.r, w = s.g, v = s.b, sn = s.a;
+  float k1 = clamp((h - 55.0) / 25.0, 0.0, 1.0);
+  vec3 peak  = vec3(235.0, 240.0, 245.0);
+  vec3 rock  = vec3(120.0 + k1 * 80.0, 110.0 + k1 * 95.0, 100.0 + k1 * 115.0);
+  vec3 grass = vec3(105.0 - v * 45.0, 128.0 + v * 55.0, 72.0 - v * 20.0);
+  vec3 sand  = vec3(189.0 - v * 30.0, 174.0 + v * 10.0, 127.0);
+  vec3 c = mix(sand, grass, smoothstep(7.0, 11.0, h));
+  c = mix(c, rock, smoothstep(53.0, 57.0, h));
+  c = mix(c, peak, smoothstep(78.0, 82.0, h));
+  float kw = min(w / 3.0, 1.0) * 0.85 * smoothstep(0.02, 0.06, w);
+  c = mix(c, vec3(25.0, 95.0, 190.0), kw);
+  float ks = min(sn, 1.0) * 0.9 * smoothstep(0.01, 0.03, sn) * (1.0 - smoothstep(0.02, 0.05, w));
+  c = mix(c, vec3(240.0, 244.0, 250.0), ks);
+  return c / 255.0;
+}
+void main(){
+  vec2 gp = uv * grid;
+  vec4 s = bil(gp);
+  // soften the waterline: the water channel jumps within one cell — a 3-tap
+  // blur turns the stepped bank into a soft shore
+  s.g = (s.g + bil(gp + vec2(0.45, 0.25)).g + bil(gp - vec2(0.3, 0.45)).g) / 3.0;
+  float e = 0.6;
+  float hx = bil(gp + vec2(e, 0.0)).r - bil(gp - vec2(e, 0.0)).r;
+  float hy = bil(gp + vec2(0.0, e)).r - bil(gp - vec2(0.0, e)).r;
+  vec3 nrm = normalize(vec3(-hx, -hy, 2.0 * e * 1.6));
+  float light = clamp(0.72 + dot(nrm, normalize(vec3(-0.5, -0.45, 0.74))) * 0.5, 0.55, 1.25);
+  float wdepth = min(s.g / 3.0, 1.0);
+  light = mix(light, 1.0, wdepth * 0.7); // water lies flat — mute the hillshade under it
+  frag = vec4(palette(s) * light, 1.0);
+}`;
+    const sh = (ty, src) => {
+      const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
+      if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+      return o;
+    };
+    const prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return { cv: cvgl, gl, prog, tex, staging: null, grid: 0, uGrid: gl.getUniformLocation(prog, 'grid') };
+  } catch (e) { return false; }
+}
+function renderTerrainGL(g) {
+  const T = glT, gl = T.gl;
+  if (T.grid !== g) {
+    T.grid = g; T.staging = new Float32Array(g * g * 4);
+    gl.uniform1f(T.uGrid, g);
+  }
+  const st = T.staging, n = g * g;
+  for (let i = 0; i < n; i++) { // planar f64 → interleaved f32 texel (h,w,v,sn)
+    st[i * 4] = FIELD[i]; st[i * 4 + 1] = FIELD[n + i];
+    st[i * 4 + 2] = FIELD[2 * n + i]; st[i * 4 + 3] = FIELD[3 * n + i];
+  }
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, g, g, 0, gl.RGBA, gl.FLOAT, st);
+  gl.viewport(0, 0, T.cv.width, T.cv.height);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+const CPU_SMP = new Float64Array(4);
+function renderTerrainCPU(g) { // Phase A: supersample + bilinear + slope light
+  const SS = Math.max(2, Math.min(4, Math.round(384 / g))), RES = g * SS;
+  if (!fieldCanvas || fieldCanvas.width !== RES) {
     fieldCanvas = document.createElement('canvas');
-    fieldCanvas.width = fieldCanvas.height = g;
+    fieldCanvas.width = fieldCanvas.height = RES;
   }
   const fg = fieldCanvas.getContext('2d');
-  const img = fg.createImageData(g, g);
-  const d = img.data;
-  for (let y = 0; y < g; y++) {
-    for (let x = 0; x < g; x++) {
-      const h = FIELD[y * g + x];
-      const w = FIELD[(g + y) * g + x];
-      const v = FIELD[(2 * g + y) * g + x];
-      const sn = FIELD[(3 * g + y) * g + x];
-      // cheap hillshade from the height gradient
-      const hl = x > 0 ? FIELD[y * g + x - 1] : h;
-      const shade = Math.max(0.72, Math.min(1.25, 1 + (hl - h) * 0.03));
-      let [r, gg, b] = terrainColor(h, w, v, sn);
-      const i = (y * g + x) * 4;
+  const img = fg.createImageData(RES, RES);
+  const d = img.data, smp = CPU_SMP;
+  for (let y = 0; y < RES; y++) {
+    const gy = (y + 0.5) / SS;
+    for (let x = 0; x < RES; x++) {
+      const gx = (x + 0.5) / SS;
+      sampleFieldAll(gx, gy, g, smp);
+      const h = smp[0], w = smp[1], v = smp[2], sn = smp[3];
+      const hw = sampleF(0, gx - 0.6, gy), he = sampleF(0, gx + 0.6, gy);
+      let shade = Math.max(0.62, Math.min(1.25, 1 + (hw - he) * 0.05));
+      shade += (1 - shade) * Math.min(w / 3, 1) * 0.7; // water lies flat
+      const [r, gg, b] = terrainColor(h, w, v, sn);
+      const i = (y * RES + x) * 4;
       d[i] = r * shade; d[i + 1] = gg * shade; d[i + 2] = b * shade; d[i + 3] = 255;
     }
   }
   fg.putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = false;
+}
+function renderField() {
+  const g = fieldWorld.grid;
   const size = Math.min(cv.width, cv.height);
   const ox = (cv.width - size) / 2;
   ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.drawImage(fieldCanvas, ox, 0, size, size);
+  if (glT === null) { glT = initGLTerrain(); window.__terrainPath = glT ? 'gl' : 'cpu'; }
+  ctx.imageSmoothingEnabled = true; // the upscale is part of the smoothing now
+  if (glT) { renderTerrainGL(g); ctx.drawImage(glT.cv, ox, 0, size, size); }
+  else { renderTerrainCPU(g); ctx.drawImage(fieldCanvas, ox, 0, size, size); }
   const s = size / g; // canvas px per grid unit — the skins live at full resolution
   const tNow = performance.now() / 1000;
   // top view: an aloft being is drawn a little larger + toward the top (nearer the sky)
