@@ -421,6 +421,145 @@ pub fn parse(src: &str) -> Result<Program, String> {
 
 /// Transpile the AST to a JS function body (`new Function('n', body)`).
 /// Comparisons rely on JS bool→number coercion, matching the DSL's 1.0/0.0.
+
+/// DSL → GLSL ES 3.00 fragment-shader body (the L4 lane). Same AST as to_js;
+/// user identifiers are prefixed `v_` so they can never collide with GLSL
+/// keywords/builtins. Value-position comparisons become float(a<b); `%` maps
+/// to mod(). Allowed calls: pure math (native), the colour verbs (map to the
+/// output colour `_oc`), and the pointer (map to uniforms). Anything else —
+/// get/set/disc/fetch/… — is rejected here: a pixel has no memory and no reach.
+pub fn to_glsl(prog: &Program) -> Result<String, String> {
+    const MATH: [&str; 7] = ["sin", "cos", "min", "max", "abs", "sqrt", "floor"];
+    fn expr(e: &Expr, out: &mut String) -> Result<(), String> {
+        match e {
+            Expr::Num(v) => {
+                let mut lit = format!("{v:?}");
+                if !lit.contains('.') && !lit.contains('e') { lit.push_str(".0"); }
+                out.push_str(&lit);
+            }
+            Expr::Var(s) => { out.push_str("v_"); out.push_str(s); }
+            Expr::Binary(l, op, r) => {
+                let cmp = matches!(op, BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge);
+                if cmp { out.push_str("float"); }
+                out.push('(');
+                if matches!(op, BinOp::Rem) {
+                    out.push_str("mod(");
+                    expr(l, out)?;
+                    out.push(',');
+                    expr(r, out)?;
+                    out.push(')');
+                } else {
+                    expr(l, out)?;
+                    out.push_str(match op {
+                        BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*",
+                        BinOp::Div => "/", BinOp::Rem => unreachable!(),
+                        BinOp::Lt => "<", BinOp::Gt => ">", BinOp::Le => "<=", BinOp::Ge => ">=",
+                    });
+                    expr(r, out)?;
+                }
+                out.push(')');
+            }
+            Expr::Call(name, args) => {
+                match name.as_str() {
+                    n if MATH.contains(&n) => {
+                        out.push_str(n);
+                        out.push('(');
+                        for (k, a) in args.iter().enumerate() {
+                            if k > 0 { out.push(','); }
+                            expr(a, out)?;
+                        }
+                        out.push(')');
+                    }
+                    "mx" => out.push_str("uMx"),
+                    "my" => out.push_str("uMy"),
+                    "down" => out.push_str("uDown"),
+                    other => return Err(format!("'{other}' does not exist in the shader fence")),
+                }
+            }
+        }
+        Ok(())
+    }
+    fn stmts(list: &[Stmt], out: &mut String) -> Result<(), String> {
+        for s in list {
+            match s {
+                Stmt::Let(name, e) => {
+                    out.push_str("float v_");
+                    out.push_str(name);
+                    out.push('=');
+                    expr(e, out)?;
+                    out.push_str(";\n");
+                }
+                Stmt::Assign(name, e) => {
+                    out.push_str("v_");
+                    out.push_str(name);
+                    out.push('=');
+                    expr(e, out)?;
+                    out.push_str(";\n");
+                }
+                Stmt::While(cond, body) => {
+                    out.push_str("while((");
+                    expr(cond, out)?;
+                    out.push_str(")!=0.0){\n");
+                    stmts(body, out)?;
+                    out.push_str("}\n");
+                }
+                Stmt::If(cond, tb, eb) => {
+                    out.push_str("if((");
+                    expr(cond, out)?;
+                    out.push_str(")!=0.0){\n");
+                    stmts(tb, out)?;
+                    out.push_str("}\n");
+                    if !eb.is_empty() {
+                        out.push_str("else{\n");
+                        stmts(eb, out)?;
+                        out.push_str("}\n");
+                    }
+                }
+                Stmt::Call(name, args) => match name.as_str() {
+                    // the colour verbs: the only way a pixel speaks
+                    "rgb" => {
+                        if args.len() != 3 { return Err("rgb needs 3 args".into()); }
+                        out.push_str("_oc=vec3(");
+                        for (k, a) in args.iter().enumerate() {
+                            if k > 0 { out.push(','); }
+                            out.push_str("clamp(");
+                            expr(a, out)?;
+                            out.push_str(",0.0,1.0)");
+                        }
+                        out.push_str(");\n");
+                    }
+                    "hsl" => {
+                        if args.len() != 3 { return Err("hsl needs 3 args".into()); }
+                        out.push_str("_oc=_hsl(");
+                        for (k, a) in args.iter().enumerate() {
+                            if k > 0 { out.push(','); }
+                            expr(a, out)?;
+                        }
+                        out.push_str(");\n");
+                    }
+                    "hue" => {
+                        if args.len() != 1 { return Err("hue needs 1 arg".into()); }
+                        out.push_str("_oc=_hsl(");
+                        expr(&args[0], out)?;
+                        out.push_str(",0.62,0.62);\n");
+                    }
+                    other => return Err(format!("'{other}' does not exist in the shader fence")),
+                },
+            }
+        }
+        Ok(())
+    }
+    let mut body = String::new();
+    stmts(&prog.stmts, &mut body)?;
+    // the return value is unused (colour flows through _oc), but it must parse
+    let mut ret = String::new();
+    expr(&prog.ret, &mut ret)?;
+    body.push_str("_unused=");
+    body.push_str(&ret);
+    body.push_str(";\n");
+    Ok(body)
+}
+
 pub fn to_js(prog: &Program) -> String {
     fn expr_js(e: &Expr, out: &mut String) {
         match e {
