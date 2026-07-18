@@ -551,7 +551,7 @@ window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
-window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, journal: (e.journal ?? []).map(j => j.line) } : null; };
+window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), journal: (e.journal ?? []).map(j => j.line) } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
       entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
@@ -702,6 +702,9 @@ function begetChild(parent, spec, g) {
   };
   child.home = [child.x, child.y]; // a begotten being's home is where it was born
   child.attrs = (spec.attrs && typeof spec.attrs === 'object') ? { ...spec.attrs } : {};
+  // heredity with variation: the parent chooses the child's birth seeds (slots 24..31)
+  child.innate = Array.isArray(spec.innate) ? spec.innate.slice(0, 8).map(Number) : null;
+  if (child.innate) child.innate.forEach((v, i) => { if (Number.isFinite(v)) child.slots[24 + i] = v; });
   try { // 3. the child's soul through the subset fence — compile + audit against ITS grants
     if (typeof spec.behavior === 'string' && spec.behavior.length) {
       const bytes = compile_entity_wasm_grants(spec.behavior, grants);
@@ -738,10 +741,16 @@ function compileEntities(world, g) {
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
                   journal: [], // 宿念: a being's own remembered moments — bounded and lossy BY LAW; mostly self-chosen (the host marks only what it heard and its strongest acts)
                   slots: new Float64Array(32),
+                  innate: Array.isArray(def.innate) ? def.innate.slice(0, 8).map(Number) : null,
                   grants: Array.isArray(def.grants) ? def.grants.filter(c => ENTITY_CAPS.includes(c)) : ENTITY_CAPS.slice(),
                   birthQuota: Number.isFinite(def.birthQuota) ? def.birthQuota : 2, // top-level beings may beget up to 2
                   mind: def.mind ?? null,
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
+    // 自性種子 (§20.3): plant birth seeds into the HIGH slots (24..31) before the
+    // first tick. The same behavior script diverges by what it was born with —
+    // same dharma, different karma. The soul may transform them (set), and the
+    // skin sees them through st() — a being's innate nature is visible in form.
+    if (ent.innate) ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
     if (def.behavior) {
       ent.soul = 'scene (DSL)';
       const bytes = compile_entity_wasm(def.behavior);

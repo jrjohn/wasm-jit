@@ -203,6 +203,13 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
 - OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
   (the boat drifts with the current, the fisherman breathes) — write behavior only to override it.
+- "innate":[n1,n2,...] (optional, up to 8 finite numbers) — the being's BIRTH SEEDS, planted
+  into its private slots 24..31 before the first tick. The SAME behavior script diverges by its
+  seeds: read them with get(24.0), get(25.0)…; the skin sees them too via st(24.0)… So when a
+  scene wants several beings of one kind that differ in temperament (a bold fish and a timid
+  one, a fast boat and a slow one), give them ONE shared behavior/skin and DIFFERENT "innate"
+  — do NOT copy the script per being. e.g. behavior "mv(get(24.0) * 0.1, 0.0);\n0.0" with
+  innate [1.0] wanders right, [-0.5] drifts left, [0.0] stays.
 - "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
   every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
