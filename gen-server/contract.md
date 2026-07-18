@@ -60,6 +60,12 @@ knob sketch: while down(), map my() to a value and emit(v); when idle show bv(0.
 arc for the level and a needle. Grown widgets are remembered by name (like grown skins):
 later schemas may write a bare {"type":"knob"} and the host recalls the look.
 
+3D PANEL in a UI — {"type":"scene3d","seed":"<draw3d script>","bind":"cellId","bind_values":[...],
+"on_input":{"cell":"id"},"w":420,"h":260}: a LIVE 3D scene inside the UI (full draw3d verbs,
+drag-orbit, shadows) whose seed also gets bv(i) — read bound cell outputs (i=0 is "bind",
+then "bind_values") — and emit(v) — fire this node's on_input. PREFER scene3d for 3D data
+visualization: a box-bar per value scaled by bv(i), a sphere sized by a live reading.
+
 optional "init": [{"cell":"id","arg":40}] — fired once right after the UI
 manifests (in order), so bound values/gauges/charts show numbers immediately
 instead of "—". Always init cells whose outputs are displayed at start.
@@ -181,6 +187,8 @@ you never write a matrix. y is UP. Keep scenes within roughly ±40 units of orig
        pop();
 - interaction, same as the 2D draw: mx()/my() pointer px (-1 away), down() pressed,
   get/set 32 private slots that persist across frames — a scene you can touch.
+- bv(i)/emit(v) also exist for when this scene runs as a PANEL inside a UI (see scene3d in
+  the ui surface); standalone they read 0 / do nothing.
 - budget: keep it under ~8000 primitives per frame (the host clamps).
 
 === surface "field" — a living world ===

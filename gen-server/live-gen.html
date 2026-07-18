@@ -548,6 +548,8 @@ function render(node) {
     }
     case 'barchart': case 'linechart': case 'piechart': case 'gauge':
       return makeChart(node);
+    case 'scene3d': // 3D-3: a live 3D panel wired to the app through bv/emit
+      return makeScene3D(node);
     default: // 詞彙自生成: an unknown type grows its own look (widget_seed) or recalls a grown one
       return makeCustomWidget(node);
   }
@@ -556,7 +558,7 @@ function render(node) {
 function manifestUi(schema) {
   drawRun = null;
   fieldWorld = null;
-  D3.run = null;
+  D3.main = null; SC3 = [];
   $('cv').style.display = 'none';
   const t0 = performance.now();
   compileCells(schema.cells);
@@ -1278,7 +1280,7 @@ function renderField() {
 
 function manifestField(world) {
   drawRun = null;
-  D3.run = null;
+  D3.main = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
   const compiled = compileWorldCells(world);
   ENTITIES = compileEntities(world, compiled.grid);
@@ -1589,7 +1591,7 @@ const env = {
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
   fieldWorld = null;
-  D3.run = null;
+  D3.main = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
   const t0 = performance.now();
   const bytes = compile_draw_wasm(seed);
@@ -1731,7 +1733,8 @@ void main(){
   vec3 base = vc * pattern(vlp, vmat.z);
   float sh = shadowAt(vwp, nn, L);
   float diff = max(dot(nn, -L), 0.0);
-  vec3 c = base * (0.32 + 0.68 * diff * sh);
+  vec3 amb = mix(vec3(0.15, 0.16, 0.19), vec3(0.43, 0.46, 0.53), nn.y * 0.5 + 0.5);
+  vec3 c = base * (amb + 0.62 * diff * sh);
   vec3 V = normalize(eye - vwp);
   vec3 H = normalize(V - L);
   c += vmat.x * pow(max(dot(nn, H), 0.0), 48.0) * sh * vec3(1.0);
@@ -1845,7 +1848,7 @@ function d3inst(kind, M) {
   d[o + 24] = D3.shine; d[o + 25] = D3.lumv; d[o + 26] = D3.patv; d[o + 27] = 0;
   K.n++;
 }
-function d3env() {
+function d3env(S) {
   const R = D3;
   const TS = (x, y, z, sx, sy, sz) => Float64Array.from([sx, 0, 0, x, 0, sy, 0, y, 0, 0, sz, z]);
   return {
@@ -1853,8 +1856,8 @@ function d3env() {
     hue: v => { R.col = hsl2rgbF(v, 0.62, 0.62); },
     rgb: (r, g, b) => { R.col = [Math.min(Math.max(r, 0), 1), Math.min(Math.max(g, 0), 1), Math.min(Math.max(b, 0), 1)]; },
     hsl: (h, s, l) => { R.col = hsl2rgbF(h, s, l); },
-    cam: (x, y, z, tx, ty, tz) => { R.camv = [x, y, z, tx, ty, tz]; },
-    light: (dx, dy, dz) => { R.lightv = [dx, dy, dz]; },
+    cam: (x, y, z, tx, ty, tz) => { S.camv = [x, y, z, tx, ty, tz]; },
+    light: (dx, dy, dz) => { S.lightv = [dx, dy, dz]; },
     sphere: (x, y, z, r) => d3inst('sph', affMul(d3top(), TS(x, y, z, Math.max(r, 1e-3), Math.max(r, 1e-3), Math.max(r, 1e-3)))),
     box: (x, y, z, sx, sy, sz) => d3inst('box', affMul(d3top(), TS(x, y, z, Math.max(sx, 1e-3), Math.max(sy, 1e-3), Math.max(sz, 1e-3)))),
     cyl: (r, h) => d3inst('cyl', affMul(d3top(), TS(0, 0, 0, Math.max(r, 1e-3), Math.max(h, 1e-3), Math.max(r, 1e-3)))),
@@ -1884,9 +1887,13 @@ function d3env() {
     shine: k => { R.shine = Math.min(Math.max(k, 0), 1); },
     lum: k => { R.lumv = Math.min(Math.max(k, 0), 1); },
     pat: k => { R.patv = Math.min(Math.max(k | 0, 0), 3); },
-    mx: () => drawPtr.x, my: () => drawPtr.y, down: () => drawPtr.down,
-    get: i => R.slots[i & 31] ?? 0,
-    set: (i, v) => { R.slots[i & 31] = v; },
+    mx: () => S.ptr.x, my: () => S.ptr.y, down: () => S.ptr.down,
+    get: i => S.slots[i & 31] ?? 0,
+    set: (i, v) => { S.slots[i & 31] = v; },
+    // the app wires (3D-3): only a scene3d PANEL has them live — the host feeds
+    // bound cell outputs in and routes one emission per frame out
+    bv: i => { const id = S.binds[i | 0]; return id != null ? (outputs[id] ?? 0) : 0; },
+    emit: v => { S.emitPending = v; },
   };
 }
 function m4persp(fovy, asp, n, f) {
@@ -1934,57 +1941,103 @@ function d3drawAll(u) {
   }
   gl.bindVertexArray(null);
 }
-function renderD3(t) {
+function mkScene3(run, ptr, binds, onEmit) {
+  return { run, ptr, binds: binds ?? [], onEmit: onEmit ?? null,
+           slots: new Float64Array(32), emitPending: null, lastEmit: null,
+           camv: null, lightv: null,
+           orbit: { yaw: 0.65, pitch: 0.4, dist: 26 }, lastPX: -1, lastPY: -1, wasDown: false };
+}
+function renderScene(S, t, tctx, W, H) {
   const R = D3, gl = R.gl;
   for (const k of ['sph', 'box', 'cyl', 'cone']) R.kinds[k].n = 0;
   R.nt = 0; R.stack = [affI()];
   R.col = [0.55, 0.66, 0.9]; R.shine = 0.15; R.lumv = 0; R.patv = 0;
-  R.camv = null; R.lightv = null;
-  try { R.run(t, cv.width, cv.height); }
-  catch (e) { R.run = null; $('stage-status').textContent = 'draw3d cell trapped: ' + e; return; }
+  S.camv = null; S.lightv = null; S.emitPending = null;
+  try { S.run(t, W, H); }
+  catch (e) { S.run = null; $('stage-status').textContent = 'draw3d cell trapped: ' + e; return; }
   // camera: the seed's cam() wins; otherwise the HOST's orbit — drag to turn
-  let c = R.camv;
+  let c = S.camv;
   if (!c) {
-    const ob = R.orbit;
-    if (drawPtr.down && R.wasDown && drawPtr.x >= 0) {
-      ob.yaw -= (drawPtr.x - R.lastPX) * 0.006;
-      ob.pitch = Math.min(Math.max(ob.pitch + (drawPtr.y - R.lastPY) * 0.004, 0.05), 1.35);
+    const ob = S.orbit, P = S.ptr;
+    if (P.down && S.wasDown && P.x >= 0) {
+      ob.yaw -= (P.x - S.lastPX) * 0.006;
+      ob.pitch = Math.min(Math.max(ob.pitch + (P.y - S.lastPY) * 0.004, 0.05), 1.35);
     }
-    R.lastPX = drawPtr.x; R.lastPY = drawPtr.y; R.wasDown = drawPtr.down;
+    S.lastPX = P.x; S.lastPY = P.y; S.wasDown = P.down;
     const cp = Math.cos(ob.pitch), sp = Math.sin(ob.pitch);
     c = [Math.sin(ob.yaw) * cp * ob.dist, sp * ob.dist + 1.5, Math.cos(ob.yaw) * cp * ob.dist, 0, 1.5, 0];
   }
-  const Lraw = R.lightv ?? [-0.5, -1, -0.35];
+  const Lraw = S.lightv ?? [-0.5, -1, -0.35];
   const ll = Math.hypot(Lraw[0], Lraw[1], Lraw[2]) || 1;
   const L = [Lraw[0] / ll, Lraw[1] / ll, Lraw[2] / ll];
-  if (R.gcv.width !== cv.width) { R.gcv.width = cv.width; R.gcv.height = cv.height; }
-  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
-  // pass 1 — the light's view of the world (shadow map); dummy bound as shmap
+  if (R.gcv.width < W || R.gcv.height < H) { R.gcv.width = Math.max(R.gcv.width, W); R.gcv.height = Math.max(R.gcv.height, H); }
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST);
+  // pass 1 — the light's view (shadow map); dummy bound as shmap
   const lvp = m4mul(m4ortho(48, 48, 10, 220), m4look(-L[0] * 90, -L[1] * 90, -L[2] * 90, 0, 0, 0));
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.white);
   gl.bindFramebuffer(gl.FRAMEBUFFER, R.shFBO);
   gl.viewport(0, 0, 1024, 1024);
   gl.clear(gl.DEPTH_BUFFER_BIT);
   d3drawAll({ vp: lvp, L: L, eye: [c[0], c[1], c[2]], shOn: 0, lvp });
-  // pass 2 — the eye's view, lit and shadowed
+  // pass 2 — the eye's view, lit and shadowed, scissored to this scene's rect
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.viewport(0, 0, R.gcv.width, R.gcv.height);
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, W, H);
   gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.shTex);
-  const vp = m4mul(m4persp(0.96, R.gcv.width / R.gcv.height, 0.1, 400), m4look(c[0], c[1], c[2], c[3], c[4], c[5]));
+  const vp = m4mul(m4persp(0.96, W / H, 0.1, 400), m4look(c[0], c[1], c[2], c[3], c[4], c[5]));
   d3drawAll({ vp, L, eye: [c[0], c[1], c[2]], shOn: 1, lvp });
-  const sky = ctx.createLinearGradient(0, 0, 0, cv.height);
+  gl.disable(gl.SCISSOR_TEST);
+  const sky = tctx.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, '#0b1526'); sky.addColorStop(1, '#1a2740');
-  ctx.fillStyle = sky; ctx.fillRect(0, 0, cv.width, cv.height);
-  ctx.drawImage(R.gcv, 0, 0, cv.width, cv.height);
+  tctx.fillStyle = sky; tctx.fillRect(0, 0, W, H);
+  tctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H);
+  // one voice per frame, only when it changes — same law as grown widgets
+  if (S.onEmit && S.emitPending != null && S.emitPending !== S.lastEmit) {
+    S.lastEmit = S.emitPending; S.onEmit(S.emitPending);
+  }
+}
+// ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
+// scene; bv(i) reads bound cell outputs, emit(v) fires the node's on_input. ----
+let SC3 = [];
+function makeScene3D(node) {
+  if (!D3.gl && !initD3()) {
+    const d = document.createElement('div');
+    d.className = 'quar'; d.textContent = 'scene3d needs WebGL2';
+    return d;
+  }
+  const W = Math.min(Math.max(Number(node.w) || 420, 120), 680);
+  const H = Math.min(Math.max(Number(node.h) || 260, 100), 480);
+  const cvs = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  cvs.style.cssText = `width:${W}px;height:${H}px;display:block;background:#0b1526;` +
+    `border:1px solid #30363d;border-radius:10px;touch-action:none;cursor:grab`;
+  const g2 = cvs.getContext('2d');
+  const ptr = { x: -1, y: -1, down: 0 };
+  const at = e => { const r = cvs.getBoundingClientRect(); const p = (e.touches && e.touches[0]) || e;
+    if (p.clientX == null) return;
+    ptr.x = (p.clientX - r.left) * (W / r.width); ptr.y = (p.clientY - r.top) * (H / r.height); };
+  cvs.addEventListener('pointermove', at);
+  cvs.addEventListener('pointerdown', e => { ptr.down = 1; at(e); try { cvs.setPointerCapture(e.pointerId); } catch (_) {} });
+  cvs.addEventListener('pointerup', () => { ptr.down = 0; });
+  cvs.addEventListener('pointerleave', () => { if (!ptr.down) { ptr.x = ptr.y = -1; } });
+  try {
+    const bytes = compile_draw3d_wasm(node.seed ?? '');
+    const binds = [node.bind, ...(Array.isArray(node.bind_values) ? node.bind_values : [])].filter(b => b != null);
+    const S = mkScene3(null, ptr, binds, node.on_input ? (v => fire(node.on_input, v)) : null);
+    S.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: d3env(S) }).exports.run;
+    SC3.push({ S, g2, W, H });
+  } catch (e) { $('stage-status').textContent = `scene3d refused by the fence: ${e.message ?? e}`; }
+  return cvs;
 }
 function manifestDraw3d(seed) {
-  drawRun = null; fieldWorld = null; WIDGETS = [];
+  drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = [];
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();
   const bytes = compile_draw3d_wasm(seed);
-  D3.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: d3env() }).exports.run;
-  D3.slots = new Float64Array(32); // a fresh scene = a fresh private root
+  const S = mkScene3(null, drawPtr, [], null);
+  S.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: d3env(S) }).exports.run;
+  D3.main = S; // a fresh scene = a fresh private root, its own orbit
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   $('stage-status').textContent =
@@ -1995,7 +2048,7 @@ function manifestDraw3d(seed) {
   document.title = 'live-gen DRAW3D OK';
 }
 window.__manifestDraw3d = s => manifestDraw3d(s);
-window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0, ncy: D3.kinds?.cyl.n ?? 0, nco: D3.kinds?.cone.n ?? 0, nt: D3.nt ?? 0, running: !!D3.run, slot0: D3.slots ? D3.slots[0] : 0 });
+window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0, ncy: D3.kinds?.cyl.n ?? 0, nco: D3.kinds?.cone.n ?? 0, nt: D3.nt ?? 0, running: !!(D3.main && D3.main.run), sc3: SC3.length, slot0: D3.main ? D3.main.slots[0] : 0 });
 (function loop(now) {
   if (drawRun) {
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -2015,10 +2068,11 @@ window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0,
       updateCam(dt);
       renderFieldFP();
     }
-  } else if (D3.run) {
-    renderD3(now / 1000); // §22: the seed writes the scene, 60fps
-  } else if (WIDGETS.length) {
-    tickWidgets(now / 1000); // grown widgets live at frame rate: pointer felt, bv read, emit routed
+  } else if (D3.main && D3.main.run) {
+    renderScene(D3.main, now / 1000, ctx, cv.width, cv.height); // §22, 60fps
+  } else if (WIDGETS.length || SC3.length) {
+    tickWidgets(now / 1000); // grown widgets live at frame rate
+    for (const p of SC3) if (p.S.run) renderScene(p.S, now / 1000, p.g2, p.W, p.H); // live 3D panels
   }
   lastRaf = now;
   requestAnimationFrame(loop);

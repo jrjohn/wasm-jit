@@ -213,7 +213,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// — camera matrices, depth, projection, lighting are host law, so a seed can
 /// never write a matrix and the model never has to. y is up.
 pub const DRAW3D_PARAMS: [&str; 3] = ["t", "w", "h"];
-pub const DRAW3D_IMPORTS: [codegen::HostFn; 27] = [
+pub const DRAW3D_IMPORTS: [codegen::HostFn; 29] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "hue", n_args: 1, returns: false },  // colour verbs — same names as 2D
@@ -248,6 +248,11 @@ pub const DRAW3D_IMPORTS: [codegen::HostFn; 27] = [
     codegen::HostFn { name: "down", n_args: 0, returns: true },
     codegen::HostFn { name: "get", n_args: 1, returns: true },
     codegen::HostFn { name: "set", n_args: 2, returns: false },
+    // ── the app wires (3D-3): a 3D scene as a LIVE PANEL inside a UI. In a
+    //    scene3d node bv(i) reads bound cell outputs and emit(v) fires the
+    //    node's on_input; standalone, bv reads 0 and emit is a no-op. ──
+    codegen::HostFn { name: "bv", n_args: 1, returns: true },
+    codegen::HostFn { name: "emit", n_args: 1, returns: false },
 ];
 
 /// Compile a 3D scene seed against the draw3d ABI.

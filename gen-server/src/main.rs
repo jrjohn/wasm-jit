@@ -39,9 +39,9 @@ const UI_IMPORTS: [HostFn; 4] = [
 // browser's compile_draw_wasm mint byte-identical modules — no drift. It now
 // carries the interaction loop (mx/my/down + get/set); see wasm_jit::DRAW_IMPORTS.
 const DRAW_IMPORTS: [HostFn; 15] = wasm_jit::DRAW_IMPORTS;
-const UI_VOCAB: [&str; 11] = [
+const UI_VOCAB: [&str; 12] = [
     "stack", "row", "label", "value", "button", "slider", "input",
-    "barchart", "linechart", "piechart", "gauge",
+    "barchart", "linechart", "piechart", "gauge", "scene3d",
 ];
 
 /// World-cell ABI (the Field, docs §19): run(t, gw, gh) -> f64.
@@ -80,7 +80,7 @@ const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
-const DRAW3D_IMPORTS: [HostFn; 27] = wasm_jit::DRAW3D_IMPORTS;
+const DRAW3D_IMPORTS: [HostFn; 29] = wasm_jit::DRAW3D_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -456,6 +456,29 @@ fn validate_tree(node: &Value, cell_ids: &[String]) -> Result<(), String> {
             }
         }
         // on_input checked by the shared event loop below; children make no sense here
+    }
+    if t == "scene3d" {
+        // 3D-3: a live 3D panel inside the UI — the seed is a full draw3d scene
+        // with bv(i)/emit(v) wired to the app through the host
+        let seed = node
+            .get("seed")
+            .and_then(|s| s.as_str())
+            .ok_or("scene3d lacks \"seed\"")?;
+        compile_check(seed, &DRAW3D_PARAMS, &DRAW3D_IMPORTS, 5_000_000)
+            .map_err(|e| format!("scene3d seed failed to compile: {e}"))?;
+        if let Some(b) = node.get("bind").and_then(|b| b.as_str()) {
+            if !cell_ids.iter().any(|i| i == b) {
+                return Err(format!("scene3d: bind references unknown cell '{b}'"));
+            }
+        }
+        if let Some(bvs) = node.get("bind_values").and_then(|b| b.as_array()) {
+            for b in bvs {
+                let id = b.as_str().unwrap_or("");
+                if !cell_ids.iter().any(|i| i == id) {
+                    return Err(format!("scene3d: bind_values references unknown cell '{id}'"));
+                }
+            }
+        }
     }
     validate_chart(t, node, cell_ids)?;
     for ev in ["on_click", "on_input"] {
@@ -1687,6 +1710,27 @@ mod tests {
         let seed = "pat(1.0);\nrgb(0.4, 0.5, 0.4);\nbox(0.0, 0.0 - 0.5, 0.0, 40.0, 1.0, 40.0);\npat(0.0);\ncone(2.2, 9.0);\npush();\nmove(0.0, 8.0, 1.2);\nrotz(t * 1.5);\nlet k = 0.0;\nwhile k < 4.0 {\n push();\n rotz(k * 1.5708);\n shine(0.5);\n box(0.0, 2.6, 0.0, 0.7, 5.2, 0.12);\n pop();\n k = k + 1.0;\n}\npop();\nlum(0.9);\nsphere(6.0, 1.1, 4.0, 0.6);\nlum(0.0);\ncyl(0.1, 1.1);\nif down() > 0.5 { set(0.0, mx()); }\nscale(1.0);\nroty(get(0.0) * 0.001);\nrotx(0.0);\n0.0";
         let obj = serde_json::json!({"surface":"draw3d","seed":seed});
         assert!(validate(&obj).is_ok(), "{:?}", validate(&obj));
+    }
+
+    #[test]
+    fn scene3d_panel_validates_and_rejects() {
+        // 3D-3: a 3D panel wired to app cells through bv/emit
+        let ok = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"n","params":["x"],"script":"set(0.0, x);\nx"}],
+            "tree":{"type":"stack","children":[
+                {"type":"slider","min":1,"max":10,"step":1,"on_input":{"cell":"n"}},
+                {"type":"scene3d","seed":"let n = bv(0.0);\nlet k = 0.0;\nwhile k < n {\n sphere(k * 2.0 - n, 1.0, 0.0, 0.8);\n k = k + 1.0;\n}\nif down() > 0.5 { emit(mx()); }\n0.0",
+                 "bind":"n","on_input":{"cell":"n"},"h":240}]},
+            "wires":[]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        let noseed = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"n","params":["x"],"script":"x"}],
+            "tree":{"type":"stack","children":[{"type":"scene3d","bind":"n"}]},"wires":[]}});
+        assert!(validate(&noseed).unwrap_err().contains("seed"));
+        let ghost = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"n","params":["x"],"script":"x"}],
+            "tree":{"type":"stack","children":[{"type":"scene3d","seed":"0.0","bind":"missing"}]},"wires":[]}});
+        assert!(validate(&ghost).unwrap_err().contains("unknown cell"));
     }
 
     #[test]
