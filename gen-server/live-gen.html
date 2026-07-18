@@ -1553,6 +1553,12 @@ cv.addEventListener('pointerenter', fadeDrawHint);
 cv.addEventListener('pointerdown', e => { drawPtr.down = 1; drawPtrAt(e); });
 window.addEventListener('pointerup', () => { drawPtr.down = 0; });
 cv.addEventListener('pointerleave', () => { drawPtr.x = drawPtr.y = -1; drawPtr.down = 0; });
+cv.addEventListener('wheel', e => { // zoom the host orbit — only when a 3D scene holds the canvas and the seed doesn't hold the camera
+  const S = D3.main;
+  if (!S || !S.run || S.camv) return;
+  e.preventDefault();
+  S.orbit.dist = Math.min(Math.max(S.orbit.dist * (1 + e.deltaY * 0.0012), 5), 90);
+}, { passive: false });
 const slot = i => (((i | 0) % 32) + 32) % 32;
 // a one-time nudge over the canvas, shown only when the drawing actually reads
 // the pointer (mx/my/down) — never for a self-animating one that ignores you
@@ -2026,6 +2032,8 @@ function makeScene3D(node) {
     const binds = [node.bind, ...(Array.isArray(node.bind_values) ? node.bind_values : [])].filter(b => b != null);
     const S = mkScene3(null, ptr, binds, node.on_input ? (v => fire(node.on_input, v)) : null);
     S.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: d3env(S) }).exports.run;
+    cvs.addEventListener('wheel', e => { if (S.camv) return; e.preventDefault();
+      S.orbit.dist = Math.min(Math.max(S.orbit.dist * (1 + e.deltaY * 0.0012), 5), 90); }, { passive: false });
     SC3.push({ S, g2, W, H });
   } catch (e) { $('stage-status').textContent = `scene3d refused by the fence: ${e.message ?? e}`; }
   return cvs;
@@ -2041,14 +2049,14 @@ function manifestDraw3d(seed) {
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   $('stage-status').textContent =
-    `manifested: ${bytes.length}-byte 3D scene cell in ${(performance.now() - t0).toFixed(1)}ms — the seed writes the scene; matrices are host law (drag to orbit when the seed doesn't hold the camera)`;
+    `manifested: ${bytes.length}-byte 3D scene cell in ${(performance.now() - t0).toFixed(1)}ms — the seed writes the scene; matrices are host law (drag to orbit, wheel to zoom, when the seed doesn't hold the camera)`;
   lastManifest = { surface: 'draw3d', payload: seed };
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = seed;
   document.title = 'live-gen DRAW3D OK';
 }
 window.__manifestDraw3d = s => manifestDraw3d(s);
-window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0, ncy: D3.kinds?.cyl.n ?? 0, nco: D3.kinds?.cone.n ?? 0, nt: D3.nt ?? 0, running: !!(D3.main && D3.main.run), sc3: SC3.length, slot0: D3.main ? D3.main.slots[0] : 0 });
+window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0, ncy: D3.kinds?.cyl.n ?? 0, nco: D3.kinds?.cone.n ?? 0, nt: D3.nt ?? 0, running: !!(D3.main && D3.main.run), sc3: SC3.length, slot0: D3.main ? D3.main.slots[0] : 0, dist: D3.main ? D3.main.orbit.dist : 0 });
 (function loop(now) {
   if (drawRun) {
     ctx.clearRect(0, 0, cv.width, cv.height);

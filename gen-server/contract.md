@@ -170,7 +170,7 @@ wires: [{"from":"cellA","to":"cellB"}] — after cellA runs, its output is fed t
 scene each frame; the host owns camera matrices, depth, projection, shading and SHADOWS —
 you never write a matrix. y is UP. Keep scenes within roughly ±40 units of origin.
 - cam(x,y,z, tx,ty,tz): eye at (x,y,z) looking at (tx,ty,tz), once per frame for a moving
-  camera. OMIT it and the host gives an orbit camera the user can DRAG — omit unless the ask
+  camera. OMIT it and the host gives an orbit camera the user can DRAG and WHEEL-ZOOM — omit unless the ask
   needs a specific viewpoint.
 - light(dx,dy,dz): directional light (default overhead-left; shadows are automatic).
 - colour/matter state (applies to primitives that follow): hue(v) rgb(r,g,b) hsl(h,s,l) ·
