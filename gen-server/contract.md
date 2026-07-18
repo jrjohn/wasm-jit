@@ -201,6 +201,10 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   "let d = other(0.0, 0.0);\nif d > 2.0 { mv(other(0.0,1.0) * 0.1, other(0.0,2.0) * 0.1); }\nif d <= 2.0 { bind(0.0); }\n0.0"
 - ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
+- t here is the being's OWN proper time (原時), not a shared clock: it advances slower the
+  faster the being actually moves (the world's speed cap is its light speed; at the cap its
+  clock stands still). A rider ages at its carrier's rate. A still being's t flows ≈ world time.
+  Terrain/world cells stay on the shared world clock.
 - OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
   (the boat drifts with the current, the fisherman breathes) — write behavior only to override it.
 - "innate":[n1,n2,...] (optional, up to 8 finite numbers) — the being's BIRTH SEEDS, planted

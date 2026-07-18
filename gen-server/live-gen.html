@@ -551,10 +551,10 @@ window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
-window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), journal: (e.journal ?? []).map(j => j.line) } : null; };
+window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, journal: (e.journal ?? []).map(j => j.line) } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
         mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
@@ -623,8 +623,9 @@ function terrainColor(h, w, v, s = 0) {
 
 // ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
 let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
-const MAX_STEP = 0.5;    // host law: nobody teleports
+const MAX_STEP = 0.5;    // host law: nobody teleports — this is also the world's light speed c
 const BIND_REACH = 2.5;  // host law: you can only board what you can reach (§19 bind)
+let lastEntT = null;     // previous world-tick timestamp, for proper-time (原時) accumulation
 
 function entityEnv(ent, g) { // one body, one slot store — reflex, packaged soul, and mind all share it
   return {
@@ -696,6 +697,7 @@ function begetChild(parent, spec, g) {
     y: Math.min(Math.max(parent.y + oy, 0.5), g - 1.5),
     on: null, offset: [0, 0], alt: 0, realm: 'ground',
     slots: new Float64Array(32),
+    tau: 0, // born at its own zero — proper time starts at birth
     grants, birthQuota: Math.max(0, (parent.birthQuota ?? 0) - 1),   // strictly fewer than the parent had
     mind: spec.persona ? { persona: String(spec.persona).slice(0, 300) } : null,
     run: null, pending: [0, 0], fails: 0, quarantined: false,
@@ -741,6 +743,7 @@ function compileEntities(world, g) {
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
                   journal: [], // 宿念: a being's own remembered moments — bounded and lossy BY LAW; mostly self-chosen (the host marks only what it heard and its strongest acts)
                   slots: new Float64Array(32),
+                  tau: 0, // 原時: the being's own proper time — advances slower the faster it moves (c = MAX_STEP)
                   innate: Array.isArray(def.innate) ? def.innate.slice(0, 8).map(Number) : null,
                   grants: Array.isArray(def.grants) ? def.grants.filter(c => ENTITY_CAPS.includes(c)) : ENTITY_CAPS.slice(),
                   birthQuota: Number.isFinite(def.birthQuota) ? def.birthQuota : 2, // top-level beings may beget up to 2
@@ -775,11 +778,17 @@ function compileEntities(world, g) {
 }
 
 function tickEntities(t, g) {
-  // pass 1: the free move themselves (a rider's own mv is ignored — the carrier carries)
+  // 原時 (proper time): the observer's absence does not age the world — a hidden
+  // tab freezes everyone together; on return, at most one gentle step passes.
+  const dt = Math.min(Math.max(t - (lastEntT ?? t), 0), 0.1);
+  lastEntT = t;
+  for (const e of ENTITIES) { e._px = e.x; e._py = e.y; } // where each body was, before this instant
+  // pass 1: the free move themselves (a rider's own mv is ignored — the carrier carries).
+  // Each soul runs on ITS OWN τ, not the world clock — 十世互入: one frame, many times.
   for (const e of ENTITIES) {
     if (e.run && !e.quarantined) {
       e.pending[0] = 0; e.pending[1] = 0;
-      try { e.run(t, e.x, e.y); e.fails = 0; }
+      try { e.run(e.tau ?? 0, e.x, e.y); e.fails = 0; }
       catch (err) { if (++e.fails >= 3) e.quarantined = true; continue; }
       if (e.on) continue;
       const len = Math.hypot(e.pending[0], e.pending[1]);
@@ -795,6 +804,15 @@ function tickEntities(t, g) {
       const carrier = ENTITIES.find(c => c.id === e.on);
       if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
     }
+  }
+  // pass 3: special relativity as host law — moving clocks run slow. v is the
+  // body's ACTUAL displacement this tick (riders inherit their carrier's motion:
+  // 物我合一連時間也合一), c is MAX_STEP. At v=c proper time stands still; a
+  // super-c snap (the instant of boarding) passes in no proper time at all.
+  for (const e of ENTITIES) {
+    const step = Math.hypot(e.x - (e._px ?? e.x), e.y - (e._py ?? e.y));
+    const kk = step / MAX_STEP;
+    e.tau = (e.tau ?? 0) + dt * Math.sqrt(Math.max(0, 1 - kk * kk));
   }
 }
 
@@ -851,7 +869,10 @@ const skinEnv = {
 };
 
 // Draw an inhabitant: its generated skin if it grew one, else the curated Rust skin.
+// The body animates on the being's OWN proper time — a swift being's breath slows,
+// a still one's flows with the world; the skin never sees the shared clock.
 function drawSkin(ent, px, py, s, t) {
+  t = ent.tau ?? t;
   if (ent.skinRun) {
     // nx,ny (-1..1): direction to the nearest other being, so a skin can face/lean toward whoever is near
     let nx = 0, ny = 0, bd = 1e9;
@@ -947,6 +968,7 @@ function manifestField(world) {
   const t0 = performance.now();
   const compiled = compileWorldCells(world);
   ENTITIES = compileEntities(world, compiled.grid);
+  lastEntT = null; // a new world is a new epoch — every being starts at its own τ = 0
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   fieldWorld = compiled;
@@ -1049,6 +1071,7 @@ function perceptionOf(ent, g) {
     you: {
       id: ent.id, kind: ent.type,
       realm: ent.realm ?? 'ground', altitude: Math.round((ent.alt ?? 0) * 100) / 100,
+      lived: Math.round((ent.tau ?? 0) * 10) / 10, // 原時: seconds of YOUR OWN time — moving fast, you have lived less
       x: Math.round(ent.x * 10) / 10, y: Math.round(ent.y * 10) / 10,
       home: ent.home ? [Math.round(ent.home[0] * 10) / 10, Math.round(ent.home[1] * 10) / 10] : undefined,
       place: (() => { const e = Math.max(3, g * 0.12); const ns = ent.y < e ? 'north' : ent.y > g - e ? 'south' : ''; const ew = ent.x < e ? 'west' : ent.x > g - e ? 'east' : ''; return ns && ew ? `${ns}-${ew} corner` : (ns || ew) ? `near the ${ns || ew} edge` : 'near the middle'; })(),
