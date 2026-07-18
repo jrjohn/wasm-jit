@@ -207,6 +207,50 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+/// The GROWN-WIDGET ABI (詞彙自生成): a widget the fixed vocabulary lacks — a
+/// knob, a clock, a heatmap cell — enters as a fenced cell through the same
+/// drawing-primitive gate as a grown skin. `run(t, w, h)` every frame on its
+/// OWN small canvas. Beyond the drawing/pointer/slot faculties it has exactly
+/// two wires into the app, both host-mediated:
+///   bv(i)   — READ the i-th bound value (the host feeds outputs of bind/bind_values)
+///   emit(v) — RAISE its voice: the host fires the widget's on_input cell with v
+///             (coalesced to one emission per frame — one voice per instant)
+/// It still cannot touch the DOM, the page, the network, or any other widget.
+pub const WIDGET_PARAMS: [&str; 3] = ["t", "w", "h"];
+pub const WIDGET_IMPORTS: [codegen::HostFn; 17] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "hue", n_args: 1, returns: false },
+    codegen::HostFn { name: "rgb", n_args: 3, returns: false },
+    codegen::HostFn { name: "hsl", n_args: 3, returns: false },
+    codegen::HostFn { name: "disc", n_args: 3, returns: false },
+    codegen::HostFn { name: "ring", n_args: 3, returns: false },
+    codegen::HostFn { name: "arc", n_args: 5, returns: false },
+    codegen::HostFn { name: "line", n_args: 4, returns: false },
+    codegen::HostFn { name: "glow", n_args: 3, returns: false },
+    codegen::HostFn { name: "mx", n_args: 0, returns: true },   // pointer x in ITS canvas px (-1 away)
+    codegen::HostFn { name: "my", n_args: 0, returns: true },
+    codegen::HostFn { name: "down", n_args: 0, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },  // private 32-slot root (drag state, animation phase)
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+    codegen::HostFn { name: "bv", n_args: 1, returns: true },   // bound value in (host-fed)
+    codegen::HostFn { name: "emit", n_args: 1, returns: false },// event out (host-routed, 1/frame)
+];
+
+/// Compile a grown widget's seed against the widget ABI.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_widget_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &WIDGET_PARAMS,
+        &WIDGET_IMPORTS,
+        codegen::CompileOpts { fuel: Some(300_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
 /// Browser-side Tier-2 fence for inhabitant souls: audit that an externally
 /// compiled behavior module's imports ⊆ the entity grant list (env.{sin, cos,
 /// get, set, fr, mv}) BEFORE instantiating it. The soul of a packaged

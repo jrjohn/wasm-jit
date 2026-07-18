@@ -45,6 +45,20 @@ visualization use these; NEVER fake a chart out of sliders (sliders are inputs):
 - {"type":"piechart","title":"...","labels":["a","b"],"values":[30,70]}
 - {"type":"gauge","title":"...","bind":"cellId","min":0,"max":100,"unit":"%"}   (or static "value":42)
 
+GROWN widgets (詞彙自生成) — ANY control/display the vocabulary lacks (a knob, a clock face,
+a heatmap cell, a progress ring, a joystick…): invent a "type" name and give "widget_seed",
+a DSL script run(t, w, h) -> f64 drawn EVERY FRAME on its own small canvas (w/h = its size in
+px; optional "w"/"h" numbers on the node, default 260×120). Capabilities:
+- sin cos + drawing: hue(v) rgb(r,g,b) hsl(h,s,l) disc(x,y,r) ring(x,y,r) arc(x,y,r,a0,a1) line(x1,y1,x2,y2) glow(x,y,r)
+- mx() my() = pointer in ITS canvas px (-1 when away); down() = 1.0 while pressed
+- get(slot)/set(slot,v) = 32 private slots that persist across frames (drag state, phase)
+- bv(i) = READ a bound value: i=0 is the node's "bind" cell, then "bind_values" in order
+- emit(v) = fire this node's "on_input" cell with v — this makes it a REAL CONTROL
+e.g. {"type":"knob","widget_seed":"<DSL>","bind":"vol","on_input":{"cell":"vol"},"w":150,"h":150}
+knob sketch: while down(), map my() to a value and emit(v); when idle show bv(0.0); draw an
+arc for the level and a needle. Grown widgets are remembered by name (like grown skins):
+later schemas may write a bare {"type":"knob"} and the host recalls the look.
+
 optional "init": [{"cell":"id","arg":40}] — fired once right after the UI
 manifests (in order), so bound values/gauges/charts show numbers immediately
 instead of "—". Always init cells whose outputs are displayed at start.

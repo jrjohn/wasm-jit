@@ -145,7 +145,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
 await initSkins();
@@ -416,6 +416,95 @@ function redrawCharts() {
   for (const c of charts) CHART_DRAW[c.node.type](c.node, c.cvs);
 }
 
+// ---- 詞彙自生成 (grown widgets): a control the vocabulary lacks enters as a
+// fenced cell — the same gate a grown skin walks through. It draws on its OWN
+// small canvas every frame; its only wires into the app are bv(i) in (host-fed
+// bound values) and emit(v) out (host fires its on_input, one voice per frame).
+// Grown once, archived in the ālaya (/api/widgets), recallable by bare name. ----
+let WIDGETS = [];        // {node, cvs, g, W, H, run, slots, ptr, binds, emitPending, lastEmit, fails, quarantined}
+const WIDGET_LIB = {};   // type -> widget_seed (in-memory cache of the library)
+function saveGrownWidget(type, seed) {
+  if (WIDGET_LIB[type] === seed) return;
+  WIDGET_LIB[type] = seed;
+  fetch('/api/widgets', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type, widget_seed: seed }) }).catch(() => {});
+}
+function widgetEnv(wd) {
+  const g = wd.g;
+  let dA = a => `hsla(210,62%,62%,${a})`;
+  const setC = (c, mk) => { g.strokeStyle = c; g.fillStyle = c; dA = mk; };
+  return {
+    sin: Math.sin, cos: Math.cos,
+    hue: v => { const H = (((v % 1) + 1) % 1) * 360; setC(`hsl(${H},62%,62%)`, a => `hsla(${H},62%,62%,${a})`); },
+    rgb: (r, gg, b) => { const R = Math.max(0, Math.min(255, r * 255)) | 0, G = Math.max(0, Math.min(255, gg * 255)) | 0, B = Math.max(0, Math.min(255, b * 255)) | 0; setC(`rgb(${R},${G},${B})`, a => `rgba(${R},${G},${B},${a})`); },
+    hsl: (h, s, l) => { const H = (((h % 1) + 1) % 1) * 360, S = Math.max(0, Math.min(1, s)) * 100, L = Math.max(0, Math.min(1, l)) * 100; setC(`hsl(${H},${S}%,${L}%)`, a => `hsla(${H},${S}%,${L}%,${a})`); },
+    disc: (x, y, r) => { g.beginPath(); g.arc(x, y, Math.max(r, 0), 0, 6.2832); g.fill(); },
+    ring: (x, y, r) => { g.beginPath(); g.arc(x, y, Math.max(r, 0), 0, 6.2832); g.stroke(); },
+    arc: (x, y, r, a0, a1) => { g.beginPath(); g.arc(x, y, Math.max(r, 0), a0, a1); g.stroke(); },
+    line: (x1, y1, x2, y2) => { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke(); },
+    glow: (x, y, r) => { r = Math.max(r, 0); if (!r) return; const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, dA(0.55)); gr.addColorStop(1, dA(0)); const k = g.fillStyle; g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.fill(); g.fillStyle = k; },
+    mx: () => wd.ptr.x, my: () => wd.ptr.y, down: () => wd.ptr.down,
+    get: i => wd.slots[i & 31] ?? 0,
+    set: (i, v) => { wd.slots[i & 31] = v; },
+    bv: i => { const id = wd.binds[i | 0]; return id != null ? (outputs[id] ?? 0) : 0; },
+    emit: v => { wd.emitPending = v; }, // collected after run — one voice per frame
+  };
+}
+function makeCustomWidget(node) {
+  const W = Math.min(Math.max(Number(node.w) || 260, 80), 680);
+  const H = Math.min(Math.max(Number(node.h) || 120, 48), 400);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cvs = document.createElement('canvas');
+  cvs.width = W * dpr; cvs.height = H * dpr;
+  cvs.style.cssText = `width:${W}px;height:${H}px;display:block;background:#0d1117;` +
+    `border:1px solid #30363d;border-radius:10px;touch-action:none;cursor:pointer`;
+  const g = cvs.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const wd = { node, cvs, g, W, H, run: null, slots: new Float64Array(32),
+               ptr: { x: -1, y: -1, down: 0 },
+               binds: [node.bind, ...(Array.isArray(node.bind_values) ? node.bind_values : [])].filter(b => b != null),
+               emitPending: null, lastEmit: null, fails: 0, quarantined: false };
+  const at = e => { const r = cvs.getBoundingClientRect(); const p = (e.touches && e.touches[0]) || e;
+    if (p.clientX == null) return;
+    wd.ptr.x = (p.clientX - r.left) * (W / r.width); wd.ptr.y = (p.clientY - r.top) * (H / r.height); };
+  cvs.addEventListener('pointermove', at);
+  cvs.addEventListener('pointerdown', e => { wd.ptr.down = 1; at(e); try { cvs.setPointerCapture(e.pointerId); } catch (_) {} });
+  cvs.addEventListener('pointerup', () => { wd.ptr.down = 0; });
+  cvs.addEventListener('pointerleave', () => { if (!wd.ptr.down) { wd.ptr.x = wd.ptr.y = -1; } });
+  const arm = seed => {
+    try {
+      const bytes = compile_widget_wasm(seed); // the fence: same審計 as every cell
+      wd.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: widgetEnv(wd) }).exports.run;
+      saveGrownWidget(node.type, seed);        // → the ālaya: grown once, remembered
+    } catch (e) { $('stage-status').textContent = `widget '${node.type}' refused by the fence: ${e.message ?? e}`; }
+  };
+  if (node.widget_seed) arm(node.widget_seed);
+  else { // bare novel type: recall the grown widget by name
+    (async () => {
+      let seed = WIDGET_LIB[node.type];
+      if (!seed) { try { const r = await fetch(`/api/widgets/${node.type}`); if (r.ok) seed = await r.text(); } catch (e) {} }
+      if (seed) { WIDGET_LIB[node.type] = seed; arm(seed); }
+      else $('stage-status').textContent = `unknown widget '${node.type}' and nothing grown by that name`;
+    })();
+  }
+  WIDGETS.push(wd);
+  return cvs;
+}
+function tickWidgets(t) {
+  for (const wd of WIDGETS) {
+    if (!wd.run || wd.quarantined) continue;
+    wd.g.clearRect(0, 0, wd.W, wd.H);
+    wd.g.lineWidth = 2; wd.g.lineCap = 'round';
+    wd.emitPending = null;
+    try { wd.run(t, wd.W, wd.H); wd.fails = 0; }
+    catch (e) { if (++wd.fails >= 3) { wd.quarantined = true; $('stage-status').textContent = `widget '${wd.node.type}' trapped — quarantined`; } continue; }
+    if (wd.emitPending != null && wd.emitPending !== wd.lastEmit) {
+      wd.lastEmit = wd.emitPending;
+      fire(wd.node.on_input, wd.emitPending); // through the same budgeted cascade as every event
+    }
+  }
+}
+window.__widgetState = () => WIDGETS.map(w => ({ type: w.node.type, armed: !!w.run, quarantined: w.quarantined, lastEmit: w.lastEmit }));
+
 function render(node) {
   switch (node.type) {
     case 'stack': case 'row': {
@@ -459,11 +548,8 @@ function render(node) {
     }
     case 'barchart': case 'linechart': case 'piechart': case 'gauge':
       return makeChart(node);
-    default: {
-      const d = document.createElement('div');
-      d.className = 'quar'; d.textContent = `unknown node '${node.type}'`;
-      return d;
-    }
+    default: // 詞彙自生成: an unknown type grows its own look (widget_seed) or recalls a grown one
+      return makeCustomWidget(node);
   }
 }
 
@@ -475,6 +561,7 @@ function manifestUi(schema) {
   compileCells(schema.cells);
   wires = schema.wires ?? [];
   charts = [];
+  WIDGETS = []; // a new UI = fresh grown-widget instances (the library remembers the looks)
   const stage = $('stage');
   stage.innerHTML = '';
   stage.appendChild(render(schema.tree));
@@ -1542,6 +1629,8 @@ window.__manifestDraw = (src, keep) => manifestDraw(src, keep);
       updateCam(dt);
       renderFieldFP();
     }
+  } else if (WIDGETS.length) {
+    tickWidgets(now / 1000); // grown widgets live at frame rate: pointer felt, bv read, emit routed
   }
   lastRaf = now;
   requestAnimationFrame(loop);
