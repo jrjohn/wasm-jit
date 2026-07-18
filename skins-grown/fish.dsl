@@ -1,7 +1,6 @@
-hue(0.08);
-disc(px, py, s * 0.3);
-line(px - s * 0.28, py - s * 0.15, px - s * 0.55, py);
-line(px - s * 0.28, py + s * 0.15, px - s * 0.55, py);
-hue(0.0);
-disc(px + s * 0.14, py - s * 0.05, s * 0.05);
+hsl(0.55,0.4,0.62);
+disc(px,py,s*0.2);
+hsl(0.55,0.4,0.48);
+line(px+s*0.18,py,px+s*0.42,py-s*0.16);
+line(px+s*0.18,py,px+s*0.42,py+s*0.16);
 0.0
