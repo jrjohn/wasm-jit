@@ -651,6 +651,31 @@ fn validate(obj: &Value) -> Result<(), String> {
                     {
                         return Err(format!("entity '{id}': at out of the {grid}×{grid} field"));
                     }
+                    // 自性種子: birth seeds planted into slots 24..31 — the same
+                    // script diverges by its seeds (same dharma, different karma)
+                    if let Some(innate) = ent.get("innate") {
+                        let arr = innate.as_array().ok_or_else(|| {
+                            format!("entity '{id}': \"innate\" must be an array of numbers")
+                        })?;
+                        if arr.len() > 8 {
+                            return Err(format!(
+                                "entity '{id}': \"innate\" holds at most 8 seeds (slots 24..31)"
+                            ));
+                        }
+                        if !arr.iter().all(|v| v.as_f64().is_some_and(f64::is_finite)) {
+                            return Err(format!(
+                                "entity '{id}': \"innate\" must be finite numbers"
+                            ));
+                        }
+                    }
+                    // 老死 as host law: a lifespan is seconds of the being's OWN τ
+                    if let Some(ls) = ent.get("lifespan") {
+                        if !ls.as_f64().is_some_and(|v| v.is_finite() && v > 0.0) {
+                            return Err(format!(
+                                "entity '{id}': \"lifespan\" must be a positive number of seconds (of its own time)"
+                            ));
+                        }
+                    }
                     if let Some(m) = ent.get("mind") {
                         let persona = m
                             .get("persona")
@@ -1479,6 +1504,51 @@ mod tests {
         assert!(ENTITY_IMPORTS.iter().any(|i| i.name == "unbind"), "entity ABI missing unbind");
         let bind = ENTITY_IMPORTS.iter().find(|i| i.name == "bind").unwrap();
         assert!(bind.returns && bind.n_args == 1, "bind(i) must take an index and return a verdict");
+    }
+
+    #[test]
+    fn entity_innate_seeds_validate() {
+        // 自性種子: same script, different seeds — validates; malformed seeds rejected
+        let ok = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[
+                    {"id":"bold","type":"person","at":[30,40],"innate":[1.0, 0.8],
+                     "behavior":"mv(get(24.0) * 0.1, 0.0);\n0.0"},
+                    {"id":"timid","type":"person","at":[60,40],"innate":[-0.5],
+                     "behavior":"mv(get(24.0) * 0.1, 0.0);\n0.0"}
+                ]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+
+        let too_many = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"x","type":"person","at":[5,5],
+                    "innate":[1,2,3,4,5,6,7,8,9]}]}});
+        assert!(validate(&too_many).unwrap_err().contains("at most 8"));
+
+        let not_numbers = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"x","type":"person","at":[5,5],"innate":["hot"]}]}});
+        assert!(validate(&not_numbers).unwrap_err().contains("finite numbers"));
+
+        let not_array = serde_json::json!({
+            "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"x","type":"person","at":[5,5],"innate":0.7}]}});
+        assert!(validate(&not_array).unwrap_err().contains("array"));
+    }
+
+    #[test]
+    fn entity_lifespan_validates() {
+        // 老死 as host law: a positive τ-lifespan validates; zero/negative/non-number rejected
+        let ok = serde_json::json!({
+            "surface":"field","world":{"grid":96,"cells":[{"id":"a","script":"1.0"}],
+                "entities":[{"id":"mayfly","type":"person","at":[40,40],"lifespan":12.5,"behavior":"0.0"}]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        for bad in [serde_json::json!(0), serde_json::json!(-3.0), serde_json::json!("short")] {
+            let w = serde_json::json!({
+                "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
+                    "entities":[{"id":"x","type":"person","at":[5,5],"lifespan":bad}]}});
+            assert!(validate(&w).unwrap_err().contains("lifespan"), "should reject {bad}");
+        }
     }
 
     #[test]

@@ -201,8 +201,24 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   "let d = other(0.0, 0.0);\nif d > 2.0 { mv(other(0.0,1.0) * 0.1, other(0.0,2.0) * 0.1); }\nif d <= 2.0 { bind(0.0); }\n0.0"
 - ex/ey = the entity's current position. Stillness is a valid behavior ("0.0") — a fisherman
   who does not move IS the poem. A boat may sway gently: "mv(sin(t * 0.4) * 0.02, 0.0);\n0.0"
+- t here is the being's OWN proper time (原時), not a shared clock: it advances slower the
+  faster the being actually moves (the world's speed cap is its light speed; at the cap its
+  clock stands still). A rider ages at its carrier's rate. A still being's t flows ≈ world time.
+  Terrain/world cells stay on the shared world clock.
+- "lifespan": seconds (optional, > 0) — 老死 as host law: when the being's OWN t reaches its
+  lifespan, the host ends the body (it vanishes from the world; anything riding it is set free).
+  Neither its behavior nor its mind can change this. Omit for a deathless being. Note the
+  relativity: a being moving near the speed cap ages slower, so the SAME lifespan lasts longer
+  in world time — mortality makes speed meaningful (a mayfly that flies fast outlives its twin).
 - OMIT "behavior" entirely for boat/fisherman: those types ship with a packaged default soul
   (the boat drifts with the current, the fisherman breathes) — write behavior only to override it.
+- "innate":[n1,n2,...] (optional, up to 8 finite numbers) — the being's BIRTH SEEDS, planted
+  into its private slots 24..31 before the first tick. The SAME behavior script diverges by its
+  seeds: read them with get(24.0), get(25.0)…; the skin sees them too via st(24.0)… So when a
+  scene wants several beings of one kind that differ in temperament (a bold fish and a timid
+  one, a fast boat and a slow one), give them ONE shared behavior/skin and DIFFERENT "innate"
+  — do NOT copy the script per being. e.g. behavior "mv(get(24.0) * 0.1, 0.0);\n0.0" with
+  innate [1.0] wanders right, [-0.5] drifts left, [0.0] stays.
 - "on":"<entityId>" — RIDE another entity: the host keeps the rider at the carrier's position
   every tick (a person ON a boat moves WITH the boat; their own mv is ignored while riding).
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
