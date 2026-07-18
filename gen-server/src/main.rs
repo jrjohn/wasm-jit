@@ -80,7 +80,7 @@ const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
-const DRAW3D_IMPORTS: [HostFn; 10] = wasm_jit::DRAW3D_IMPORTS;
+const DRAW3D_IMPORTS: [HostFn; 27] = wasm_jit::DRAW3D_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -1679,6 +1679,14 @@ mod tests {
             "2D-only verbs must not exist in the 3D fence");
         let missing = serde_json::json!({"surface":"draw3d"});
         assert!(validate(&missing).unwrap_err().contains("lacks"));
+    }
+
+    #[test]
+    fn draw3d_full_suite_validates() {
+        // 3D-1..3: stack + cyl/cone + matter + pattern + interaction, one seed
+        let seed = "pat(1.0);\nrgb(0.4, 0.5, 0.4);\nbox(0.0, 0.0 - 0.5, 0.0, 40.0, 1.0, 40.0);\npat(0.0);\ncone(2.2, 9.0);\npush();\nmove(0.0, 8.0, 1.2);\nrotz(t * 1.5);\nlet k = 0.0;\nwhile k < 4.0 {\n push();\n rotz(k * 1.5708);\n shine(0.5);\n box(0.0, 2.6, 0.0, 0.7, 5.2, 0.12);\n pop();\n k = k + 1.0;\n}\npop();\nlum(0.9);\nsphere(6.0, 1.1, 4.0, 0.6);\nlum(0.0);\ncyl(0.1, 1.1);\nif down() > 0.5 { set(0.0, mx()); }\nscale(1.0);\nroty(get(0.0) * 0.001);\nrotx(0.0);\n0.0";
+        let obj = serde_json::json!({"surface":"draw3d","seed":seed});
+        assert!(validate(&obj).is_ok(), "{:?}", validate(&obj));
     }
 
     #[test]
