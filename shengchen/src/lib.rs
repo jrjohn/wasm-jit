@@ -16,6 +16,8 @@
 //! Compiled with `--target wasm32-unknown-unknown` (no wasm-bindgen) the module
 //! imports NOTHING: it cannot touch the world; it can only vibrate.
 
+pub mod zhuyin;
+
 // ---------------------------------------------------------------- rng --------
 
 /// xorshift32 — our own randomness, so the wasm needs no `getrandom` import.
@@ -274,13 +276,16 @@ impl Voice {
         self.vow += k * (self.vow_t - self.vow);
         self.nas += k * (self.nas_t - self.nas);
         let want = if self.f0_t > 20.0 { 1.0 } else { 0.0 };
-        self.level += (1.0 - (-dt / 0.06).exp()) * (want - self.level);
+        // asymmetric gate: voicing OPENS fast (a stop is a sudden release — a
+        // 60ms fade-in turns every 獨 into 無) but closes gently (no click)
+        let tau = if want > self.level { 0.015 } else { 0.06 };
+        self.level += (1.0 - (-dt / tau).exp()) * (want - self.level);
         // frication first — it sounds through a closed throat (s… before 蓑's uo)
         self.flvl += (1.0 - (-dt / 0.012).exp()) * (self.flvl_t - self.flvl);
         let mut hiss = 0.0;
         if self.flvl > 0.001 {
             if self.fctrl == 0 {
-                self.fric.tune(sr, self.fcf_t.max(300.0), 0.965);
+                self.fric.tune(sr, self.fcf_t.max(300.0), 0.94);
                 self.fctrl = 32;
             }
             self.fctrl -= 1;

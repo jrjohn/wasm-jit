@@ -359,20 +359,21 @@ fn main() {
         write_wav(&dir.join("8-jasmine.wav"), &wav).unwrap();
     }
 
-    // ---- 9. 老翁講話 — "孤舟蓑笠翁 獨釣寒江雪", spoken, an old man's voice ----
-    // Klatt-style speech gestures: initials = closure + shaped hiss (burst /
-    // fricative), finals = vowel glides + nasal codas, Mandarin tones = f0
-    // contours. 老 = low f0 (~100Hz), slow syllables, a 4Hz tremor, extra air.
+    // ---- 9. 老翁講話 — "孤舟蓑笠翁 獨釣寒江雪", spoken FROM ZHUYIN ----
+    // The methodology, not hand-scoring: the verse is one zhuyin string; the
+    // compiler (shengchen::zhuyin) turns 聲母+介音+韻母+聲調 into gestures.
+    // Everything the listening rounds taught lives in the symbol tables now.
     {
-        struct Syl {
-            closure: f32,                       // silence before voicing (stop / fric onset)
-            fric: Option<(f32, f32, f32, f32)>, // (cf Hz, start s, len s, level)
-            vow: &'static [(f32, f32)],         // (voiced-fraction, vowel target 0..4)
-            nas: &'static [(f32, f32)],         // (voiced-fraction, nasal 0..1)
-            tone: (f32, f32, f32),              // f0 multiplier start/mid/end
-            dur: f32,
-            gap: f32,                           // articulatory pause after
+        use shengchen::zhuyin;
+        let verse = zhuyin::compile("ㄍㄨ ㄓㄡ ㄙㄨㄛ ㄌㄧˋ ㄨㄥ ， ㄉㄨˊ ㄉㄧㄠˋ ㄏㄢˊ ㄐㄧㄤ ㄒㄩㄝˇ");
+        let mut starts = Vec::new();
+        let mut cursor = 0.4f32;
+        for g in &verse {
+            starts.push(cursor);
+            cursor += g.dur + g.gap;
         }
+        let total = cursor + 0.8;
+        let base_f0 = 100.0f32; // an old man, low in the chest
         fn track(pts: &[(f32, f32)], u: f32) -> f32 {
             if pts.is_empty() { return 0.0; }
             if u <= pts[0].0 { return pts[0].1; }
@@ -384,56 +385,33 @@ fn main() {
             }
             pts[pts.len() - 1].1
         }
-        // 孤舟蓑笠翁 獨釣寒江雪 — ten syllables, hand-scored
-        let verse: [Syl; 10] = [
-            Syl { closure: 0.10, fric: Some((1100.0, 0.075, 0.035, 0.80)), vow: &[(0.0, 2.0)], nas: &[(0.0, 0.02)], tone: (1.02, 1.02, 1.0), dur: 0.38, gap: 0.06 }, // 孤 gū — g: long closure, strong LOW burst
-            Syl { closure: 0.11, fric: Some((2600.0, 0.055, 0.09, 0.70)), vow: &[(0.0, 0.0), (0.8, 0.0), (1.0, 2.0)], nas: &[(0.0, 0.02)], tone: (1.0, 1.0, 0.99), dur: 0.44, gap: 0.06 }, // 舟 zhōu — zh: closure THEN burst-into-hiss
-            Syl { closure: 0.10, fric: Some((6000.0, 0.0, 0.11, 0.50)), vow: &[(0.0, 2.0), (0.32, 0.0), (1.0, 0.0)], nas: &[(0.0, 0.02)], tone: (1.0, 1.0, 1.0), dur: 0.46, gap: 0.06 }, // 蓑 suō — glide done by 1/3, then HOLD o
-            Syl { closure: 0.05, fric: None, vow: &[(0.0, 2.0), (0.3, 3.0), (1.0, 3.0)], nas: &[(0.0, 0.5), (0.2, 0.1), (1.0, 0.03)], tone: (1.10, 0.95, 0.80), dur: 0.36, gap: 0.06 }, // 笠 lì ✓ (heard right)
-            Syl { closure: 0.0, fric: None, vow: &[(0.0, 2.0), (0.3, 0.5), (1.0, 0.35)], nas: &[(0.0, 0.06), (0.45, 0.15), (1.0, 0.92)], tone: (1.0, 1.0, 0.97), dur: 0.52, gap: 0.5 }, // 翁 wēng — w into a SCHWA, then the nose
-            Syl { closure: 0.10, fric: Some((3900.0, 0.075, 0.03, 0.80)), vow: &[(0.0, 2.0)], nas: &[(0.0, 0.02)], tone: (0.92, 0.96, 1.06), dur: 0.38, gap: 0.06 }, // 獨 dú — d: real closure, real burst
-            Syl { closure: 0.06, fric: Some((3200.0, 0.045, 0.03, 0.55)), vow: &[(0.0, 3.0), (0.45, 1.0), (1.0, 0.0)], nas: &[(0.0, 0.02)], tone: (1.10, 0.94, 0.78), dur: 0.42, gap: 0.06 }, // 釣 diào ✓ (heard right)
-            Syl { closure: 0.05, fric: Some((1400.0, 0.0, 0.07, 0.32)), vow: &[(0.0, 1.0)], nas: &[(0.0, 0.03), (0.6, 0.1), (1.0, 0.8)], tone: (0.92, 0.95, 1.05), dur: 0.44, gap: 0.06 }, // 寒 hán ✓ (heard right)
-            Syl { closure: 0.12, fric: Some((4200.0, 0.05, 0.08, 0.70)), vow: &[(0.0, 3.0), (0.5, 1.0), (1.0, 1.0)], nas: &[(0.0, 0.03), (0.55, 0.15), (1.0, 0.9)], tone: (1.0, 1.0, 0.98), dur: 0.48, gap: 0.06 }, // 江 jiāng — j: closure then burst-into-hiss
-            Syl { closure: 0.08, fric: Some((4300.0, 0.0, 0.09, 0.50)), vow: &[(0.0, 2.5), (0.5, 4.0), (1.0, 4.0)], nas: &[(0.0, 0.02)], tone: (0.88, 0.80, 0.96), dur: 0.52, gap: 0.3 }, // 雪 xuě — ü onset (u/i midpoint), then e
-        ];
-        let mut starts = Vec::new();
-        let mut cursor = 0.4f32;
-        for sy in &verse {
-            starts.push(cursor);
-            cursor += sy.dur + sy.gap;
-        }
-        let total = cursor + 0.8;
-        let base_f0 = 100.0f32; // an old man, low in the chest
         let mut e = Engine::new(SR);
         let s = e.seat_add(false);
         let wav = perform(&mut e, total, |b, e| {
             let tt = t(b);
-            // the old tremor: slow, slightly irregular
             let tremor = 1.0 + 0.009 * (std::f32::consts::TAU * 3.8 * tt).sin(); // old but steady
             let mut set = (0.0f32, 1.0f32, 0.05f32);
             let mut fric = (1000.0f32, 0.0f32);
-            for (i, sy) in verse.iter().enumerate() {
+            for (i, g) in verse.iter().enumerate() {
                 let ct = tt - starts[i];
-                if ct < 0.0 || ct >= sy.dur + sy.gap {
+                if ct < 0.0 || ct >= g.dur + g.gap {
                     continue;
                 }
-                if let Some((cf, fs, fl, lv)) = sy.fric {
+                if let Some((cf, fs, fl, lv)) = g.fric {
                     if ct >= fs && ct < fs + fl {
-                        // Hann window over the hiss so it breathes, not clicks
                         let u = (ct - fs) / fl;
                         fric = (cf, lv * (std::f32::consts::PI * u).sin());
                     }
                 }
-                if ct >= sy.closure && ct < sy.dur {
-                    let vf = (ct - sy.closure) / (sy.dur - sy.closure);
-                    let (m0, m1, m2) = sy.tone;
+                if ct >= g.closure && ct < g.dur {
+                    let vf = (ct - g.closure) / (g.dur - g.closure);
+                    let (m0, m1, m2) = g.tone;
                     let tone = if vf < 0.5 {
                         m0 + (m1 - m0) * (vf * 2.0)
                     } else {
                         m1 + (m2 - m1) * ((vf - 0.5) * 2.0)
                     };
-                    set = (base_f0 * tone * tremor, track(sy.vow, vf), track(sy.nas, vf));
+                    set = (base_f0 * tone * tremor, track(&g.vow, vf), track(&g.nas, vf));
                 }
                 break;
             }
