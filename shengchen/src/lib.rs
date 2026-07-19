@@ -285,7 +285,11 @@ impl Voice {
         let mut hiss = 0.0;
         if self.flvl > 0.001 {
             if self.fctrl == 0 {
-                self.fric.tune(sr, self.fcf_t.max(300.0), 0.94);
+                // sibilance is BROADBAND: a low-centred hiss (ㄓㄕ ~3.3kHz) must be
+                // wide (~2kHz) or it reads as a breathy puff and the ear discards
+                // it; only the high s/x band works narrow
+                let r = if self.fcf_t < 3600.0 { 0.86 } else { 0.94 };
+                self.fric.tune(sr, self.fcf_t.max(300.0), r);
                 self.fctrl = 32;
             }
             self.fctrl -= 1;
