@@ -214,6 +214,10 @@ struct Voice {
     murmur: Lp,
     soften: Lp,
     ctrl: u32, // control-rate divider for formant retuning
+    // vibrato is EARNED: it blooms only after ~0.45s on a held pitch. Periodic
+    // wobble on short moving syllables is THE robot artifact — speech stays dry.
+    f0_ref: f32,
+    stab: f32,
     // consonants: frication is UNVOICED — a hiss shaped by the mouth, alive
     // even while the glottis is closed (s, x, h; a stop's release burst)
     fcf_t: f32,
@@ -233,6 +237,11 @@ impl Voice {
         self.f0_t = f0.clamp(0.0, 1000.0);
         self.vow_t = vowel.clamp(0.0, 4.0);
         self.nas_t = nasal.clamp(0.0, 1.0);
+        // a pitch move beyond 5% is a new note/syllable — vibrato starts over
+        if (self.f0_t - self.f0_ref).abs() > self.f0_ref * 0.05 {
+            self.f0_ref = self.f0_t;
+            self.stab = 0.0;
+        }
     }
 
     fn retune(&mut self, sr: f32) {
@@ -289,7 +298,10 @@ impl Voice {
         // register carries a slightly deeper vibrato and more air in the tone
         let reg = ((self.f0 - 150.0) / 130.0).clamp(0.0, 1.0);
         self.vib += core::f32::consts::TAU * (5.3 + 0.6 * reg) * dt;
-        let f = self.f0.max(20.0) * (1.0 + (0.011 + 0.007 * reg) * self.vib.sin());
+        self.stab += dt;
+        let bloom = ((self.stab - 0.15) / 0.45).clamp(0.0, 1.0); // dry onset, then it opens
+        let f = self.f0.max(20.0)
+            * (1.0 + (0.011 + 0.007 * reg) * bloom * self.vib.sin());
         self.ph = (self.ph + f * dt).fract();
         // glottal source: soft saw + breath
         let saw = 2.0 * self.ph - 1.0;
