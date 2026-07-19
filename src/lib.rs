@@ -183,7 +183,7 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// reaches form (the body). The skin still cannot fetch, read the page, touch
 /// any other being, or write anything — richness up, reach fixed.
 pub const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
-pub const SKIN_IMPORTS: [codegen::HostFn; 10] = [
+pub const SKIN_IMPORTS: [codegen::HostFn; 12] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "hue", n_args: 1, returns: false },
@@ -193,6 +193,8 @@ pub const SKIN_IMPORTS: [codegen::HostFn; 10] = [
     codegen::HostFn { name: "ring", n_args: 3, returns: false },
     codegen::HostFn { name: "arc", n_args: 5, returns: false },
     codegen::HostFn { name: "line", n_args: 4, returns: false },
+    codegen::HostFn { name: "rect", n_args: 4, returns: false }, // FILLED rect(x, y, w, h) — walls, platforms, beams: mass, not sticks
+    codegen::HostFn { name: "tri", n_args: 6, returns: false },  // FILLED triangle — roofs, sails, mountains' children
     codegen::HostFn { name: "st", n_args: 1, returns: true },   // read the being's published state slot (soul writes, skin reads)
 ];
 
