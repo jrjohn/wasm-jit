@@ -1,0 +1,12 @@
+[package]
+name = "shengchen"
+version = "0.1.0"
+edition = "2021"
+description = "聲塵器 — the sound-dust engine: physical primitives for everything's voice (a raindrop's ping, a bubble's resonance, a bird's chirp, a bell's partials, the throat's 嗡阿吽). Zero dependencies, zero imports: compiled to raw wasm it can touch NOTHING — it can only vibrate."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# no dependencies — the physics is std math, the randomness is our own xorshift
+# (this is what keeps the wasm import table EMPTY)
+[dependencies]
