@@ -245,63 +245,116 @@ fn main() {
         write_wav(&dir.join("7-cold-river-night.wav"), &wav).unwrap();
     }
 
-    // ---- 8. 茉莉花 — a WOMAN sings (vocalise): D4–D5, jasmine pentatonic ----
-    // No consonant machinery yet, so she sings the way a voice warms up: each
-    // note begins with a soft nasal touch ("na"-like), phrases breathe, long
-    // notes round from a toward o. The melody is the folk song itself.
+    // ---- 8. 茉莉花 — a WOMAN sings the LYRICS, not a vocalise ----
+    // Each syllable is a sung gesture: onset consonant (fric/burst/nasal) +
+    // vowel glide + nasal coda; the MELODY replaces the tones (as in real
+    // Mandarin song). 花/椏 carry melisma — one word over several notes.
     {
-        let mut e = Engine::new(SR);
-        let s = e.seat_add(false);
-        // scale degrees in D: 1=294 2=330 3=370 5=440 6=494 8=587(1')
+        struct G {
+            closure: f32,
+            fric: Option<(f32, f32, f32, f32)>, // (cf, start, len, lvl)
+            nas0: f32,                          // nasal onset (m / n / l-ish)
+            vow: &'static [(f32, f32)],         // glide over the first ~180ms
+            coda: f32,                          // nasal coda level (n / ng)
+        }
+        const HAO: G = G { closure: 0.05, fric: Some((1400.0, 0.0, 0.08, 0.30)), nas0: 0.0, vow: &[(0.0, 1.0), (0.6, 1.0), (1.0, 0.0)], coda: 0.0 };
+        const YI: G = G { closure: 0.0, fric: None, nas0: 0.0, vow: &[(0.0, 3.0)], coda: 0.0 };
+        const DUO: G = G { closure: 0.05, fric: Some((3000.0, 0.04, 0.025, 0.45)), nas0: 0.0, vow: &[(0.0, 2.0), (0.4, 0.0), (1.0, 0.0)], coda: 0.0 };
+        const MEI: G = G { closure: 0.0, fric: None, nas0: 0.85, vow: &[(0.0, 4.0), (0.6, 4.0), (1.0, 3.0)], coda: 0.0 };
+        const LI: G = G { closure: 0.03, fric: None, nas0: 0.45, vow: &[(0.0, 3.0)], coda: 0.0 };
+        const DE: G = G { closure: 0.05, fric: Some((3000.0, 0.04, 0.02, 0.4)), nas0: 0.0, vow: &[(0.0, 4.0)], coda: 0.0 };
+        const MO: G = G { closure: 0.0, fric: None, nas0: 0.85, vow: &[(0.0, 0.0)], coda: 0.0 };
+        const HUA: G = G { closure: 0.06, fric: Some((1500.0, 0.0, 0.09, 0.28)), nas0: 0.0, vow: &[(0.0, 2.0), (0.4, 1.0), (1.0, 1.0)], coda: 0.0 };
+        const FEN: G = G { closure: 0.05, fric: Some((2200.0, 0.0, 0.08, 0.30)), nas0: 0.0, vow: &[(0.0, 4.0)], coda: 0.7 };
+        const FANG: G = G { closure: 0.05, fric: Some((2200.0, 0.0, 0.08, 0.30)), nas0: 0.0, vow: &[(0.0, 1.0)], coda: 0.8 };
+        const MAN: G = G { closure: 0.0, fric: None, nas0: 0.85, vow: &[(0.0, 1.0)], coda: 0.75 };
+        const ZHI: G = G { closure: 0.06, fric: Some((2800.0, 0.0, 0.08, 0.5)), nas0: 0.0, vow: &[(0.0, 3.0)], coda: 0.0 };
+        const YA: G = G { closure: 0.0, fric: None, nas0: 0.0, vow: &[(0.0, 3.0), (0.35, 1.0), (1.0, 1.0)], coda: 0.0 };
+        // (gesture-or-melisma, scale degree, beats); degree 0 = breath
+        type N = (Option<&'static G>, u8, f32);
+        const PHRASE1: [N; 12] = [
+            (Some(&HAO), 3, 0.6), (Some(&YI), 3, 0.4), (Some(&DUO), 5, 0.5), (Some(&MEI), 6, 0.5),
+            (Some(&LI), 8, 0.9), (Some(&DE), 8, 0.45), (Some(&MO), 6, 0.45), (Some(&LI), 5, 0.5),
+            (Some(&HUA), 5, 0.5), (None, 6, 0.4), (None, 5, 1.4), (None, 0, 0.9),
+        ];
+        const PHRASE3: [N; 8] = [
+            (Some(&FEN), 5, 0.5), (Some(&FANG), 5, 0.5), (Some(&MEI), 5, 0.5), (Some(&LI), 3, 0.5),
+            (Some(&MAN), 5, 0.5), (Some(&ZHI), 6, 0.9), (Some(&YA), 6, 0.4), (None, 5, 1.6),
+        ];
         const F: [(u8, f32); 6] = [(1, 294.0), (2, 330.0), (3, 370.0), (5, 440.0), (6, 494.0), (8, 587.0)];
         let f_of = |d: u8| F.iter().find(|(k, _)| *k == d).map(|(_, f)| *f).unwrap_or(294.0);
-        // 好一朵美麗的茉莉花 (×2) / 芬芳美麗滿枝椏 — (degree, beats); 0 = breath
-        const TUNE: [(u8, f32); 27] = [
-            (3, 0.6), (3, 0.4), (5, 0.5), (6, 0.5), (8, 0.9), (8, 0.45), (6, 0.45), (5, 0.5), (5, 0.5), (6, 0.4), (5, 1.4),
-            (0, 0.7),
-            (3, 0.6), (3, 0.4), (5, 0.5), (6, 0.5), (8, 0.9), (8, 0.45), (6, 0.45), (5, 0.5), (5, 0.5), (6, 0.4), (5, 1.4),
-            (0, 0.7),
-            (5, 0.5), (5, 0.5), (5, 0.5),
-        ];
-        const TUNE2: [(u8, f32); 5] = [(3, 0.5), (5, 0.5), (6, 0.9), (6, 0.4), (5, 1.6)];
         let beat = 0.62f32;
-        // lay the score out as (start, dur, freq, phrase_end)
-        let mut notes: Vec<(f32, f32, f32, bool)> = Vec::new();
+        // (start, dur, freq, gesture, is_last_of_word)
+        let mut notes: Vec<(f32, f32, f32, Option<&G>)> = Vec::new();
         let mut cursor = 0.3f32;
-        let mut lay = |list: &[(u8, f32)], notes: &mut Vec<(f32, f32, f32, bool)>, cursor: &mut f32| {
-            for (i, (d, b)) in list.iter().enumerate() {
+        for list in [&PHRASE1[..], &PHRASE1[..], &PHRASE3[..]] {
+            for &(g, d, b) in list {
                 let dur = b * beat;
-                if *d == 0 {
-                    *cursor += dur; // a breath
+                if d == 0 {
+                    cursor += dur; // breath between phrases
                 } else {
-                    let end = i + 1 == list.len() || list.get(i + 1).map(|(n, _)| *n == 0).unwrap_or(false);
-                    notes.push((*cursor, dur, f_of(*d), end));
-                    *cursor += dur;
+                    notes.push((cursor, dur, f_of(d), g));
+                    cursor += dur;
                 }
             }
-        };
-        lay(&TUNE, &mut notes, &mut cursor);
-        lay(&TUNE2, &mut notes, &mut cursor);
+        }
         let total = cursor + 1.2;
+        let mut e = Engine::new(SR);
+        let s = e.seat_add(false);
         let wav = perform(&mut e, total, |b, e| {
             let tt = t(b);
-            let mut ctl = (0.0f32, 1.0f32, 0.1f32); // silence between phrases = breath
-            for &(start, dur, freq, phrase_end) in &notes {
-                if tt >= start && tt < start + dur {
-                    let ct = tt - start;
-                    // articulation: a soft nasal touch at each onset — "na"-like
-                    let nas = 0.06 + 0.5 * (-ct / 0.055).exp();
-                    // long phrase-final notes round from a toward o as they bloom
-                    let vow = if phrase_end && dur > 0.6 {
-                        1.0 - 0.55 * (ct / dur).min(1.0)
-                    } else {
-                        1.0
-                    };
-                    ctl = (freq, vow, nas);
+            let mut set = (0.0f32, 1.0f32, 0.08f32);
+            let mut fric = (1000.0f32, 0.0f32);
+            let mut carry_vow = 1.0f32;
+            for &(start, dur, freq, g) in &notes {
+                if tt >= start + dur {
+                    if let Some(g) = g {
+                        carry_vow = g.vow[g.vow.len() - 1].1; // melisma carries the word's vowel
+                    }
+                    continue;
+                }
+                if tt < start {
                     break;
                 }
+                let ct = tt - start;
+                match g {
+                    Some(g) => {
+                        if let Some((cf, fs, fl, lv)) = g.fric {
+                            if ct >= fs && ct < fs + fl {
+                                let u = (ct - fs) / fl;
+                                fric = (cf, lv * (std::f32::consts::PI * u).sin());
+                            }
+                        }
+                        if ct >= g.closure {
+                            let vt = ((ct - g.closure) / 0.18).min(1.0); // the glide window
+                            let mut vow = {
+                                // piecewise track
+                                let pts = g.vow;
+                                let mut v = pts[pts.len() - 1].1;
+                                if vt <= pts[0].0 { v = pts[0].1; }
+                                for w in pts.windows(2) {
+                                    if vt >= w[0].0 && vt < w[1].0 {
+                                        let k = (vt - w[0].0) / (w[1].0 - w[0].0);
+                                        v = w[0].1 + (w[1].1 - w[0].1) * k;
+                                    }
+                                }
+                                v
+                            };
+                            let mut nas = 0.06 + g.nas0 * (-(ct - g.closure) / 0.06).exp();
+                            if g.coda > 0.0 && ct > dur - 0.14 {
+                                let k = (ct - (dur - 0.14)) / 0.14;
+                                nas = nas.max(g.coda * k);
+                                vow = vow.min(2.0); // the mouth closes toward the nose
+                            }
+                            set = (freq, vow, nas);
+                        }
+                    }
+                    None => set = (freq, carry_vow, 0.08), // melisma: same word, new note
+                }
+                break;
             }
-            e.voice_set(s, ctl.0, ctl.1, ctl.2);
+            e.voice_set(s, set.0, set.1, set.2);
+            e.voice_fric(s, fric.0, fric.1);
         });
         write_wav(&dir.join("8-jasmine.wav"), &wav).unwrap();
     }
