@@ -226,6 +226,7 @@ function fire(spec, eventVal) {
     el.textContent = v === undefined ? '—' : (Math.round(v * 100) / 100).toString();
   });
   redrawCharts(); // live charts: bound values may have changed
+  appScheduleSave(); // 業: interactions accumulate; the host remembers (debounced)
 }
 
 // ---------------- chart vocabulary (host-rendered, zero dependencies) ----------------
@@ -555,6 +556,67 @@ function render(node) {
   }
 }
 
+
+// ---- App-state persistence (業): the host remembers what an app has lived ----
+// Keyed by the schema's hash — the same cause replays the same schema (the
+// ledger), the same schema hashes to the same identity, and that identity's
+// accumulated state comes back. Cells never see a storage API: the host
+// snapshots the slots outside the frame and pours them back after manifest.
+let APP = { key: null };
+function appHash(schema) {
+  const s = JSON.stringify(schema);
+  let h1 = 5381, h2 = 52711;
+  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = (h1 * 33 + c) >>> 0; h2 = (h2 * 31 + c) >>> 0; }
+  return h1.toString(36) + h2.toString(36);
+}
+function appSnapshot() {
+  return {
+    v: 1,
+    slots: Array.from(slots),
+    outputs: { ...outputs },
+    inputs: Array.from(document.querySelectorAll('#stage .w-slider, #stage .w-input')).map(el => el.value),
+    widgets: WIDGETS.map(w => ({ slots: Array.from(w.slots), lastEmit: w.lastEmit })),
+    scenes: SC3.map(p => ({ slots: Array.from(p.S.slots), orbit: { ...p.S.orbit } })),
+  };
+}
+function appRestore(st) {
+  if (!st || st.v !== 1) return false;
+  try {
+    slots.set((st.slots ?? []).slice(0, 32));
+    outputs = { ...st.outputs };
+    const els = document.querySelectorAll('#stage .w-slider, #stage .w-input');
+    (st.inputs ?? []).forEach((v, i) => { if (els[i] != null && v !== '' && v != null) els[i].value = v; });
+    (st.widgets ?? []).forEach((w, i) => { if (WIDGETS[i]) { WIDGETS[i].slots.set((w.slots ?? []).slice(0, 32)); WIDGETS[i].lastEmit = w.lastEmit ?? null; } });
+    (st.scenes ?? []).forEach((sc, i) => { if (SC3[i]) { SC3[i].S.slots.set((sc.slots ?? []).slice(0, 32)); Object.assign(SC3[i].S.orbit, sc.orbit ?? {}); } });
+    document.querySelectorAll('[data-bind]').forEach(el => {
+      const v = outputs[el.dataset.bind];
+      el.textContent = v === undefined ? '—' : (Math.round(v * 100) / 100).toString();
+    });
+    redrawCharts();
+    return true;
+  } catch (e) { return false; }
+}
+let appSaveTimer = null;
+function appScheduleSave() { // debounced on interaction — animated widget slots don't thrash storage
+  if (!APP.key) return;
+  clearTimeout(appSaveTimer);
+  appSaveTimer = setTimeout(appSaveNow, 300);
+}
+function appSaveNow() {
+  if (!APP.key) return;
+  try {
+    localStorage.setItem('wjstate:' + APP.key, JSON.stringify(appSnapshot()));
+    const idx = JSON.parse(localStorage.getItem('wjstate:index') || '{}');
+    idx[APP.key] = Date.now();
+    for (const k of Object.keys(idx).sort((a, b) => idx[b] - idx[a]).slice(50)) {
+      delete idx[k]; localStorage.removeItem('wjstate:' + k);
+    }
+    localStorage.setItem('wjstate:index', JSON.stringify(idx));
+  } catch (e) { /* quota etc. — persistence is best-effort, never breaks the app */ }
+}
+window.addEventListener('beforeunload', appSaveNow);
+window.__appState = () => ({ key: APP.key, slot0: slots[0] });
+
 function manifestUi(schema) {
   drawRun = null;
   fieldWorld = null;
@@ -570,11 +632,16 @@ function manifestUi(schema) {
   stage.appendChild(render(schema.tree));
   for (const entry of schema.init ?? []) fire({ cell: entry.cell, arg: entry.arg ?? 0 });
   redrawCharts();
+  // 業: if this exact app has lived here before, its accumulated state returns
+  APP.key = appHash(schema);
+  let lived = false;
+  try { const sv = localStorage.getItem('wjstate:' + APP.key); if (sv) lived = appRestore(JSON.parse(sv)); } catch (e) {}
   priorSchema = schema;
   lastManifest = { surface: 'ui', payload: schema };
   const n = schema.cells.length;
   $('stage-status').textContent =
-    `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)`;
+    `manifested: ${n} cells compiled + instantiated in ${(performance.now() - t0).toFixed(1)}ms (fuel-metered, sin/cos/get/set)` +
+    (lived ? ' · 業 restored — this app has lived here before' : '');
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = JSON.stringify(schema, null, 2);
   document.title = 'live-gen UI OK';
@@ -1279,6 +1346,7 @@ function renderField() {
 }
 
 function manifestField(world) {
+  APP.key = null;
   drawRun = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
@@ -1596,6 +1664,7 @@ const env = {
 // keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
+  APP.key = null;
   fieldWorld = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
@@ -2123,6 +2192,7 @@ function makeScene3D(node) {
 // transpiles to GLSL and the GPU runs it at full resolution, per pixel.
 const SHD = { prog: null };
 function manifestShader(seed) {
+  APP.key = null;
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null;
   if (!D3.gl && !initD3()) { say('err', 'shader needs WebGL2 — unavailable here'); return; }
   const t0 = performance.now();
@@ -2191,6 +2261,7 @@ function renderShader(t) {
 }
 window.__manifestShader = s => manifestShader(s);
 function manifestDraw3d(seed) {
+  APP.key = null;
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; SHD.prog = null;
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();
@@ -2423,7 +2494,7 @@ $('view-toggle').onclick = () => setFieldView(fieldView === 'fp' ? 'top' : 'fp')
 // ---- the world library: save a manifested world + its conversation, switch instantly ----
 function manifestSaved(bundle) {
   if (!bundle || !bundle.surface) return;
-  if (bundle.surface === 'ui') manifestUi(bundle.payload);
+  if (bundle.surface === 'ui') { manifestUi(bundle.payload); if (bundle.state) appRestore(bundle.state); }
   else if (bundle.surface === 'field') manifestField(bundle.payload);
   else if (bundle.surface === 'draw3d') manifestDraw3d(bundle.payload);
   else if (bundle.surface === 'shader') manifestShader(bundle.payload);
@@ -2435,7 +2506,8 @@ $('world-save').onclick = async () => {
   if (!lastManifest) { say('err', 'nothing manifested to save yet'); return; }
   const name = (prompt('save this world as… (letters/digits/_/-)') || '').trim().replace(/[^A-Za-z0-9_-]/g, '-');
   if (!name) return;
-  const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog };
+  const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog,
+                   state: lastManifest.surface === 'ui' ? appSnapshot() : undefined }; // 業 rides along
   try {
     const r = await fetch('/api/worlds', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bundle) });
     say(r.ok ? 'ai' : 'err', r.ok ? `💾 saved world '${name}' — load it anytime, instantly` : `save failed: ${await r.text()}`);
