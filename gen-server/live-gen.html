@@ -63,6 +63,16 @@
   .w-input:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
   .w-input::placeholder { color: #6e7681; }
   .quar { color: #f85149; font-size: .75rem; }
+  .w-list { border: 1px solid #30363d; border-radius: 10px; background: #0d1117; min-width: 260px;
+            max-width: 480px; max-height: 260px; overflow-y: auto; }
+  .w-listrow { padding: .42rem .8rem; font-size: .86rem; border-bottom: 1px solid #21262d;
+               font-variant-numeric: tabular-nums; }
+  .w-listrow:last-child { border-bottom: none; }
+  .w-listrow:hover { background: #161b22; }
+  .w-empty { color: #6e7681; }
+  .w-textinput { width: 230px; }
+  .w-feedchip { font-family: ui-monospace, monospace; font-size: .7rem; color: #6e7681;
+                border: 1px dashed #30363d; border-radius: 999px; padding: .2rem .6rem; }
   .hint { font-size: .75rem; opacity: .55; }
   .chat { position: relative; }
   .at-menu { position: absolute; left: .5rem; right: .5rem; bottom: 96px; background: #161b22;
@@ -178,13 +188,25 @@ let priorSchema = null;
 let lastManifest = null; // {surface, payload} — what to re-manifest on load
 let drawRun = null;
 let slots = new Float64Array(32); // the granted get/set store — multi-input logic lives here
+let MEM = new Float64Array(4096);  // ② the COLLECTION store (ld/sd): lists, queues, tables — slots writ large
+let STRS = [];                     // ③ the string table: host holds text, cells hold HANDLES (f64 indices)
+function strIntern(sv) { // dedup: equal text = equal handle, so handle comparison IS string equality
+  sv = String(sv).slice(0, 200);
+  const i = STRS.indexOf(sv);
+  if (i >= 0) return i;
+  STRS.push(sv);
+  return STRS.length - 1;
+}
 
 function compileCells(defs) {
   cells = {}; outputs = {}; slots = new Float64Array(32); // a new UI = a new world
+  MEM = new Float64Array(4096); STRS = [];
   const env = {
     sin: Math.sin, cos: Math.cos,
     get: i => slots[i & 31] ?? 0,
     set: (i, v) => { slots[i & 31] = v; },
+    ld: i => MEM[(i | 0) & 4095] ?? 0,        // ② read the collection store
+    sd: (i, v) => { MEM[(i | 0) & 4095] = v; },// ② write it
   };
   for (const c of defs) {
     const bytes = compile_ui_cell_wasm(c.script); // throws on a bad seed (server already vetted)
@@ -226,6 +248,7 @@ function fire(spec, eventVal) {
     el.textContent = v === undefined ? '—' : (Math.round(v * 100) / 100).toString();
   });
   redrawCharts(); // live charts: bound values may have changed
+  refreshLists(); // ② lists / ③ texts: the stores may have changed
   appScheduleSave(); // 業: interactions accumulate; the host remembers (debounced)
 }
 
@@ -417,6 +440,57 @@ function redrawCharts() {
   for (const c of charts) CHART_DRAW[c.node.type](c.node, c.cvs);
 }
 
+// ---- ② lists are windows onto MEM; ③ text widgets read the string table ----
+let LISTS = [];
+function refreshLists() {
+  for (const d of LISTS) {
+    const sp = d._spec;
+    const n = sp.count_cell != null ? Math.max(0, Math.round(outputs[sp.count_cell] ?? 0)) : sp.count;
+    d.innerHTML = '';
+    for (let i = 0; i < Math.min(n, 200); i++) {
+      const v = MEM[(sp.start + i) & 4095];
+      const r = document.createElement('div');
+      r.className = 'w-listrow';
+      r.textContent = sp.prefix + (sp.text ? (STRS[Math.round(v)] ?? fmtN(v)) : fmtN(v));
+      if (sp.on_select) { r.style.cursor = 'pointer'; const idx = i; r.onclick = () => fire(sp.on_select, idx); }
+      d.appendChild(r);
+    }
+    if (!d.childElementCount) { const r = document.createElement('div'); r.className = 'w-listrow w-empty'; r.textContent = '—'; d.appendChild(r); }
+  }
+  document.querySelectorAll('[data-bindtext]').forEach(el => {
+    const v = outputs[el.dataset.bindtext];
+    el.textContent = v === undefined ? '—' : (STRS[Math.round(v)] ?? fmtN(v));
+  });
+}
+
+// ---- ④ feeds: the schema declares, the HOST fetches (server-side allowlist),
+// the cells receive numbers (strings arrive as handles). ----
+let FEED_DEFS = [];
+let feedTimer = null;
+function stopFeeds() { if (feedTimer) clearInterval(feedTimer); feedTimer = null; FEED_DEFS = []; }
+function startFeeds() {
+  if (!FEED_DEFS.length) return;
+  const defs = FEED_DEFS.slice();
+  const run = async () => {
+    for (const f of defs) {
+      try {
+        const r = await fetch('/api/feed?url=' + encodeURIComponent(f.url));
+        if (!r.ok) { $('stage-status').textContent = 'feed refused: ' + (await r.text()).slice(0, 90); continue; }
+        const j = await r.json();
+        for (const p of (f.plucks ?? [])) {
+          let v = j;
+          for (const seg of String(p.path).split('.')) v = v?.[/^\d+$/.test(seg) ? Number(seg) : seg];
+          if (typeof v === 'number' && Number.isFinite(v)) fire({ cell: p.cell }, v);
+          else if (typeof v === 'string') fire({ cell: p.cell }, strIntern(v));
+        }
+      } catch (e) { /* a dead feed never breaks the app */ }
+    }
+  };
+  run();
+  const every = Math.max(15, Math.min(...defs.map(f => Number(f.every) || 60)));
+  feedTimer = setInterval(run, every * 1000);
+}
+
 // ---- 詞彙自生成 (grown widgets): a control the vocabulary lacks enters as a
 // fenced cell — the same gate a grown skin walks through. It draws on its OWN
 // small canvas every frame; its only wires into the app are bv(i) in (host-fed
@@ -551,6 +625,43 @@ function render(node) {
       return makeChart(node);
     case 'scene3d': // 3D-3: a live 3D panel wired to the app through bv/emit
       return makeScene3D(node);
+    case 'list': { // ② a window onto the collection store: MEM[start .. start+count)
+      const d = document.createElement('div');
+      d.className = 'w-list';
+      d._spec = { start: Number(node.start) || 0, count: node.count_cell ? null : (Number(node.count) || 8),
+                  count_cell: node.count_cell ?? null, text: !!node.text,
+                  prefix: node.prefix ?? '', on_select: node.on_select ?? null };
+      LISTS.push(d);
+      return d;
+    }
+    case 'textinput': { // ③ text in: Enter interns the string, the cell gets its HANDLE
+      const i = document.createElement('input');
+      i.type = 'text'; i.className = 'w-input w-textinput'; i.placeholder = node.placeholder ?? '';
+      i.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        const v = i.value.trim();
+        if (!v) return;
+        fire(node.on_input, strIntern(v));
+        i.value = '';
+      });
+      return i;
+    }
+    case 'text': { // ③ text out: render the cell's output as the string it names
+      const sp = document.createElement('span');
+      sp.className = 'w-value';
+      if (node.prefix) sp.append(node.prefix);
+      const b = document.createElement('b');
+      b.dataset.bindtext = node.bind ?? ''; b.textContent = '—';
+      sp.appendChild(b);
+      return sp;
+    }
+    case 'feed': { // ④ the world delivers data — cells never fetch
+      const chip = document.createElement('span');
+      chip.className = 'w-feedchip';
+      try { chip.textContent = '⟳ ' + new URL(node.url).host; } catch (e) { chip.textContent = '⟳ feed'; }
+      FEED_DEFS.push(node);
+      return chip;
+    }
     default: // 詞彙自生成: an unknown type grows its own look (widget_seed) or recalls a grown one
       return makeCustomWidget(node);
   }
@@ -577,6 +688,8 @@ function appSnapshot() {
     inputs: Array.from(document.querySelectorAll('#stage .w-slider, #stage .w-input')).map(el => el.value),
     widgets: WIDGETS.map(w => ({ slots: Array.from(w.slots), lastEmit: w.lastEmit })),
     scenes: SC3.map(p => ({ slots: Array.from(p.S.slots), orbit: { ...p.S.orbit } })),
+    mem: (() => { let hi = MEM.length - 1; while (hi >= 0 && MEM[hi] === 0) hi--; return Array.from(MEM.slice(0, hi + 1)); })(),
+    strs: STRS.slice(0, 2000),
   };
 }
 function appRestore(st) {
@@ -588,6 +701,9 @@ function appRestore(st) {
     (st.inputs ?? []).forEach((v, i) => { if (els[i] != null && v !== '' && v != null) els[i].value = v; });
     (st.widgets ?? []).forEach((w, i) => { if (WIDGETS[i]) { WIDGETS[i].slots.set((w.slots ?? []).slice(0, 32)); WIDGETS[i].lastEmit = w.lastEmit ?? null; } });
     (st.scenes ?? []).forEach((sc, i) => { if (SC3[i]) { SC3[i].S.slots.set((sc.slots ?? []).slice(0, 32)); Object.assign(SC3[i].S.orbit, sc.orbit ?? {}); } });
+    MEM = new Float64Array(4096); MEM.set((st.mem ?? []).slice(0, 4096));
+    STRS = Array.isArray(st.strs) ? st.strs.slice(0, 2000) : [];
+    refreshLists();
     document.querySelectorAll('[data-bind]').forEach(el => {
       const v = outputs[el.dataset.bind];
       el.textContent = v === undefined ? '—' : (Math.round(v * 100) / 100).toString();
@@ -627,6 +743,7 @@ function manifestUi(schema) {
   wires = schema.wires ?? [];
   charts = [];
   WIDGETS = []; // a new UI = fresh grown-widget instances (the library remembers the looks)
+  LISTS = []; stopFeeds();
   const stage = $('stage');
   stage.innerHTML = '';
   stage.appendChild(render(schema.tree));
@@ -636,6 +753,8 @@ function manifestUi(schema) {
   APP.key = appHash(schema);
   let lived = false;
   try { const sv = localStorage.getItem('wjstate:' + APP.key); if (sv) lived = appRestore(JSON.parse(sv)); } catch (e) {}
+  refreshLists();
+  startFeeds(); // ④ the world begins delivering
   priorSchema = schema;
   lastManifest = { surface: 'ui', payload: schema };
   const n = schema.cells.length;
@@ -1346,7 +1465,7 @@ function renderField() {
 }
 
 function manifestField(world) {
-  APP.key = null;
+  APP.key = null; stopFeeds();
   drawRun = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
@@ -1664,7 +1783,7 @@ const env = {
 // keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
-  APP.key = null;
+  APP.key = null; stopFeeds();
   fieldWorld = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
@@ -2192,7 +2311,7 @@ function makeScene3D(node) {
 // transpiles to GLSL and the GPU runs it at full resolution, per pixel.
 const SHD = { prog: null };
 function manifestShader(seed) {
-  APP.key = null;
+  APP.key = null; stopFeeds();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null;
   if (!D3.gl && !initD3()) { say('err', 'shader needs WebGL2 — unavailable here'); return; }
   const t0 = performance.now();
@@ -2261,7 +2380,7 @@ function renderShader(t) {
 }
 window.__manifestShader = s => manifestShader(s);
 function manifestDraw3d(seed) {
-  APP.key = null;
+  APP.key = null; stopFeeds();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; SHD.prog = null;
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();

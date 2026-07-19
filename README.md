@@ -68,6 +68,17 @@ Everything below was added through the same fence, without widening it an inch:
 - **surface shader (L4) — the seed IS the fragment shader**: the same DSL transpiles to GLSL through the narrowest fence of all (pure math + colour verbs + pointer; no memory, no reach — over-reach dies at transpile) and every pixel runs it: `examples/shader-sdf-raymarch.dsl` renders a raymarched sphere on a checkered plane at full resolution, 60 fps.
 - **The ālaya ledger + streaming**: every validated generation is stored by its **cause** (the ask + the prior world it acted on) and replays in 0 ms on a repeat — no model call; a fresh cause streams in token by token (SSE), the schema visibly writing itself.
 
+## Apps that remember and connect (the four App gaps, closed)
+
+Beyond "numbers in, picture out," a generated UI is now a real app — persistent, list-holding, text-keeping, live-data-fed — with the fence unmoved (no memory imports for the cell, no string ABI, no `fetch` in any cell):
+
+- **① Persistence (業)**: app state is keyed by the schema's hash — the same ask replays the same schema (the ledger), which hashes to the same identity, so the accumulated state returns on reload. No accounts; the host snapshots the slots outside the frame and pours them back after `init`. `💾 save world` packs the lived state alongside the schema.
+- **② Collections** — `ld(i)/sd(i,v)`: a host-owned 4096-slot f64 array (slots writ large) for lists/queues/tables, plus a `list` widget that windows onto it (row count from a cell; clicking a row fires `on_select` with the row index, so delete/toggle is cell logic).
+- **③ Strings as handles**: the host holds text; cells hold a numeric **handle**. `textinput` interns on Enter and fires the cell with the handle; `text` / `list(text:true)` render a value as the string it names. Interning dedups, so equal text = equal handle — a cell can compare and route strings but never read or forge them.
+- **④ Feeds** — the world delivers data: a `feed` node declares a url + dot-path plucks; the **host** fetches through `/api/feed` (server-enforced domain allowlist, timeout, size cap) and fires cells with numbers (strings arrive as handles). Cells never touch the network — authority sits at the schema layer, auditable, not in the cell. Verified live: "台北即時氣溫儀表板" wires open-meteo and shows the real current temperature.
+
+Everything above persists across reloads automatically — apps *remember*.
+
 ## The power of wasm-jit (vs JS, honest version)
 
 Speed: on a pure f64 kernel it ties JS (V8's home turf). Ergonomics: JS still wins slightly (the DSL added if/%/built-in math but still has no functions/arrays/strings). The power is in five properties JS structurally cannot give:
