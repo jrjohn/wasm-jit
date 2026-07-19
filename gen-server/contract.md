@@ -256,6 +256,23 @@ the host's, not yours.
 - wind/noise-ish texture: high-frequency FM with slowly drifting amplitude
 - end with the sample expression (no semicolon), like every seed.
 
+THE 聲塵 PRIMITIVES — the host lends the PHYSICS of real sounds; YOUR seed decides
+WHEN (no call = no sound). All are procedures (no return value), like the skin's disc():
+  drop(bright)          one raindrop (bright 0..1: dark thud → bright tick)
+  bubble(pitch)         one water bubble (pitch 0..1) — a stream = sparse bubbles over a breath() bed
+  chirp(f1, f2, dur)    one bird syllable: a sweep f1→f2 Hz over dur seconds (≤0.3)
+  strike(f0, energy)    one modal strike (a bell/gong/woodblock): rings and decays by itself
+  voice(f0, vowel, nasal)  a continuous THROAT: f0 Hz (0 closes it), vowel 0=o 1=a 2=u 3=i 4=e
+                        (fractional morphs; 0.5≈schwa, 2.5≈ü), nasal 0..1 (the m of 嗡/吽)
+  breath(level)         a wind/air layer (level 0..1) — set it, it stays until changed
+Patterns (each event fired ONCE — use a slot as a phase/counter, or a noise() threshold):
+  RAIN:  "if noise() > 0.9995 { drop(0.2 + (noise() + 1.0) * 0.3); }\n0.0"   (denser = lower threshold)
+  RIVER: "breath(0.25);\nif noise() > 0.9997 { bubble(0.3); }\n0.0"
+  BELL every ~30s: "let n = get(0.0) + 1.0;\nset(0.0, n);\nif n > 1400000.0 { strike(98.0, 0.8); set(0.0, 0.0); }\n0.0"
+  BIRDSONG: arm a countdown slot on a rare noise() threshold, fire 2-3 chirp() at
+  narrow phase windows as it counts down (each window ~one sample wide so the chirp fires once).
+  A CHANT (嗡阿吽): drive voice() through vowel/nasal phases with a slow slot phase.
+
 === surface "field" — a living world ===
 "world" = {"grid":96,"view":"top"|"first_person","cells":[...]}
 - "view" (optional, default "top"): the host's camera. "top" = looking straight down;
@@ -336,6 +353,11 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
   ("on" is the AUTHORED, initial ride; a being with a mind/behavior can also bind()/unbind() at
   RUNTIME to board or leave by its own choice — same host law, chosen instead of declared.)
+- entities may carry "sound_seed": "<a sound-surface seed>" (optional) — the being's OWN
+  VOICE, run at its POSITION: the world spatializes it (near = loud, far = silent) and the
+  ear follows the walker. A bird carries its birdsong (chirp patterns), a monk his chant
+  (voice()), a spring its bubbles. Its raw return value is NOT mixed — a positioned being
+  speaks ONLY through the 聲塵 primitives. Same DSL and fence as surface "sound".
 - "ambient": "<a sound-surface seed>" (optional) — an AMBIENT SOUND that plays while this
   world is manifested (rain, wind, a river, birdsong). Same DSL as surface "sound": run(t) ->
   a sample in −1..1, capabilities sin cos get set; keep it gentle (sum voices at ~0.05–0.15).

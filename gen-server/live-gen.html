@@ -775,6 +775,7 @@ let fieldWorld = null;   // {grid, cells:[{id,mode,order,region,run,fails,quaran
 let FIELD = null;        // Float64Array(grid*grid*4): height, water, veg, snow
 let fieldCanvas = null;  // offscreen grid-sized canvas
 let lastTick = 0;
+let lastSndSync = 0; // §24b ear/voice position sync throttle
 let lastRaf = 0;
 
 // ---- first-person view: the same field, seen from inside ----
@@ -1480,8 +1481,14 @@ function manifestField(world) {
   fieldWorld = compiled;
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
-  if (typeof world.ambient === 'string' && world.ambient.trim()) soundPlayAmbient(world.ambient);
-  else soundStop();
+  const sndCells = [];
+  if (typeof world.ambient === 'string' && world.ambient.trim())
+    sndCells.push({ seed: world.ambient, id: '__ambient', positional: false });
+  for (const def of world.entities ?? []) {
+    if (typeof def.sound_seed === 'string' && def.sound_seed.trim())
+      sndCells.push({ seed: def.sound_seed, id: def.id, positional: true, x: def.at?.[0] ?? 0, y: def.at?.[1] ?? 0 });
+  }
+  if (sndCells.length) soundPlayCells(sndCells); else soundStop();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
   lastManifest = { surface: 'field', payload: world };
   // The viewpoint is YOURS: once you're in first person, you stay there across
@@ -2347,36 +2354,95 @@ const SOUND_WORKLET = `
 class SeedSynth extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.run = null; this.dead = false; this.n = 0; this.slots = new Float64Array(32);
+    // the 聲塵器 (zero-import dust engine) + a CHORUS of sound cells, each with
+    // its own seat in the world. 聲從身出 · 根塵和合 · 動則有聲 — engine law.
+    this.dust = null; this.dustMem = null; this.dustPtr = 0;
+    this.cells = []; this.n = 0;
     this.port.onmessage = (e) => {
       const d = e.data;
-      if (d.stop) { this.run = null; return; }
-      if (d.bytes) {
-        try {
-          const slots = this.slots;
-          const env = { sin: Math.sin, cos: Math.cos,
-            get: (i) => slots[i & 31] || 0, set: (i, v) => { slots[i & 31] = v; },
-            noise: () => Math.random() * 2 - 1 };  // §24: the texture primitive — filter it for rain/wind/snow
-          this.run = new WebAssembly.Instance(new WebAssembly.Module(d.bytes), { env }).exports.run;
-          this.dead = false; this.n = 0; this.slots.fill(0);
-        } catch (err) { this.run = null; this.port.postMessage({ err: String(err) }); }
-      }
+      try {
+        if (d.dust) { // instantiated with an EMPTY import object — it can only vibrate
+          const inst = new WebAssembly.Instance(new WebAssembly.Module(d.dust), {});
+          this.dust = inst.exports; this.dust.init(sampleRate);
+          this.dustMem = new Float32Array(this.dust.memory.buffer);
+          this.dustPtr = this.dust.out_ptr() >>> 2;
+          this.port.postMessage({ dustReady: true });
+          return;
+        }
+        if (d.stop) { this.cells = []; if (this.dust) this.dust.clear(); return; }
+        if (d.bytes) { // a single ambient cell (surface "sound" / legacy ambient)
+          this.cells = []; if (this.dust) this.dust.clear();
+          this.addCell({ bytes: d.bytes, id: '__ambient', positional: false, x: 0, y: 0 });
+          this.n = 0; return;
+        }
+        if (d.cells) { // a world's chorus: ambient + per-being voices
+          this.cells = []; if (this.dust) this.dust.clear();
+          for (const c of d.cells) this.addCell(c);
+          this.n = 0; return;
+        }
+        if (d.seatpos && this.dust) {
+          const c = this.cells.find(x => x.id === d.seatpos.id);
+          if (c && c.seat >= 0) this.dust.seat_pos(c.seat, d.seatpos.x, d.seatpos.y);
+          return;
+        }
+        if (d.listener && this.dust) { this.dust.listener(d.listener.x, d.listener.y); return; }
+      } catch (err) { this.port.postMessage({ err: String(err) }); }
     };
+  }
+  addCell(c) {
+    const slots = new Float64Array(32);
+    const seat = this.dust ? this.dust.seat_add(c.positional ? 1 : 0) : -1;
+    if (this.dust && seat >= 0 && c.positional) this.dust.seat_pos(seat, c.x || 0, c.y || 0);
+    const dust = this.dust, S = seat;
+    const env = { sin: Math.sin, cos: Math.cos,
+      get: (i) => slots[i & 31] || 0, set: (i, v) => { slots[i & 31] = v; },
+      noise: () => Math.random() * 2 - 1,
+      // §24b the 聲塵 primitives — the cell decides WHEN; the engine is the physics
+      drop:   (b) => { if (dust && S >= 0) dust.ev_drop(S, b); },
+      bubble: (q) => { if (dust && S >= 0) dust.ev_bubble(S, q); },
+      chirp:  (f1, f2, du) => { if (dust && S >= 0) dust.ev_chirp(S, f1, f2, du); },
+      strike: (f0, en) => { if (dust && S >= 0) dust.ev_strike(S, f0, en); },
+      voice:  (f0, vw, na) => { if (dust && S >= 0) dust.voice_set(S, f0, vw, na); },
+      breath: (l) => { if (dust && S >= 0) dust.breath_set(S, l); },
+    };
+    try {
+      const run = new WebAssembly.Instance(new WebAssembly.Module(c.bytes), { env }).exports.run;
+      this.cells.push({ run, id: c.id, seat, positional: !!c.positional, dead: false });
+    } catch (err) { this.port.postMessage({ err: String(err) }); }
   }
   process(inputs, outputs) {
     const out = outputs[0]; if (!out || !out[0]) return true;
-    const ch0 = out[0], sr = sampleRate;
-    if (!this.run || this.dead) { for (let i = 0; i < ch0.length; i++) ch0[i] = 0; return true; }
-    const run = this.run;
-    try {
-      for (let i = 0; i < ch0.length; i++) {
-        let v = run(this.n / sr);
-        if (!(v > -4 && v < 4)) v = 0;          // NaN / inf guard
-        v = v < -1 ? -1 : (v > 1 ? 1 : v);
-        for (let c = 0; c < out.length; c++) out[c][i] = v;
-        this.n++;
+    const L = out[0], R = out[1] || out[0], n = L.length, sr = sampleRate;
+    L.fill(0); if (R !== L) R.fill(0);
+    for (const c of this.cells) {
+      if (c.dead) continue;
+      try {
+        for (let i = 0; i < n; i++) {
+          let v = c.run((this.n + i) / sr);
+          // a positional being's RAW wave stays in its body — only what it
+          // sends through the seated primitives reaches the world's ear
+          if (!c.positional) {
+            if (!(v > -4 && v < 4)) v = 0;
+            v = v < -1 ? -1 : (v > 1 ? 1 : v);
+            L[i] += v; if (R !== L) R[i] += v;
+          }
+        }
+      } catch (e) { c.dead = true; this.port.postMessage({ trapped: c.id + ': ' + String(e) }); }
+    }
+    this.n += n;
+    if (this.dust) {
+      this.dust.render(n);
+      if (this.dustMem.buffer !== this.dust.memory.buffer) {
+        this.dustMem = new Float32Array(this.dust.memory.buffer);
+        this.dustPtr = this.dust.out_ptr() >>> 2;
       }
-    } catch (e) { this.dead = true; this.port.postMessage({ trapped: String(e) }); for (let i = 0; i < ch0.length; i++) ch0[i] = 0; }
+      const m = this.dustMem, q = this.dustPtr;
+      for (let i = 0; i < n; i++) { L[i] += m[q + 2 * i]; if (R !== L) R[i] += m[q + 2 * i + 1]; }
+    }
+    for (let i = 0; i < n; i++) {
+      L[i] = L[i] < -1 ? -1 : (L[i] > 1 ? 1 : L[i]);
+      if (R !== L) R[i] = R[i] < -1 ? -1 : (R[i] > 1 ? 1 : R[i]);
+    }
     return true;
   }
 }
@@ -2389,11 +2455,19 @@ async function ensureAudio() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const url = URL.createObjectURL(new Blob([SOUND_WORKLET], { type: 'application/javascript' }));
     await ctx.audioWorklet.addModule(url);
-    const node = new AudioWorkletNode(ctx, 'seed-synth', { outputChannelCount: [1] });
+    const node = new AudioWorkletNode(ctx, 'seed-synth', { outputChannelCount: [2] });
+    // the 聲塵器: fetched once, posted before any cells (port order guarantees it)
+    try {
+      const r = await fetch('/pkg-dust/shengchen.wasm');
+      if (r.ok) node.port.postMessage({ dust: new Uint8Array(await r.arrayBuffer()) });
+    } catch (e) { /* no dust engine — cells still run, primitives stay silent */ }
     const analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
     const gain = ctx.createGain(); gain.gain.value = 0.55; // master ceiling — host law
     node.connect(analyser); analyser.connect(gain); gain.connect(ctx.destination);
-    node.port.onmessage = (e) => { if (e.data.trapped || e.data.err) $('stage-status').textContent = 'sound cell silenced: ' + (e.data.trapped || e.data.err); };
+    node.port.onmessage = (e) => {
+      if (e.data.dustReady) { AUDIO.dustReady = true; return; }
+      if (e.data.trapped || e.data.err) $('stage-status').textContent = 'sound cell silenced: ' + (e.data.trapped || e.data.err);
+    };
     AUDIO.ctx = ctx; AUDIO.node = node; AUDIO.gain = gain; AUDIO.analyser = analyser;
     AUDIO.buf = new Float32Array(analyser.fftSize);
     return AUDIO;
@@ -2401,6 +2475,22 @@ async function ensureAudio() {
   return AUDIO.ready;
 }
 function soundStop() { if (AUDIO.node) AUDIO.node.port.postMessage({ stop: true }); AUDIO.active = false; AUDIO.ambient = false; }
+let SND_IDS = []; // positional sound-cell ids — seat positions follow their beings
+async function soundPlayCells(defs) { // §24b the world's CHORUS: ambient + 聲從身出
+  const cells = [];
+  SND_IDS = [];
+  for (const d of defs) {
+    try {
+      cells.push({ bytes: compile_sound_wasm(d.seed), id: d.id, positional: !!d.positional, x: d.x || 0, y: d.y || 0 });
+      if (d.positional) SND_IDS.push(d.id);
+    } catch (e) { say('err', `sound cell '${d.id}' refused: ${e.message || e}`); }
+  }
+  if (!cells.length) { soundStop(); return; }
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  AUDIO.node.port.postMessage({ cells });
+  AUDIO.ambient = true; // playing under the world — no scope takeover
+}
 async function soundPlayAmbient(seed) { // §24 the ear's LAYER: sound rides on a world, the canvas keeps the world
   let bytes;
   try { bytes = compile_sound_wasm(seed); }
@@ -2629,6 +2719,20 @@ window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0,
     if (fieldView === 'fp') { // the walker moves every frame — smooth inside a living world
       updateCam(dt);
       renderFieldFP();
+    }
+    // §24b 根塵和合: the EAR follows the walker, each voice follows its body —
+    // what you hear is where you stand. Throttled; the engine smooths the rest.
+    if (AUDIO.node && AUDIO.ambient && now - lastSndSync > 150) {
+      lastSndSync = now;
+      const g = fieldWorld.grid;
+      const lx = fieldView === 'fp' ? cam.px : g / 2;
+      const ly = fieldView === 'fp' ? cam.pz : g / 2;
+      AUDIO.node.port.postMessage({ listener: { x: lx, y: ly } });
+      for (const id of SND_IDS) {
+        const e = ENTITIES.find(x => x.id === id);
+        if (e) AUDIO.node.port.postMessage({ seatpos: { id, x: e.x, y: e.y } });
+      }
+      window.__earState = { lx, ly, voices: SND_IDS.length };
     }
   } else if (AUDIO.active) {
     renderScope(); // §24: the audio runs on its own thread; here we draw its waveform

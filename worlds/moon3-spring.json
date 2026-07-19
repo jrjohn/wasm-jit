@@ -2,6 +2,7 @@
  "chat": [],
  "name": "moon3-spring",
  "payload": {
+  "ambient": "let gw = get(0.0) * 0.9995 + noise() * 0.0005;\nset(0.0, gw);\nbreath(0.16 + gw * 6.0);\nif noise() > 0.99993 { bubble(0.25); }\nif noise() > 0.99997 { drop(0.12); }\nlet bt = get(1.0) + 1.0;\nset(1.0, bt);\nif bt > 1400000.0 { strike(98.0, 0.85); set(1.0, 0.0); }\n0.0",
   "cells": [
    {
     "id": "plains",
@@ -42,6 +43,7 @@
      "persona": "孤舟蓑笠翁，獨釣寒江雪 — a solitary old man in a straw cloak and bamboo hat, fishing alone on a frozen river under falling snow. He speaks rarely, in short quiet lines, at peace with the silence and cold."
     },
     "on": "boat",
+    "sound_seed": "let ph = get(0.0) + 0.0000011;\nif ph > 1.0 { ph = 0.0; }\nset(0.0, ph);\nif ph < 0.3 { voice(108.0, 0.0, 0.3 + ph * 2.0); }\nif ph >= 0.3 { if ph < 0.36 { voice(0.0, 0.0, 0.0); } }\nif ph >= 0.36 { if ph < 0.62 { voice(114.0, 1.0, 0.08); } }\nif ph >= 0.62 { if ph < 0.68 { voice(0.0, 2.0, 0.0); } }\nif ph >= 0.68 { if ph < 0.96 { voice(104.0, 2.0, 0.85); } }\nif ph >= 0.96 { voice(0.0, 2.0, 0.0); }\n0.0",
     "type": "fisherman"
    },
    {
@@ -116,6 +118,7 @@
     "id": "bird1",
     "realm": "sky",
     "skin_seed": "hsl(0.62,0.2,0.28);\ndisc(px,py,s*0.16);\nline(px,py,px-s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\nline(px,py,px+s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\n0.0",
+    "sound_seed": "let ph = get(0.0);\nif ph <= 0.0 { if noise() > 0.99999 { set(0.0, 4.0); } }\nelse {\n set(0.0, ph - 0.0002);\n if ph > 3.9999 { chirp(2600.0, 3400.0, 0.07); }\n if ph > 2.9999 { if ph < 3.0001 { chirp(3100.0, 2700.0, 0.06); } }\n if ph > 1.9999 { if ph < 2.0001 { chirp(2500.0, 3600.0, 0.09); } }\n}\n0.0",
     "type": "bird"
    },
    {
@@ -128,6 +131,7 @@
     "id": "bird2",
     "realm": "sky",
     "skin_seed": "hsl(0.62,0.2,0.28);\ndisc(px,py,s*0.16);\nline(px,py,px-s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\nline(px,py,px+s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\n0.0",
+    "sound_seed": "let ph = get(0.0);\nif ph <= 0.0 { if noise() > 0.99999 { set(0.0, 3.0); } }\nelse {\n set(0.0, ph - 0.00025);\n if ph > 2.9999 { chirp(3400.0, 4200.0, 0.05); }\n if ph > 1.9999 { if ph < 2.0001 { chirp(4000.0, 3300.0, 0.06); } }\n if ph > 0.9999 { if ph < 1.0001 { chirp(3600.0, 4400.0, 0.05); } }\n}\n0.0",
     "type": "bird"
    },
    {
@@ -140,6 +144,7 @@
     "id": "bird3",
     "realm": "sky",
     "skin_seed": "hsl(0.62,0.2,0.28);\ndisc(px,py,s*0.16);\nline(px,py,px-s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\nline(px,py,px+s*0.55,py-s*0.25-sin(t*7.0)*s*0.22);\n0.0",
+    "sound_seed": "let ph = get(0.0);\nif ph <= 0.0 { if noise() > 0.999992 { set(0.0, 2.0); } }\nelse {\n set(0.0, ph - 0.00015);\n if ph > 1.9999 { chirp(2200.0, 2900.0, 0.11); }\n if ph > 0.9999 { if ph < 1.0001 { chirp(2800.0, 2300.0, 0.1); } }\n}\n0.0",
     "type": "bird"
    },
    {
@@ -225,8 +230,7 @@
    }
   ],
   "grid": 96,
-  "view": "top",
-  "ambient": "let wlp = get(0.0) * 0.986 + noise() * 0.014;\nset(0.0, wlp);\nlet gust = 0.35 + 0.4 * sin(t * 0.13) + 0.15 * sin(t * 0.37);\nlet wind = wlp * gust * 2.6;\nlet slp = get(1.0) * 0.4 + noise() * 0.6;\nset(1.0, slp);\nlet snow = slp * 0.05 * (0.6 + 0.4 * sin(t * 0.7));\nlet ph = t % 11.0;\nlet env = max(1.0 - ph * 0.9, 0.0);\nlet bell = (sin(6.2832 * 261.6 * ph) * 0.6 + sin(6.2832 * 392.0 * ph) * 0.3) * env * env * 0.1;\nlet river = sin(6.2832 * 48.0 * t) * 0.04 * (0.6 + 0.4 * sin(t * 0.08));\nwind + snow + bell + river"
+  "view": "top"
  },
  "surface": "field"
 }

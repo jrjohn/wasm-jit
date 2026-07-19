@@ -77,7 +77,7 @@ const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
 // Sound ABI (§24 — the audio shader), shared likewise.
 const SOUND_PARAMS: [&str; 1] = wasm_jit::SOUND_PARAMS;
-const SOUND_IMPORTS: [HostFn; 5] = wasm_jit::SOUND_IMPORTS;
+const SOUND_IMPORTS: [HostFn; 11] = wasm_jit::SOUND_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
 const DRAW3D_IMPORTS: [HostFn; 30] = wasm_jit::DRAW3D_IMPORTS;
@@ -762,6 +762,13 @@ fn validate(obj: &Value) -> Result<(), String> {
                     if let Some(seed) = skin_seed {
                         compile_check(seed, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000)
                             .map_err(|e| format!("entity '{id}' skin_seed failed to compile: {e}"))?;
+                    }
+                    // §24b 聲從身出: a being may carry a sound cell — its voice
+                    // sits at ITS coordinates, spatialized by the world. The
+                    // seed passes the same SOUND fence as the world's ambient.
+                    if let Some(seed) = ent.get("sound_seed").and_then(|s| s.as_str()) {
+                        compile_check(seed, &SOUND_PARAMS, &SOUND_IMPORTS, 4096)
+                            .map_err(|e| format!("entity '{id}' sound_seed failed to compile: {e}"))?;
                     }
                     if let Some(realm) = ent.get("realm").and_then(|r| r.as_str()) {
                         if !matches!(realm, "sky" | "ground") {
@@ -1494,6 +1501,9 @@ async fn main() {
         .route("/", get(index))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .nest_service("/pkg-skins", ServeDir::new("pkg-skins"))
+        // §24b the 聲塵器 — the zero-import sound-dust engine (shengchen), a
+        // raw wasm the audio thread instantiates with an EMPTY import object
+        .nest_service("/pkg-dust", ServeDir::new("pkg-dust"))
         // version-skew guard: the page is no-store but /pkg used to be
         // heuristically cached — a fresh HTML importing a new export from a
         // stale pkg kills the whole module (dead buttons). no-cache = may
@@ -1831,6 +1841,50 @@ mod tests {
         assert!(validate(&overreach).unwrap_err().contains("failed to compile"));
         let missing = serde_json::json!({"surface":"sound"});
         assert!(validate(&missing).unwrap_err().contains("lacks"));
+    }
+
+    #[test]
+    fn entity_sound_seed_validates_and_rejects() {
+        // a bird that chirps by its own law — 聲從身出
+        let ok = serde_json::json!({
+            "surface": "field",
+            "world": {
+                "grid": 64,
+                "cells": [{"id":"ground","mode":"once","order":1,"script":"fw(0.0, 5.0, 5.0, 2.0);\n1.0"}],
+                "entities": [{"id": "b1", "type": "bird", "at": [10.0, 10.0],
+                    "skin_seed": "hue(0.6);\ndisc(px, py, s * 0.2);\n0.0",
+                    "sound_seed": "let ph = get(0.0) + 1.0;\nset(0.0, ph);\nif ph % 9000.0 < 1.0 { chirp(2500.0, 3200.0, 0.08); }\n0.0"}]
+            }
+        });
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        // over-reach dies at the fence: mv() is an ENTITY faculty, not a sound one
+        let bad = serde_json::json!({
+            "surface": "field",
+            "world": {
+                "grid": 64,
+                "cells": [{"id":"ground","mode":"once","order":1,"script":"fw(0.0, 5.0, 5.0, 2.0);\n1.0"}],
+                "entities": [{"id": "b1", "type": "bird", "at": [10.0, 10.0],
+                    "skin_seed": "hue(0.6);\ndisc(px, py, s * 0.2);\n0.0",
+                    "sound_seed": "mv(0.1, 0.0);\n0.0"}]
+            }
+        });
+        let e = validate(&bad).unwrap_err();
+        assert!(e.contains("sound_seed"), "{e}");
+    }
+
+    #[test]
+    fn dust_engine_wasm_has_zero_imports() {
+        // the fence's extreme: the committed shengchen wasm imports NOTHING —
+        // it cannot touch anything; it can only vibrate. Machine-checked.
+        let bytes = std::fs::read("../pkg-dust/shengchen.wasm")
+            .expect("pkg-dust/shengchen.wasm missing — build shengchen for wasm32-unknown-unknown and copy it");
+        let mut imports = 0;
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            if let Ok(wasmparser::Payload::ImportSection(r)) = payload {
+                imports += r.count();
+            }
+        }
+        assert_eq!(imports, 0, "the dust engine grew hands — its import table must stay EMPTY");
     }
 
     #[test]

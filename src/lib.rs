@@ -287,12 +287,21 @@ pub fn compile_draw3d_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// sequencing. No pointer, no drawing, no reach — and the master volume is
 /// host law, outside the cell's world entirely.
 pub const SOUND_PARAMS: [&str; 1] = ["t"];
-pub const SOUND_IMPORTS: [codegen::HostFn; 5] = [
+pub const SOUND_IMPORTS: [codegen::HostFn; 11] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "get", n_args: 1, returns: true },
     codegen::HostFn { name: "set", n_args: 2, returns: false },
-    codegen::HostFn { name: "noise", n_args: 0, returns: true }, // white noise in -1..1 — filter it (get/set) for rain/wind/waterfall/snow
+    codegen::HostFn { name: "noise", n_args: 0, returns: true }, // white noise in -1..1 — filter it (get/set) for texture
+    // §24b the 聲塵 primitives — the host lends the PHYSICS (shengchen, a
+    // zero-import Rust engine on the audio thread); the cell's 自性 decides
+    // WHEN. 動則有聲: no call, no sound. Procedures, like the skin's disc().
+    codegen::HostFn { name: "drop", n_args: 1, returns: false }, // one raindrop: drop(bright 0..1)
+    codegen::HostFn { name: "bubble", n_args: 1, returns: false }, // one water bubble: bubble(pitch 0..1)
+    codegen::HostFn { name: "chirp", n_args: 3, returns: false }, // one bird syllable: chirp(f1, f2, dur<=0.3)
+    codegen::HostFn { name: "strike", n_args: 2, returns: false }, // one modal strike: strike(f0, energy 0..1)
+    codegen::HostFn { name: "voice", n_args: 3, returns: false }, // the throat: voice(f0, vowel 0..4, nasal 0..1); f0<=0 closes it
+    codegen::HostFn { name: "breath", n_args: 1, returns: false }, // wind/air layer: breath(level 0..1)
 ];
 
 /// Compile a sound seed. Fuel is small and per-call: at 44.1kHz a runaway loop
