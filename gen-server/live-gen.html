@@ -2047,7 +2047,7 @@ in vec3 p; in vec3 n;
 in vec4 r0; in vec4 r1; in vec4 r2;
 in vec4 q0; in vec4 q1; in vec4 q2;
 in vec4 m;
-uniform mat4 vp;
+uniform mat4 vp; uniform float shOn;
 out vec3 vn; out vec3 vc; out vec3 vwp; out vec3 vlp; out vec3 vmat; out float vd;
 void main(){
   vec3 wp = vec3(dot(r0.xyz, p) + r0.w, dot(r1.xyz, p) + r1.w, dot(r2.xyz, p) + r2.w);
@@ -2055,14 +2055,18 @@ void main(){
   vc = vec3(q0.w, q1.w, q2.w);
   vwp = wp; vlp = p; vmat = m.xyz;
   vec4 cp = vp * vec4(wp, 1.0);
+  // the light pass (shOn=0): a LUMINOUS thing casts light, not shadow — clip it
+  if (shOn < 0.5 && m.y > 0.5) cp = vec4(0.0, 0.0, -3.0, 1.0);
   vd = cp.w; gl_Position = cp;
 }`;
     const VS_T = `#version 300 es
 in vec3 p; in vec3 n; in vec3 col; in vec3 mm;
-uniform mat4 vp;
+uniform mat4 vp; uniform float shOn;
 out vec3 vn; out vec3 vc; out vec3 vwp; out vec3 vlp; out vec3 vmat; out float vd;
 void main(){ vn = n; vc = col; vwp = p; vlp = p; vmat = mm;
-  vec4 cp = vp * vec4(p, 1.0); vd = cp.w; gl_Position = cp; }`;
+  vec4 cp = vp * vec4(p, 1.0);
+  if (shOn < 0.5 && mm.y > 0.5) cp = vec4(0.0, 0.0, -3.0, 1.0);
+  vd = cp.w; gl_Position = cp; }`;
     const mk = (vs, fs, binds) => {
       const sh = (ty, src) => { const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
         if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
@@ -2394,7 +2398,8 @@ function renderBodiesFP(list, W, H) {
   S.camv = null; S.lightv = null;
   for (const e of list) {
     sampleFieldAll(e.x, e.y, fieldWorld.grid, CPU_SMP);
-    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K;
+    // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
+    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
     R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
     try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
   }
@@ -2548,12 +2553,12 @@ void main(){
   float sh = shadowAt(vwp, nn, L);
   float diff = max(dot(nn, -L), 0.0);
   vec3 amb = mix(vec3(0.40, 0.42, 0.48), vec3(0.56, 0.58, 0.64), nn.y * 0.5 + 0.5);
-  float dk = mix(0.55, 0.30, wdepth); // the waves may glint; the flat lies calm
+  float dk = mix(0.55, 0.24, wdepth); // the waves may glint; the flat lies calm
   vec3 c = palette(s) * (amb + dk * diff * sh);
-  if (wdepth > 0.003) { // 月光鋪水路 — the moon's road on the breathing water
+  if (wdepth > 0.003) { // 月光鋪水路 — a narrow road, not a flood of milk
     vec3 V = normalize(eye - vwp);
     vec3 Hh = normalize(V - L);
-    c += wdepth * pow(max(dot(nn, Hh), 0.0), 110.0) * vec3(0.85, 0.9, 1.0) * 0.55 * sh;
+    c += wdepth * pow(max(dot(nn, Hh), 0.0), 160.0) * vec3(0.85, 0.9, 1.0) * 0.3 * sh;
   }
   float d = length(vwp - eye);
   float fog = pow(min(d / (grid * 1.15), 1.0), 1.35) * 0.8; // same veil as the CPU eye
@@ -2728,7 +2733,8 @@ function renderFieldFPGL() {
   for (const e of ENTITIES) {
     if (!e.bodyRun) continue;
     sampleFieldAll(e.x, e.y, g, CPU_SMP);
-    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K;
+    // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
+    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
     R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
     try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
   }
