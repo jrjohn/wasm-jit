@@ -77,7 +77,7 @@ const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
 // Sound ABI (§24 — the audio shader), shared likewise.
 const SOUND_PARAMS: [&str; 1] = wasm_jit::SOUND_PARAMS;
-const SOUND_IMPORTS: [HostFn; 4] = wasm_jit::SOUND_IMPORTS;
+const SOUND_IMPORTS: [HostFn; 5] = wasm_jit::SOUND_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
 const DRAW3D_IMPORTS: [HostFn; 30] = wasm_jit::DRAW3D_IMPORTS;
@@ -846,6 +846,7 @@ Answer only from what these report. If a faculty does not tell you something (e.
 Reply with ONE JSON object only (no prose outside it):
 {"say":"<one short in-character sentence (reply to words, or react) — may be empty>",
  "thought":"<one short private thought>",
+ "sing":"<OPTIONAL: the actual words to be SPOKEN ALOUD in a real voice — the world lends you its voice (the browser's). This is different from 'say' (which is only shown as text): whatever you put in 'sing' is VOCALIZED. If the visitor asks you to sing, to speak aloud, to say something out loud, or to make up a song, you MUST put the sung/spoken words HERE in 'sing' (a short verse or line, under 120 chars) — do NOT just describe it in 'say'. YOUR MIND writes the words; the voice is the world's.>",
  "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
@@ -853,6 +854,10 @@ Reply with ONE JSON object only (no prose outside it):
  "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
  "attrs":{"name":"Ink","mood":"content"},   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>
  "remember":"<OPTIONAL — one short line (≤80 chars) worth keeping. It joins your journal and returns to you in every future perception. Choose rarely and fold well: the journal holds only 12 lines and the oldest falls away, so keep the ESSENCE of a moment, not its transcript (e.g. 'first snow tonight; the line stayed slack'). Remembering is pure data about yourself — it never widens what you can touch.>}
+
+SAY vs SING — a crucial difference: 'say' is only shown as TEXT; 'sing' is VOCALIZED aloud in a real voice. So if you are asked to sing/perform/speak aloud, the actual sung words go in 'sing', NOT in 'say'. Do not merely announce a song in 'say' and leave 'sing' empty — that produces silence. Sing the words themselves.
+Example — asked "sing me a short song": {"say":"", "thought":"a tune for them", "sing":"Down by the cold river the willow leans low, / the water knows secrets the old stones won't show."}
+Example — asked "say hello out loud": {"say":"", "sing":"Hello, traveller — well met on this road."}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
@@ -986,6 +991,9 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(m) = obj.get("remember") {
                         resp["remember"] = m.clone(); // a moment the being chose to keep — its own folded past
+                    }
+                    if let Some(s) = obj.get("sing").filter(|v| v.is_string()) {
+                        resp["sing"] = s.clone(); // §24 words the world will vocalize (host-lent voice)
                     }
                     return (StatusCode::OK, Json(resp));
                 }

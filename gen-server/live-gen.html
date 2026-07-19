@@ -1605,6 +1605,26 @@ function journalMark(ent, line) {
   if (ent.journal.length > JOURNAL_CAP) ent.journal.shift(); // the oldest moment falls away
 }
 
+// §24 the human voice — an ASSET the world lends, not a program the seed runs:
+// the being's mind (real Claude) writes the words; the browser speaks them.
+let VOICES = null;
+function speakAloud(ent, text) {
+  if (!('speechSynthesis' in window)) { say('thought', `(${ent.id} would sing, but this world has no voice)`); return; }
+  if (AUDIO && AUDIO.muted) return; // the mute covers the whole ear
+  say('being', `${ent.id} 🎵 ${text}`);
+  const u = new SpeechSynthesisUtterance(text.slice(0, 180));
+  if (!VOICES) VOICES = speechSynthesis.getVoices();
+  // a per-being timbre from a stable hash of its id — same being, same voice
+  let h = 0; for (let i = 0; i < ent.id.length; i++) h = (h * 31 + ent.id.charCodeAt(i)) >>> 0;
+  const pool = VOICES.filter(v => /en|zh/.test(v.lang));
+  if (pool.length) u.voice = pool[h % pool.length];
+  u.rate = 0.82 + (h % 20) / 100;   // sung, slow
+  u.pitch = 0.7 + (h % 40) / 100;
+  try { speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
+}
+if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => { VOICES = speechSynthesis.getVoices(); };
+window.__speakAloud = (id, text) => speakAloud({ id: id || 'weng' }, text); // e2e: drive the voice without a live mind
+
 async function mindBeat(ent, words) {
   const st = ent.mindState;
   if (!st || st.busy || !fieldWorld) return;
@@ -1624,6 +1644,7 @@ async function mindBeat(ent, words) {
     if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
     if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
     if (d.say) say('being', `${ent.id}: ${d.say}`);
+    if (typeof d.sing === 'string' && d.sing.trim()) speakAloud(ent, d.sing.trim()); // §24: the world lends a voice, the words are the being's
     if (d.intent && typeof d.intent === 'object') {
       for (const [k, v] of Object.entries(d.intent)) {
         const i = Number(k), val = Number(v);
@@ -2333,7 +2354,8 @@ class SeedSynth extends AudioWorkletProcessor {
         try {
           const slots = this.slots;
           const env = { sin: Math.sin, cos: Math.cos,
-            get: (i) => slots[i & 31] || 0, set: (i, v) => { slots[i & 31] = v; } };
+            get: (i) => slots[i & 31] || 0, set: (i, v) => { slots[i & 31] = v; },
+            noise: () => Math.random() * 2 - 1 };  // §24: the texture primitive — filter it for rain/wind/snow
           this.run = new WebAssembly.Instance(new WebAssembly.Module(d.bytes), { env }).exports.run;
           this.dead = false; this.n = 0; this.slots.fill(0);
         } catch (err) { this.run = null; this.port.postMessage({ err: String(err) }); }

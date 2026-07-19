@@ -226,7 +226,7 @@
   ],
   "grid": 96,
   "view": "top",
-  "ambient": "let breath = 0.5 + 0.5 * sin(t * 0.19);\nlet w1 = sin(6.2832 * 88.0 * t + sin(6.2832 * 37.0 * t) * 3.5);\nlet w2 = sin(6.2832 * 131.0 * t + sin(6.2832 * 53.0 * t) * 2.5);\nlet wind = (w1 * 0.6 + w2 * 0.4) * (0.06 + 0.08 * breath);\nlet ph = t % 9.0;\nlet env = max(1.0 - ph * 0.8, 0.0);\nlet bell = (sin(6.2832 * 261.6 * ph) * 0.6 + sin(6.2832 * 392.0 * ph) * 0.3) * env * env * 0.14;\nlet river = sin(6.2832 * 52.0 * t) * 0.045 * (0.6 + 0.4 * sin(t * 0.09));\nwind + bell + river"
+  "ambient": "let wlp = get(0.0) * 0.986 + noise() * 0.014;\nset(0.0, wlp);\nlet gust = 0.35 + 0.4 * sin(t * 0.13) + 0.15 * sin(t * 0.37);\nlet wind = wlp * gust * 2.6;\nlet slp = get(1.0) * 0.4 + noise() * 0.6;\nset(1.0, slp);\nlet snow = slp * 0.05 * (0.6 + 0.4 * sin(t * 0.7));\nlet ph = t % 11.0;\nlet env = max(1.0 - ph * 0.9, 0.0);\nlet bell = (sin(6.2832 * 261.6 * ph) * 0.6 + sin(6.2832 * 392.0 * ph) * 0.3) * env * env * 0.1;\nlet river = sin(6.2832 * 48.0 * t) * 0.04 * (0.6 + 0.4 * sin(t * 0.08));\nwind + snow + bell + river"
  },
  "surface": "field"
 }

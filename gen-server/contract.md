@@ -240,7 +240,13 @@ syntax; end with 0.0.
 "seed" = one DSL script, run(t) -> f64, called ONCE PER AUDIO SAMPLE (44100×/s). t = seconds.
 Return one sample in −1..1 (the host clamps; keep amplitudes well under 1 to avoid clipping —
 sum voices at ~0.2–0.3 each). Capabilities: sin cos + get(slot)/set(slot,v) (32 slots for
-envelopes, phase, simple sequencing). NO drawing, NO pointer, NO reach. The master volume is
+envelopes, phase, sequencing) + noise() (white noise in −1..1). NO drawing, NO pointer, NO reach.
+- sin/cos are for TONES and music (a bell, a chord, a melody). For REAL-WORLD TEXTURES (rain,
+  wind, snow, waterfall, ocean, fire, static) use noise() and FILTER it — pure tones sound
+  like a test signal, filtered noise sounds real. Filtering = a one-pole lowpass in a slot:
+  RAIN: "let lp = get(0.0) * 0.6 + noise() * 0.4;\nset(0.0, lp);\nlp * 0.4"  (brighter = hiss/snow)
+  WIND: "let lp = get(0.0) * 0.985 + noise() * 0.015;\nset(0.0, lp);\nlp * (0.5 + 0.5 * sin(t * 0.2)) * 1.6"  (heavy lowpass + slow amplitude = gusts)
+  OCEAN/WATERFALL: like wind but faster amplitude swell. The master volume is
 the host's, not yours.
 - a pure tone: sin(6.2832 * 440.0 * t) * 0.3
 - vibrato / FM: sin(6.2832 * 220.0 * t + sin(6.2832 * 6.0 * t) * 2.0) * 0.3

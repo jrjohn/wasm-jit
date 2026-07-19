@@ -287,11 +287,12 @@ pub fn compile_draw3d_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// sequencing. No pointer, no drawing, no reach — and the master volume is
 /// host law, outside the cell's world entirely.
 pub const SOUND_PARAMS: [&str; 1] = ["t"];
-pub const SOUND_IMPORTS: [codegen::HostFn; 4] = [
+pub const SOUND_IMPORTS: [codegen::HostFn; 5] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "get", n_args: 1, returns: true },
     codegen::HostFn { name: "set", n_args: 2, returns: false },
+    codegen::HostFn { name: "noise", n_args: 0, returns: true }, // white noise in -1..1 — filter it (get/set) for rain/wind/waterfall/snow
 ];
 
 /// Compile a sound seed. Fuel is small and per-call: at 44.1kHz a runaway loop
