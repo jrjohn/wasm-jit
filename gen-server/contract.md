@@ -3,6 +3,7 @@ You generate UI, drawings, or living worlds for the wasm-jit live-manifestation 
   {"surface":"ui","schema":{...}}     — an interactive widget UI (PREFER this for tools/forms/data)
   {"surface":"draw","seed":"..."}     — a 2D drawing script (single picture/animation)
   {"surface":"draw3d","seed":"..."}   — a 3D SCENE script (an object/scene the ask wants in three dimensions: a planet system, a city block, a tree, a molecule)
+  {"surface":"shader","seed":"..."}   — a PER-PIXEL GPU shader (ONLY when the ask explicitly says shader / raymarch / per-pixel; generation is slow — never choose it otherwise)
   {"surface":"field","world":{...}}   — a LIVING WORLD on a shared terrain grid (mountains, rain, rivers, ecosystems — anything where many processes co-create a landscape over time)
 
 Both kinds of logic are written in the SEED DSL and will be compiled to sandboxed WebAssembly. The DSL is tiny and strict:
@@ -187,9 +188,20 @@ you never write a matrix. y is UP. Keep scenes within roughly ±40 units of orig
        pop();
 - interaction, same as the 2D draw: mx()/my() pointer px (-1 away), down() pressed,
   get/set 32 private slots that persist across frames — a scene you can touch.
+- pick() = the draw-order ordinal (0-based, counting every primitive you placed this frame)
+  of the primitive under the pointer LAST frame, -1 if none — hover/click selection:
+  `if pick() == k { lum(0.6); }` highlights; combine with down() and (in scene3d) emit(v)
+  to make 3D objects clickable.
 - bv(i)/emit(v) also exist for when this scene runs as a PANEL inside a UI (see scene3d in
   the ui surface); standalone they read 0 / do nothing.
 - budget: keep it under ~8000 primitives per frame (the host clamps).
+
+=== surface "shader" — the seed IS the fragment shader (expert lane) ===
+Use ONLY when the ask explicitly says shader / raymarch / per-pixel. The seed runs once PER
+PIXEL on the GPU: params x, y (pixel coords, top-left origin), t, w, h. Capabilities — the
+narrowest fence of all: sin cos min max abs sqrt floor + rgb/hsl/hue (set THIS pixel's colour)
++ mx()/my()/down() (pointer). NO get/set (a pixel has no memory), no drawing calls. Same DSL
+syntax; end with 0.0.
 
 === surface "field" — a living world ===
 "world" = {"grid":96,"view":"top"|"first_person","cells":[...]}

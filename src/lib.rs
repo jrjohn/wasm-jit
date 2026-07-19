@@ -213,7 +213,7 @@ pub fn compile_skin_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// — camera matrices, depth, projection, lighting are host law, so a seed can
 /// never write a matrix and the model never has to. y is up.
 pub const DRAW3D_PARAMS: [&str; 3] = ["t", "w", "h"];
-pub const DRAW3D_IMPORTS: [codegen::HostFn; 29] = [
+pub const DRAW3D_IMPORTS: [codegen::HostFn; 30] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "hue", n_args: 1, returns: false },  // colour verbs — same names as 2D
@@ -253,6 +253,10 @@ pub const DRAW3D_IMPORTS: [codegen::HostFn; 29] = [
     //    node's on_input; standalone, bv reads 0 and emit is a no-op. ──
     codegen::HostFn { name: "bv", n_args: 1, returns: true },
     codegen::HostFn { name: "emit", n_args: 1, returns: false },
+    // pick(): the ordinal (draw order, 0-based) of the primitive under the
+    // pointer LAST frame, -1 if none — hover/click selection as host law (the
+    // host ray-casts; the seed only reads a number).
+    codegen::HostFn { name: "pick", n_args: 0, returns: true },
 ];
 
 /// Compile a 3D scene seed against the draw3d ABI.
@@ -413,6 +417,16 @@ pub fn compile_to_wasm_fueled(src: &str, budget: u32) -> Result<Vec<u8>, JsError
 pub fn transpile_to_js(src: &str) -> Result<String, JsError> {
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     Ok(parser::to_js(&prog))
+}
+
+/// L4 — the seed IS a GPU fragment shader: DSL → GLSL ES 3.00 body. The shader
+/// fence is the narrowest of all: pure math + the colour verbs + the pointer
+/// uniforms; no get/set (a pixel has no memory), no drawing calls, no reach.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn transpile_to_glsl(src: &str) -> Result<String, JsError> {
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    parser::to_glsl(&prog).map_err(|e| JsError::new(&e))
 }
 
 /// The default benchmark kernel, hand-written in Rust and AOT-compiled into

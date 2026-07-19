@@ -80,7 +80,7 @@ const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
-const DRAW3D_IMPORTS: [HostFn; 29] = wasm_jit::DRAW3D_IMPORTS;
+const DRAW3D_IMPORTS: [HostFn; 30] = wasm_jit::DRAW3D_IMPORTS;
 
 #[derive(Deserialize)]
 struct GenReq {
@@ -606,6 +606,20 @@ fn validate(obj: &Value) -> Result<(), String> {
                 .ok_or("surface \"draw3d\" lacks \"seed\"")?;
             compile_check(seed, &DRAW3D_PARAMS, &DRAW3D_IMPORTS, 5_000_000)
                 .map_err(|e| format!("draw3d seed failed to compile: {e}"))
+        }
+        Some("shader") => {
+            // L4 expert lane: validate = parse + transpile through the shader
+            // fence (math + colour + pointer only); the GLSL compiler in the
+            // browser is the final gate
+            let seed = obj
+                .get("seed")
+                .and_then(|s| s.as_str())
+                .ok_or("surface \"shader\" lacks \"seed\"")?;
+            let prog = wasm_jit::parser::parse(seed)
+                .map_err(|e| format!("shader seed failed to parse: {e}"))?;
+            wasm_jit::parser::to_glsl(&prog)
+                .map_err(|e| format!("shader seed rejected: {e}"))?;
+            Ok(())
         }
         Some("field") => {
             let world = obj.get("world").ok_or("surface \"field\" lacks \"world\"")?;
@@ -1734,13 +1748,25 @@ mod tests {
     }
 
     #[test]
+    fn shader_surface_validates_and_rejects() {
+        // L4: pure math + colour + pointer transpiles; memory/drawing/net die at the fence
+        let ok = serde_json::json!({"surface":"shader","seed":
+            "let u = x / w;\nlet v = y / h;\nlet d = sqrt((u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5));\nhsl(d + t * 0.1, 0.7, 0.5);\n0.0"});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        for (bad, why) in [("set(0.0, x);\n0.0", "memory"), ("disc(1.0, 2.0, 3.0);\n0.0", "drawing"), ("fetch(t)", "net")] {
+            let w = serde_json::json!({"surface":"shader","seed":bad});
+            assert!(validate(&w).is_err(), "shader fence must reject {why}");
+        }
+    }
+
+    #[test]
     fn draw3d_abi_matches_crate() {
         assert_eq!(DRAW3D_IMPORTS.len(), wasm_jit::DRAW3D_IMPORTS.len());
         for (a, b) in DRAW3D_IMPORTS.iter().zip(wasm_jit::DRAW3D_IMPORTS.iter()) {
             assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
         }
         // world-space primitives only — no matrix-shaped import may ever appear
-        for f in ["sphere", "box", "tri", "cam", "light"] {
+        for f in ["sphere", "box", "tri", "cam", "light", "bv", "emit", "pick"] {
             assert!(DRAW3D_IMPORTS.iter().any(|i| i.name == f), "draw3d ABI missing {f}");
         }
     }

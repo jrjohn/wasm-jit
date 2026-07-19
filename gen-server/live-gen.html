@@ -145,7 +145,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
 await initSkins();
@@ -558,7 +558,7 @@ function render(node) {
 function manifestUi(schema) {
   drawRun = null;
   fieldWorld = null;
-  D3.main = null; SC3 = [];
+  D3.main = null; SHD.prog = null; SC3 = [];
   $('cv').style.display = 'none';
   const t0 = performance.now();
   compileCells(schema.cells);
@@ -1280,7 +1280,7 @@ function renderField() {
 
 function manifestField(world) {
   drawRun = null;
-  D3.main = null; SC3 = []; WIDGETS = [];
+  D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
   const compiled = compileWorldCells(world);
   ENTITIES = compileEntities(world, compiled.grid);
@@ -1597,7 +1597,7 @@ const env = {
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
   fieldWorld = null;
-  D3.main = null; SC3 = []; WIDGETS = [];
+  D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
   const t0 = performance.now();
   const bytes = compile_draw_wasm(seed);
@@ -1834,7 +1834,7 @@ void main(){ vn = n; vc = col; vwp = p; vlp = p; vmat = mm;
       lvp: gl.getUniformLocation(pr, 'lvp'), shmap: gl.getUniformLocation(pr, 'shmap') });
     Object.assign(D3, {
       gl, gcv, progI, progT, kinds, triVAO, triB,
-      triD: new Float32Array(D3_MAX.tri * 36), nt: 0,
+      triD: new Float32Array(D3_MAX.tri * 36), triOrd: new Int32Array(D3_MAX.tri), nt: 0, ordN: 0,
       uI: uni(progI), uT: uni(progT), shTex, shFBO, white,
       stack: [affI()], col: [0.55, 0.66, 0.9], shine: 0.15, lumv: 0, patv: 0,
       camv: null, lightv: null, slots: new Float64Array(32),
@@ -1851,7 +1851,7 @@ function d3inst(kind, M) {
   const N = nrm3(M), o = K.n * D3_STRIDE, d = K.data, C = D3.col;
   for (let r = 0; r < 3; r++) { d[o + r * 4] = M[r * 4]; d[o + r * 4 + 1] = M[r * 4 + 1]; d[o + r * 4 + 2] = M[r * 4 + 2]; d[o + r * 4 + 3] = M[r * 4 + 3]; }
   for (let r = 0; r < 3; r++) { d[o + 12 + r * 4] = N[r * 3]; d[o + 13 + r * 4] = N[r * 3 + 1]; d[o + 14 + r * 4] = N[r * 3 + 2]; d[o + 15 + r * 4] = C[r]; }
-  d[o + 24] = D3.shine; d[o + 25] = D3.lumv; d[o + 26] = D3.patv; d[o + 27] = 0;
+  d[o + 24] = D3.shine; d[o + 25] = D3.lumv; d[o + 26] = D3.patv; d[o + 27] = D3.ordN++;
   K.n++;
 }
 function d3env(S) {
@@ -1900,6 +1900,9 @@ function d3env(S) {
     // bound cell outputs in and routes one emission per frame out
     bv: i => { const id = S.binds[i | 0]; return id != null ? (outputs[id] ?? 0) : 0; },
     emit: v => { S.emitPending = v; },
+    // pick(): what the pointer touched LAST frame — the host ray-casts, the
+    // seed reads one number (draw-order ordinal, -1 = nothing)
+    pick: () => S.hover ?? -1,
   };
 }
 function m4persp(fovy, asp, n, f) {
@@ -1953,10 +1956,84 @@ function mkScene3(run, ptr, binds, onEmit) {
            camv: null, lightv: null,
            orbit: { yaw: 0.65, pitch: 0.4, dist: 26 }, lastPX: -1, lastPY: -1, wasDown: false };
 }
+function d3pick(S, c, W, H) {
+  const P = S.ptr;
+  if (!P || P.x < 0 || P.y < 0) return -1;
+  // the pointer ray, from the same camera the eye uses
+  let zx = c[0] - c[3], zy = c[1] - c[4], zz = c[2] - c[5];
+  const zl = Math.hypot(zx, zy, zz) || 1; zx /= zl; zy /= zl; zz /= zl;
+  let xx = zz, xy = 0, xz = -zx;
+  const xl = Math.hypot(xx, xy, xz);
+  if (xl < 1e-4) { xx = 1; xy = 0; xz = 0; } else { xx /= xl; xz /= xl; }
+  const yx = zy * xz - zz * xy, yy = zz * xx - zx * xz, yz = zx * xy - zy * xx;
+  const th = Math.tan(0.48);
+  const nx = (P.x / W * 2 - 1) * th * (W / H), ny = (1 - P.y / H * 2) * th;
+  let dx = xx * nx + yx * ny - zx, dy = xy * nx + yy * ny - zy, dz = xz * nx + yz * ny - zz;
+  const dl = Math.hypot(dx, dy, dz); dx /= dl; dy /= dl; dz /= dl;
+  const ox = c[0], oy = c[1], oz = c[2];
+  const R = D3;
+  let best = Infinity, bestOrd = -1;
+  for (const k of ['sph', 'box', 'cyl', 'cone']) {
+    const K = R.kinds[k], d = K.data;
+    const lo = k === 'box' ? -0.5 : -1, hi = k === 'box' ? 0.5 : 1;   // local x/z bounds
+    const ylo = k === 'box' ? -0.5 : 0, yhi = k === 'box' ? 0.5 : 1;  // local y bounds
+    for (let i = 0; i < K.n; i++) {
+      const o = i * D3_STRIDE;
+      const tx = d[o + 3], ty = d[o + 7], tz = d[o + 11];
+      let t;
+      if (k === 'sph') {
+        const r = Math.hypot(d[o], d[o + 4], d[o + 8]); // column norm = radius under rotation
+        const lx = ox - tx, ly = oy - ty, lz = oz - tz;
+        const b = lx * dx + ly * dy + lz * dz;
+        const disc = b * b - (lx * lx + ly * ly + lz * lz - r * r);
+        if (disc < 0) continue;
+        const sq = Math.sqrt(disc);
+        t = -b - sq; if (t < 1e-4) t = -b + sq;
+      } else {
+        // into the instance's local frame via M3⁻¹ = (nrm rows)ᵀ; slab test
+        const vx = ox - tx, vy = oy - ty, vz = oz - tz;
+        const lox = d[o+12]*vx + d[o+16]*vy + d[o+20]*vz, loy = d[o+13]*vx + d[o+17]*vy + d[o+21]*vz, loz = d[o+14]*vx + d[o+18]*vy + d[o+22]*vz;
+        const ldx = d[o+12]*dx + d[o+16]*dy + d[o+20]*dz, ldy = d[o+13]*dx + d[o+17]*dy + d[o+21]*dz, ldz = d[o+14]*dx + d[o+18]*dy + d[o+22]*dz;
+        let t0 = -Infinity, t1 = Infinity;
+        const slab = (oo, dd, mn, mx) => {
+          if (Math.abs(dd) < 1e-12) return oo >= mn && oo <= mx;
+          let a = (mn - oo) / dd, b2 = (mx - oo) / dd;
+          if (a > b2) { const q = a; a = b2; b2 = q; }
+          if (a > t0) t0 = a; if (b2 < t1) t1 = b2;
+          return t0 <= t1;
+        };
+        if (!slab(lox, ldx, lo, hi)) continue;
+        if (!slab(loy, ldy, ylo, yhi)) continue;
+        if (!slab(loz, ldz, lo, hi)) continue;
+        t = t0 > 1e-4 ? t0 : t1;
+      }
+      if (t > 1e-4 && t < best) { best = t; bestOrd = d[o + 27]; }
+    }
+  }
+  for (let i = 0; i < R.nt; i++) { // Möller–Trumbore on world-space triangles
+    const q = i * 36;
+    const ax = R.triD[q], ay = R.triD[q+1], az = R.triD[q+2];
+    const e1x = R.triD[q+12]-ax, e1y = R.triD[q+13]-ay, e1z = R.triD[q+14]-az;
+    const e2x = R.triD[q+24]-ax, e2y = R.triD[q+25]-ay, e2z = R.triD[q+26]-az;
+    const px = dy*e2z - dz*e2y, py = dz*e2x - dx*e2z, pz = dx*e2y - dy*e2x;
+    const det = e1x*px + e1y*py + e1z*pz;
+    if (Math.abs(det) < 1e-9) continue;
+    const inv = 1 / det;
+    const sx = ox-ax, sy = oy-ay, sz = oz-az;
+    const u = (sx*px + sy*py + sz*pz) * inv;
+    if (u < 0 || u > 1) continue;
+    const qx = sy*e1z - sz*e1y, qy = sz*e1x - sx*e1z, qz = sx*e1y - sy*e1x;
+    const v = (dx*qx + dy*qy + dz*qz) * inv;
+    if (v < 0 || u + v > 1) continue;
+    const t = (e2x*qx + e2y*qy + e2z*qz) * inv;
+    if (t > 1e-4 && t < best) { best = t; bestOrd = R.triOrd[i]; }
+  }
+  return bestOrd;
+}
 function renderScene(S, t, tctx, W, H) {
   const R = D3, gl = R.gl;
   for (const k of ['sph', 'box', 'cyl', 'cone']) R.kinds[k].n = 0;
-  R.nt = 0; R.stack = [affI()];
+  R.nt = 0; R.ordN = 0; R.stack = [affI()];
   R.col = [0.55, 0.66, 0.9]; R.shine = 0.15; R.lumv = 0; R.patv = 0;
   S.camv = null; S.lightv = null; S.emitPending = null;
   try { S.run(t, W, H); }
@@ -1973,6 +2050,7 @@ function renderScene(S, t, tctx, W, H) {
     const cp = Math.cos(ob.pitch), sp = Math.sin(ob.pitch);
     c = [Math.sin(ob.yaw) * cp * ob.dist, sp * ob.dist + 1.5, Math.cos(ob.yaw) * cp * ob.dist, 0, 1.5, 0];
   }
+  S.hover = d3pick(S, c, W, H); // next frame's pick() answer — host law, one ray
   const Lraw = S.lightv ?? [-0.5, -1, -0.35];
   const ll = Math.hypot(Lraw[0], Lraw[1], Lraw[2]) || 1;
   const L = [Lraw[0] / ll, Lraw[1] / ll, Lraw[2] / ll];
@@ -2038,8 +2116,82 @@ function makeScene3D(node) {
   } catch (e) { $('stage-status').textContent = `scene3d refused by the fence: ${e.message ?? e}`; }
   return cvs;
 }
+
+// ---------------- shader surface (L4): the seed IS a GPU fragment shader ----
+// The narrowest fence of all: pure math + the colour verbs + the pointer.
+// A pixel has no memory (no get/set), no drawing calls, no reach — the DSL
+// transpiles to GLSL and the GPU runs it at full resolution, per pixel.
+const SHD = { prog: null };
+function manifestShader(seed) {
+  drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null;
+  if (!D3.gl && !initD3()) { say('err', 'shader needs WebGL2 — unavailable here'); return; }
+  const t0 = performance.now();
+  const body = transpile_to_glsl(seed); // the fence: over-reach dies right here
+  const gl = D3.gl;
+  const FS = `#version 300 es
+precision highp float;
+uniform float uT; uniform float uW; uniform float uH;
+uniform float uMx; uniform float uMy; uniform float uDown;
+out vec4 fragColor;
+vec3 _hsl(float h, float s, float l){
+  h = fract(fract(h) + 1.0); s = clamp(s, 0.0, 1.0); l = clamp(l, 0.0, 1.0);
+  float a = s * min(l, 1.0 - l);
+  vec3 k = mod(vec3(0.0, 8.0, 4.0) + h * 12.0, 12.0);
+  return l - a * clamp(min(k - 3.0, 9.0 - k), -1.0, 1.0);
+}
+void main(){
+  float v_x = gl_FragCoord.x;
+  float v_y = uH - gl_FragCoord.y;
+  float v_t = uT; float v_w = uW; float v_h = uH;
+  vec3 _oc = vec3(0.0);
+  float _unused = 0.0;
+${body}
+  fragColor = vec4(_oc, 1.0);
+}`;
+  const VS = `#version 300 es\nin vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }`;
+  const sh = (ty, src) => { const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
+    if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS));
+  gl.bindAttribLocation(pr, 0, 'p');
+  gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+  if (!SHD.vao) {
+    SHD.vao = gl.createVertexArray(); gl.bindVertexArray(SHD.vao);
+    const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+  }
+  SHD.prog = pr;
+  SHD.u = { t: gl.getUniformLocation(pr, 'uT'), w: gl.getUniformLocation(pr, 'uW'), h: gl.getUniformLocation(pr, 'uH'),
+            mx: gl.getUniformLocation(pr, 'uMx'), my: gl.getUniformLocation(pr, 'uMy'), dn: gl.getUniformLocation(pr, 'uDown') };
+  $('stage').innerHTML = '';
+  cv.style.display = 'block';
+  $('stage-status').textContent =
+    `manifested: seed → GLSL in ${(performance.now() - t0).toFixed(1)}ms — the seed IS the shader now; every pixel runs it on the GPU`;
+  lastManifest = { surface: 'shader', payload: seed };
+  $('seed-box').style.display = 'block';
+  $('seed-json').textContent = seed;
+  document.title = 'live-gen SHADER OK';
+}
+function renderShader(t) {
+  const gl = D3.gl, W = cv.width, H = cv.height;
+  if (D3.gcv.width < W || D3.gcv.height < H) { D3.gcv.width = Math.max(D3.gcv.width, W); D3.gcv.height = Math.max(D3.gcv.height, H); }
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.SCISSOR_TEST);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(SHD.prog);
+  gl.uniform1f(SHD.u.t, t); gl.uniform1f(SHD.u.w, W); gl.uniform1f(SHD.u.h, H);
+  gl.uniform1f(SHD.u.mx, drawPtr.x); gl.uniform1f(SHD.u.my, drawPtr.y); gl.uniform1f(SHD.u.dn, drawPtr.down);
+  gl.bindVertexArray(SHD.vao);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+  ctx.drawImage(D3.gcv, 0, D3.gcv.height - H, W, H, 0, 0, W, H);
+}
+window.__manifestShader = s => manifestShader(s);
 function manifestDraw3d(seed) {
-  drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = [];
+  drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; SHD.prog = null;
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();
   const bytes = compile_draw3d_wasm(seed);
@@ -2076,6 +2228,8 @@ window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0,
       updateCam(dt);
       renderFieldFP();
     }
+  } else if (SHD.prog) {
+    renderShader(now / 1000); // L4: every pixel runs the seed
   } else if (D3.main && D3.main.run) {
     renderScene(D3.main, now / 1000, ctx, cv.width, cv.height); // §22, 60fps
   } else if (WIDGETS.length || SC3.length) {
@@ -2142,6 +2296,7 @@ async function send() {
     if (d.surface === 'ui') manifestUi(d.schema);
     else if (d.surface === 'field') manifestField(d.world);
     else if (d.surface === 'draw3d') manifestDraw3d(d.seed);
+    else if (d.surface === 'shader') manifestShader(d.seed);
     else manifestDraw(d.seed);
   };
   try {
@@ -2271,6 +2426,7 @@ function manifestSaved(bundle) {
   if (bundle.surface === 'ui') manifestUi(bundle.payload);
   else if (bundle.surface === 'field') manifestField(bundle.payload);
   else if (bundle.surface === 'draw3d') manifestDraw3d(bundle.payload);
+  else if (bundle.surface === 'shader') manifestShader(bundle.payload);
   else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
   restoreChat(bundle.chat);
   say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
