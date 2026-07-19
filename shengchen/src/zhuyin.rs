@@ -176,9 +176,17 @@ pub fn compile(text: &str) -> Vec<Gesture> {
         // ---- assemble the vowel journey: locus glide → medial → final ----
         let mut vow: Vec<(f32, f32)> = Vec::new();
         let mut cursor = 0.0f32;
+        // the locus cue only helps when the road is SHORT: our mouth is a 1-D
+        // line (o a u i e), so a far glide detours through foreign vowels —
+        // ㄓㄡ's 3.3→0 passed the a-region and 舟 was heard as 阿
+        let first_target = med
+            .filter(|_| !is_bare_medial_nucleus)
+            .unwrap_or(fin.vow[0].1);
         if let Some(l) = init.locus {
-            vow.push((0.0, l));
-            cursor = 0.14; // the transition cue: ~50ms of a 0.4s syllable
+            if (l - first_target).abs() <= 1.6 {
+                vow.push((0.0, l));
+                cursor = 0.14; // the transition cue: ~50ms of a 0.4s syllable
+            }
         }
         if let (Some(m), false) = (med, is_bare_medial_nucleus) {
             vow.push((cursor, m));
@@ -262,6 +270,16 @@ mod tests {
         assert!(xue.vow.iter().any(|(_, v)| (*v - 2.5).abs() < 0.11), "ㄒㄩㄝ lost its ü: {:?}", xue.vow);
         // 江 has an ng coda
         assert!(g[8].nas.last().unwrap().1 > 0.8, "ㄐㄧㄤ lost its ng");
+    }
+
+    #[test]
+    fn far_locus_is_skipped_near_locus_kept() {
+        // 舟 ㄓㄡ: retroflex locus 3.3 vs o(0) — a 1-D detour through a → SKIP
+        let zhou = &compile("ㄓㄡ")[0];
+        assert!(zhou.vow[0].1 < 1.0, "ㄓㄡ must start at o, not the far locus: {:?}", zhou.vow);
+        // 獨 ㄉㄨ: alveolar locus 3.5 vs u(2) — short road, the stop cue stays
+        let du = &compile("ㄉㄨˊ")[0];
+        assert!(du.vow[0].1 > 3.0, "ㄉㄨ must keep its locus glide: {:?}", du.vow);
     }
 
     #[test]
