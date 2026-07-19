@@ -1143,6 +1143,7 @@ function compileEntities(world, g) {
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
                   alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
+                habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   home: def.home ?? [def.at[0], def.at[1]], // where it first appeared — so it can find its way back
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
                   journal: [], // 宿念: a being's own remembered moments — bounded and lossy BY LAW; mostly self-chosen (the host marks only what it heard and its strongest acts)
@@ -1206,8 +1207,12 @@ function tickEntities(t, g) {
       if (e.on) continue;
       const len = Math.hypot(e.pending[0], e.pending[1]);
       const k = len > MAX_STEP ? MAX_STEP / len : 1; // host law: nobody teleports
-      e.x = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
-      e.y = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+      const nx = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
+      const ny = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+      // 棲地律: a water being's step onto dry land does not land — host law,
+      // not the seed's discipline (魚不上山, the way the fence is not a request)
+      if (e.habitat === 'water' && sampleF(1, nx, ny) < 0.3) { /* the water holds it */ }
+      else { e.x = nx; e.y = ny; }
     }
   }
   // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
