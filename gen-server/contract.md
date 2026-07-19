@@ -23,11 +23,16 @@ SEED DSL (all values are f64):
 "schema" = {"cells":[...],"tree":{...},"wires":[...]}
 
 cells: [{"id":"name","params":["x"],"script":"<DSL, run(x) -> f64>"}]
-- capabilities: sin(x), cos(x), get(slot), set(slot, value).
+- capabilities: sin(x), cos(x), get(slot), set(slot, value), ld(i), sd(i, value).
 - get/set is a shared 32-slot f64 store (slots 0..31) — THE way to do multi-input
   logic: each input's cell persists its value (`set(0.0, x);`) and computed
   cells read the slots (`get(0.0) * get(1.0)`). A cell's single param x is the
   event value that triggered it; computed cells may ignore x entirely.
+- ld(i)/sd(i,v) is the COLLECTION store: a shared 4096-slot f64 array for lists,
+  queues, tables. Convention: keep a count in a scalar slot, append with
+  `sd(get(1.0), x);\nset(1.0, get(1.0) + 1.0);`. Delete = shift down with a while
+  loop. Everything (slots, the collection store, the string table) persists
+  across reloads automatically — apps REMEMBER.
 
 tree: nested widgets. Vocabulary (NOTHING else):
 - {"type":"stack","children":[...]}        vertical box
@@ -60,6 +65,27 @@ e.g. {"type":"knob","widget_seed":"<DSL>","bind":"vol","on_input":{"cell":"vol"}
 knob sketch: while down(), map my() to a value and emit(v); when idle show bv(0.0); draw an
 arc for the level and a needle. Grown widgets are remembered by name (like grown skins):
 later schemas may write a bare {"type":"knob"} and the host recalls the look.
+
+LIST — {"type":"list","start":0,"count_cell":"n","text":true,"prefix":"· ","on_select":{"cell":"pick"}}
+shows the collection store MEM[start .. start+count) as rows. "count_cell" reads the row count
+from a cell's output (or static "count"). "text":true renders each value as the STRING it names
+(see textinput). Clicking a row fires "on_select" with the ROW INDEX — build delete/toggle with it.
+
+TEXT IN/OUT (strings are HANDLES — a number that names an interned string; equal text = equal
+handle, so handle comparison IS string equality; cells store/route handles like any number):
+- {"type":"textinput","placeholder":"add a task…","on_input":{"cell":"add"}} — on Enter the host
+  interns the string and fires the cell with its handle. The input clears itself.
+- {"type":"text","bind":"cellId","prefix":"..."} — renders the cell's output as the string it
+  names (falls back to the number).
+e.g. a working TODO: cell add = "sd(get(1.0), x);\nset(1.0, get(1.0) + 1.0);\nget(1.0)", cell
+n = "get(1.0)", wire add→n, tree = textinput(on_input add) + list(count_cell n, text true,
+on_select del) where del shifts MEM down and decrements the count.
+
+FEED — {"type":"feed","url":"https://api.open-meteo.com/v1/forecast?latitude=25.03&longitude=121.56&current=temperature_2m","every":120,"plucks":[{"path":"current.temperature_2m","cell":"temp"}]}
+the WORLD delivers data: the host fetches the url (allowlisted domains only, server-enforced),
+plucks values by dot-path (array indices are numeric segments), and fires each cell with the
+number (a string value arrives as its handle). Cells never touch the network. Use with a value/
+gauge/chart bound to the cell. "every" = refresh seconds (min 15).
 
 3D PANEL in a UI — {"type":"scene3d","seed":"<draw3d script>","bind":"cellId","bind_values":[...],
 "on_input":{"cell":"id"},"w":420,"h":260}: a LIVE 3D scene inside the UI (full draw3d verbs,

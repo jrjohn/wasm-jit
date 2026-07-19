@@ -1,0 +1,5 @@
+# feed allowlist — one host (suffix) per line; the proxy refuses everything else
+api.open-meteo.com
+api.frankfurter.app
+api.coingecko.com
+127.0.0.1

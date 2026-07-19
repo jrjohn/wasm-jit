@@ -85,22 +85,28 @@ pub const DRAW_IMPORTS: [codegen::HostFn; 15] = [
 /// multi-input logic works (input cells persist to slots, computed cells read
 /// them). Fuel-metered at 200k. The same contract the gen-server validates
 /// against natively — browser and server compile identical modules.
+/// The UI-cell ABI, shared crate-side. get/set = 32 scalar slots (the fast
+/// shared store); ld/sd = a host-owned 4096-slot f64 array — the COLLECTION
+/// store (lists, queues, tables), same closure pattern as slots, so the fence
+/// and the persistence story extend without touching the memory-audit rule.
+pub const UI_PARAMS: [&str; 1] = ["x"];
+pub const UI_IMPORTS: [codegen::HostFn; 6] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+    codegen::HostFn { name: "ld", n_args: 1, returns: true },  // read the 4096-slot collection store
+    codegen::HostFn { name: "sd", n_args: 2, returns: false }, // write it
+];
+
 #[cfg(feature = "js-api")]
 #[wasm_bindgen]
 pub fn compile_ui_cell_wasm(src: &str) -> Result<Vec<u8>, JsError> {
-    use codegen::HostFn;
-    const PARAMS: [&str; 1] = ["x"];
-    const IMPORTS: [HostFn; 4] = [
-        HostFn { name: "sin", n_args: 1, returns: true },
-        HostFn { name: "cos", n_args: 1, returns: true },
-        HostFn { name: "get", n_args: 1, returns: true },
-        HostFn { name: "set", n_args: 2, returns: false },
-    ];
     let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
     codegen::compile_with_opts(
         &prog,
-        &PARAMS,
-        &IMPORTS,
+        &UI_PARAMS,
+        &UI_IMPORTS,
         codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))

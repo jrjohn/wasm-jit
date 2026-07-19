@@ -29,19 +29,16 @@ const ALLOWED_MODELS: [&str; 3] = ["claude-haiku-4-5-20251001", "claude-sonnet-5
 const MAX_ATTEMPTS: u32 = 3;
 const GEN_TIMEOUT: Duration = Duration::from_secs(150);
 
-const UI_IMPORTS: [HostFn; 4] = [
-    HostFn { name: "sin", n_args: 1, returns: true },
-    HostFn { name: "cos", n_args: 1, returns: true },
-    HostFn { name: "get", n_args: 1, returns: true },
-    HostFn { name: "set", n_args: 2, returns: false },
-];
+// Shared with the browser compiler via the crate (ld/sd included).
+const UI_IMPORTS: [HostFn; 6] = wasm_jit::UI_IMPORTS;
 // The draw ABI lives in the wasm-jit crate so the native validator here and the
 // browser's compile_draw_wasm mint byte-identical modules — no drift. It now
 // carries the interaction loop (mx/my/down + get/set); see wasm_jit::DRAW_IMPORTS.
 const DRAW_IMPORTS: [HostFn; 15] = wasm_jit::DRAW_IMPORTS;
-const UI_VOCAB: [&str; 12] = [
+const UI_VOCAB: [&str; 16] = [
     "stack", "row", "label", "value", "button", "slider", "input",
     "barchart", "linechart", "piechart", "gauge", "scene3d",
+    "list", "textinput", "text", "feed",
 ];
 
 /// World-cell ABI (the Field, docs §19): run(t, gw, gh) -> f64.
@@ -477,6 +474,41 @@ fn validate_tree(node: &Value, cell_ids: &[String]) -> Result<(), String> {
                 if !cell_ids.iter().any(|i| i == id) {
                     return Err(format!("scene3d: bind_values references unknown cell '{id}'"));
                 }
+            }
+        }
+    }
+    if t == "list" {
+        if let Some(cc) = node.get("count_cell").and_then(|c| c.as_str()) {
+            if !cell_ids.iter().any(|i| i == cc) {
+                return Err(format!("list: count_cell references unknown cell '{cc}'"));
+            }
+        }
+        if let Some(spec) = node.get("on_select") {
+            let cell = spec.get("cell").and_then(|c| c.as_str()).ok_or("list on_select lacks \"cell\"")?;
+            if !cell_ids.iter().any(|i| i == cell) {
+                return Err(format!("list on_select references unknown cell '{cell}'"));
+            }
+        }
+    }
+    if t == "text" {
+        let b = node.get("bind").and_then(|b| b.as_str()).ok_or("text lacks \"bind\"")?;
+        if !cell_ids.iter().any(|i| i == b) {
+            return Err(format!("text: bind references unknown cell '{b}'"));
+        }
+    }
+    if t == "feed" {
+        // ④ the world delivers data — cells never fetch. Shape checked here;
+        // the domain allowlist is enforced server-side at fetch time.
+        let url = node.get("url").and_then(|u| u.as_str()).ok_or("feed lacks \"url\"")?;
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("feed url must be http(s)".into());
+        }
+        let plucks = node.get("plucks").and_then(|p| p.as_array()).ok_or("feed lacks \"plucks\"")?;
+        for p in plucks {
+            p.get("path").and_then(|x| x.as_str()).ok_or("feed pluck lacks \"path\"")?;
+            let c = p.get("cell").and_then(|x| x.as_str()).ok_or("feed pluck lacks \"cell\"")?;
+            if !cell_ids.iter().any(|i| i == c) {
+                return Err(format!("feed pluck references unknown cell '{c}'"));
             }
         }
     }
@@ -1032,6 +1064,53 @@ fn slug_ok(name: &str) -> bool {
 /// Save a manifested world + its conversation — the whole "三千大千世界" is data
 /// (surface + payload JSON + chat transcript), so a save is just a file. Loading
 /// it re-manifests in µs: generate once (slow), then switch worlds at will.
+
+/// ④ the feed proxy — the WORLD delivers data, cells never fetch. The browser
+/// asks this endpoint; the server checks the domain against an allowlist
+/// (gen-server/feeds-allow.txt, one host suffix per line), fetches with a hard
+/// timeout and size cap, and passes the JSON through. The cell only ever sees
+/// numbers (and string handles) fired into it by the host.
+async fn feed_proxy(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    use axum::http::header::CONTENT_TYPE;
+    let Some(url) = q.get("url") else {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "missing url".to_string());
+    };
+    let parsed = match reqwest::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad url".to_string()),
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "http(s) only".to_string());
+    }
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let allow = tokio::fs::read_to_string("gen-server/feeds-allow.txt").await.unwrap_or_default();
+    let ok = allow.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .any(|l| host == l || host.ends_with(&format!(".{l}")));
+    if !ok {
+        return (StatusCode::FORBIDDEN, [(CONTENT_TYPE, "text/plain")],
+                format!("'{host}' is not in the feed allowlist (gen-server/feeds-allow.txt)"));
+    }
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(8)).build() {
+        Ok(c) => c,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, [(CONTENT_TYPE, "text/plain")], format!("client: {e}")),
+    };
+    match client.get(parsed).send().await {
+        Ok(resp) => match resp.text().await {
+            Ok(body) if body.len() <= 262_144 => (StatusCode::OK, [(CONTENT_TYPE, "application/json")], body),
+            Ok(_) => (StatusCode::PAYLOAD_TOO_LARGE, [(CONTENT_TYPE, "text/plain")], "feed too large (256KB cap)".to_string()),
+            Err(e) => (StatusCode::BAD_GATEWAY, [(CONTENT_TYPE, "text/plain")], format!("read: {e}")),
+        },
+        Err(e) => (StatusCode::BAD_GATEWAY, [(CONTENT_TYPE, "text/plain")], format!("fetch: {e}")),
+    }
+}
+
+/// a tiny local test feed for e2e (127.0.0.1 is allowlisted)
+async fn feed_test() -> impl IntoResponse {
+    Json(json!({ "n": 42, "s": "hello from the world", "nested": { "deep": 7 } }))
+}
+
 async fn world_save(Json(body): Json<Value>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
     let name = body.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -1378,6 +1457,8 @@ async fn main() {
         .route("/api/mind", post(mind))
         .route("/api/skins", get(skin_list).post(skin_save))
         .route("/api/skins/{ty}", get(skin_get))
+        .route("/api/feed", get(feed_proxy))
+        .route("/api/feed-test", get(feed_test))
         .route("/api/widgets", get(widget_list).post(widget_save))
         .route("/api/widgets/{ty}", get(widget_get))
         .route("/api/worlds", get(world_list).post(world_save))
@@ -1673,6 +1754,55 @@ mod tests {
             "surface":"field","world":{"cells":[{"id":"a","script":"1.0"}],
                 "entities":[{"id":"x","type":"person","at":[5,5],"innate":0.7}]}});
         assert!(validate(&not_array).unwrap_err().contains("array"));
+    }
+
+    #[test]
+    fn collections_strings_feeds_validate_and_reject() {
+        // ②③④: a mini-todo with a feed — ld/sd cells, list, textinput, text, feed
+        let ok = serde_json::json!({"surface":"ui","schema":{
+            "cells":[
+                {"id":"add","params":["x"],"script":"sd(get(1.0), x);\nset(1.0, get(1.0) + 1.0);\nget(1.0)"},
+                {"id":"n","params":["x"],"script":"get(1.0)"},
+                {"id":"temp","params":["x"],"script":"set(2.0, x);\nx"}],
+            "tree":{"type":"stack","children":[
+                {"type":"textinput","placeholder":"add…","on_input":{"cell":"add"}},
+                {"type":"list","start":0,"count_cell":"n","text":true,"on_select":{"cell":"n"}},
+                {"type":"text","bind":"add"},
+                {"type":"feed","url":"https://api.open-meteo.com/v1/x","every":120,
+                 "plucks":[{"path":"current.temperature_2m","cell":"temp"}]},
+                {"type":"value","bind":"temp"}]},
+            "wires":[{"from":"add","to":"n"}]}});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+
+        let ghost_count = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"a","params":["x"],"script":"x"}],
+            "tree":{"type":"list","count_cell":"missing"},"wires":[]}});
+        assert!(validate(&ghost_count).unwrap_err().contains("count_cell"));
+
+        let ghost_text = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"a","params":["x"],"script":"x"}],
+            "tree":{"type":"text","bind":"missing"},"wires":[]}});
+        assert!(validate(&ghost_text).unwrap_err().contains("unknown cell"));
+
+        let bad_feed = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"a","params":["x"],"script":"x"}],
+            "tree":{"type":"feed","url":"ftp://x","plucks":[]},"wires":[]}});
+        assert!(validate(&bad_feed).unwrap_err().contains("http"));
+
+        let ghost_pluck = serde_json::json!({"surface":"ui","schema":{
+            "cells":[{"id":"a","params":["x"],"script":"x"}],
+            "tree":{"type":"feed","url":"https://x.y/z","plucks":[{"path":"p","cell":"missing"}]},"wires":[]}});
+        assert!(validate(&ghost_pluck).unwrap_err().contains("unknown cell"));
+    }
+
+    #[test]
+    fn ui_abi_matches_crate() {
+        assert_eq!(UI_IMPORTS.len(), wasm_jit::UI_IMPORTS.len());
+        for (a, b) in UI_IMPORTS.iter().zip(wasm_jit::UI_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
+        assert!(UI_IMPORTS.iter().any(|i| i.name == "ld"), "ui ABI missing ld");
+        assert!(UI_IMPORTS.iter().any(|i| i.name == "sd"), "ui ABI missing sd");
     }
 
     #[test]
