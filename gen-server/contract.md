@@ -81,6 +81,12 @@ e.g. a working TODO: cell add = "sd(get(1.0), x);\nset(1.0, get(1.0) + 1.0);\nge
 n = "get(1.0)", wire add→n, tree = textinput(on_input add) + list(count_cell n, text true,
 on_select del) where del shifts MEM down and decrements the count.
 
+⚠️ HARD RULE — if the ask wants LIVE/REAL-WORLD data (即時 / 現在 / real-time / current weather /
+temperature / exchange rate / price — anything that exists in the WORLD, not in the user's
+input), you MUST include a "feed" node wired to a cell. NEVER fake live data with static
+values or init constants — that ignores the user. Allowlisted hosts: api.open-meteo.com
+(weather, no key), api.frankfurter.app (FX rates, no key), api.coingecko.com (crypto, no key).
+
 FEED — {"type":"feed","url":"https://api.open-meteo.com/v1/forecast?latitude=25.03&longitude=121.56&current=temperature_2m","every":120,"plucks":[{"path":"current.temperature_2m","cell":"temp"}]}
 the WORLD delivers data: the host fetches the url (allowlisted domains only, server-enforced),
 plucks values by dot-path (array indices are numeric segments), and fires each cell with the
