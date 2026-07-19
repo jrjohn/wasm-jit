@@ -133,6 +133,7 @@ Generation is seconds; every interaction after is µs.
     <div class="stage-head">
       <span id="stage-status">nothing manifested yet</span>
       <button id="view-toggle" style="display:none; margin-left:auto; font-size:.75rem; padding:.25rem .7rem"></button>
+      <button id="weng-sing" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">🎤 唱《江雪》</button>
       <button id="world-save" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">💾 save world</button>
       <button id="world-load" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">🌀 worlds</button>
     </div>
@@ -2441,10 +2442,85 @@ function renderScope() { // the ear's picture: the live waveform on the canvas
   for (let x = 0; x < W; x++) { const v = b[(x * step) | 0]; const y = H * 0.5 - v * H * 0.42; x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
   ctx.stroke();
 }
+// §24 the 聲帶 — a voice that SINGS (follows a melody), not one that READS (念).
+// The host lends the instrument (glottal buzz → vowel formants → vibrato), the
+// being's mind lends the song. THIS is why it can 唱 and TTS could only 念: the
+// pitch follows the notes. Fence-consistent — the primitives are host vocabulary
+// (like disc/hsl for the skin); the composition is the being's (自性→用).
+const VOWELS = { // F1,F2,F3 formant peaks (Hz) — the vowel IS the vocal-tract shape
+  a: [800, 1150, 2800], e: [500, 1900, 2550], i: [320, 2300, 3000],
+  o: [500, 900, 2450],  u: [330, 700, 2200],
+};
+// 柳宗元《江雪》— 20 syllables, slow pentatonic, a cold and lonely air.
+// each note = [midi, vowel, beats]; the vowel is the sung mouth-shape of the word.
+const JIANGXUE = [
+  [64,'a',1],[64,'a',1],[67,'o',1],[64,'e',1],[60,'e',2], // 千山鳥飛絕
+  [62,'a',1],[62,'i',1],[64,'e',1],[62,'o',1],[57,'e',2], // 萬徑人蹤滅
+  [60,'u',1],[62,'o',1],[64,'o',1],[67,'i',1],[64,'o',2], // 孤舟蓑笠翁
+  [64,'u',1],[62,'o',1],[60,'a',1],[62,'a',1],[57,'e',3], // 獨釣寒江雪
+];
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12); // MIDI note → frequency
+
+// Sing a melody through the host 聲帶. Returns total seconds. opts.pan (x in −1..1)
+// pre-wires the spatial seat for the 根塵和合 upgrade; default centre.
+async function voiceSing(melody, opts) {
+  opts = opts || {};
+  if (!Array.isArray(melody) || !melody.length) return 0;
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  const ctx = AUDIO.ctx, bpm = opts.bpm || 54, spb = 60 / bpm; // slow — desolate
+  let t = ctx.currentTime + 0.1;
+  const bus = ctx.createGain(); bus.gain.value = 0.85;
+  bus.connect(AUDIO.analyser); // analyser → master gain → destination (metered, mutable)
+  for (const [midi, vowel, beats] of melody) {
+    const dur = Math.max(0.12, (beats || 1) * spb), f = mtof(midi);
+    const F = VOWELS[vowel] || VOWELS.a;
+    const osc = ctx.createOscillator(); osc.type = 'sawtooth'; osc.frequency.value = f; // glottal buzz
+    const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 5.5;   // vibrato
+    const lfoGain = ctx.createGain(); lfoGain.gain.value = f * 0.014; // ±1.4% — a living breath
+    lfo.connect(lfoGain); lfoGain.connect(osc.frequency);
+    const noteGain = ctx.createGain(); // this note's envelope
+    const fg = [1.0, 0.5, 0.26];
+    for (let k = 0; k < 3; k++) { // three formants carve the buzz into a vowel
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = F[k]; bp.Q.value = 9 + k * 2;
+      const g = ctx.createGain(); g.gain.value = fg[k];
+      osc.connect(bp); bp.connect(g); g.connect(noteGain);
+    }
+    const env = noteGain.gain; // soft attack, legato release into the next word
+    env.setValueAtTime(0.0001, t);
+    env.exponentialRampToValueAtTime(0.85, t + 0.07);
+    env.setValueAtTime(0.85, t + Math.max(0.07, dur - 0.14));
+    env.exponentialRampToValueAtTime(0.0001, t + dur + 0.03);
+    noteGain.connect(bus);
+    osc.start(t); lfo.start(t); osc.stop(t + dur + 0.06); lfo.stop(t + dur + 0.06);
+    t += dur;
+  }
+  return t - ctx.currentTime;
+}
+window.__sing = mel => voiceSing(mel || JIANGXUE);
+{
+  const b = document.getElementById('weng-sing');
+  if (b) b.onclick = async () => {
+    say('being', 'weng 🎶 千山鳥飛絕，萬徑人蹤滅。孤舟蓑笠翁，獨釣寒江雪。 （以聲帶唱出，非念）');
+    try { await voiceSing(JIANGXUE); } catch (e) { say('err', 'the 聲帶 caught: ' + (e.message || e)); }
+  };
+}
+
 window.__manifestSound = s => manifestSound(s);
 window.__soundState = () => ({ active: AUDIO.active, ambient: AUDIO.ambient, muted: AUDIO.muted, gain: AUDIO.gain ? AUDIO.gain.gain.value : null, ctx: AUDIO.ctx ? AUDIO.ctx.state : null });
 window.__soundBad = s => { try { compile_sound_wasm(s); return 'COMPILED'; } catch (e) { return 'rejected: ' + (e.message || e); } };
 window.__soundRMS = () => { const a = AUDIO.analyser; if (!a) return 0; a.getFloatTimeDomainData(AUDIO.buf); let s = 0; for (const v of AUDIO.buf) s += v * v; return Math.sqrt(s / AUDIO.buf.length); };
+window.__soundSpectrum = () => { // e2e: formant peaks in the vocal band (proves a vowel, not a beep)
+  const a = AUDIO.analyser; if (!a) return null;
+  const n = a.frequencyBinCount, d = new Float32Array(n); a.getFloatFrequencyData(d);
+  const sr = AUDIO.ctx.sampleRate, hz = i => i * sr / (2 * n);
+  const peaks = []; let last = -1;
+  for (let i = 2; i < n - 2; i++) { const f = hz(i); if (f < 200 || f > 3400) continue;
+    if (d[i] > -62 && d[i] > d[i - 1] && d[i] > d[i + 1] && d[i] > d[i - 2] && d[i] > d[i + 2]) {
+      if (last < 0 || f - last > 150) { peaks.push(Math.round(f)); last = f; } } }
+  return { peaks: peaks.slice(0, 8), npeaks: peaks.length };
+};
 
 function manifestShader(seed) {
   APP.key = null; soundStop(); stopFeeds(); soundStop();
