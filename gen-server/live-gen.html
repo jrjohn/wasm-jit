@@ -775,6 +775,14 @@ let FIELD = null;        // Float64Array(grid*grid*4): height, water, veg, snow
 let fieldCanvas = null;  // offscreen grid-sized canvas
 let lastTick = 0;
 let lastSndSync = 0; // §24b ear/voice position sync throttle
+let OCCL = null; // §22c per-column terrain silhouette by distance bucket
+const OCCL_META = { step: 2, ob: 2.5, nb: 0, cols: 0 };
+function occlCut(sx, zc) { // screen-y above which things at depth zc are visible
+  if (!OCCL || !OCCL_META.nb) return 1e9;
+  const c = Math.min(Math.max((sx / OCCL_META.step) | 0, 0), OCCL_META.cols - 1);
+  const k = Math.min(Math.max((zc / OCCL_META.ob) | 0, 0), OCCL_META.nb - 1);
+  return OCCL[c * OCCL_META.nb + k];
+}
 let lastRaf = 0;
 
 // ---- first-person view: the same field, seen from inside ----
@@ -845,9 +853,16 @@ function renderFieldFP() {
   const maxD = g * 1.15;
   const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
   const smp = CPU_SMP;
+  // §22c occlusion truth: per column, the terrain silhouette (minY) reached by
+  // everything NEARER than each distance bucket — billboards and bodies are
+  // clipped against it, so a boat behind a bank hides and a temple sits on land
+  const OB = 2.5, ONB = Math.ceil(maxD / OB) + 1, OCols = Math.ceil(W / step) + 1;
+  if (!OCCL || OCCL.length !== OCols * ONB) OCCL = new Float32Array(OCols * ONB);
+  OCCL.fill(H); OCCL_META.step = step; OCCL_META.ob = OB; OCCL_META.nb = ONB; OCCL_META.cols = OCols;
   for (let sx = 0; sx < W; sx += step) {
     const off = (sx / W - 0.5) * fov;
     const dx = sinY + off * cosY, dz = cosY - off * sinY;
+    const ocol = (sx / step) | 0;
     let minY = H;
     for (let d = 1.6; d < maxD; d += 0.35 + d * 0.014) {
       const wx = cam.px + dx * d, wz = cam.pz + dz * d;
@@ -866,8 +881,15 @@ function renderFieldFP() {
         ctx.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
         ctx.fillRect(sx, Math.max(sy, 0), step, minY - Math.max(sy, 0));
         minY = sy;
+        const ok = Math.min((d / OB) | 0, ONB - 1);
+        if (minY < OCCL[ocol * ONB + ok]) OCCL[ocol * ONB + ok] = minY;
         if (minY <= 0) break;
       }
+    }
+    // prefix-min: bucket k = silhouette of ALL terrain nearer than k·OB
+    for (let k = 1; k < ONB; k++) {
+      const i = ocol * ONB + k;
+      if (OCCL[i] > OCCL[i - 1]) OCCL[i] = OCCL[i - 1];
     }
   }
   // §22b true bodies first (real 3D, camera-matched), then the billboards
@@ -889,7 +911,12 @@ function renderFieldFP() {
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K2;
     const sy = horizon + ((eye - surfaceY) * focal) / zc;
     const s = Math.max(3, (focal / zc) * 1.1);
+    // §22c the meeting of eye and thing passes through the LAND between them
+    const cut = occlCut(sx, zc);
+    if (cut <= 0) continue; // wholly behind a hill
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, cut); ctx.clip();
     drawSkin(e, sx, sy - s * 0.4, s, performance.now() / 1000);
+    ctx.restore();
   }
   if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
@@ -2369,7 +2396,25 @@ function renderBodiesFP(list, W, H) {
   gl.bindTexture(gl.TEXTURE_2D, R.shTex);
   d3drawAll({ vp, L, eye: [cam.px, eye, cam.pz], shOn: 1, lvp });
   gl.disable(gl.SCISSOR_TEST);
+  // §22c composite through the terrain's silhouette: per body, per column,
+  // only the sky above the nearer land shows the body — 岸線裁寺, 丘背藏舟
+  ctx.save(); ctx.beginPath();
+  const st = OCCL_META.step;
+  for (const e of list) {
+    const dx = e.x - cam.px, dz = e.y - cam.pz;
+    const zc = dx * sy + dz * cy;
+    if (zc < 0.8) { ctx.rect(0, 0, W, H); continue; } // walking inside it — no clip
+    const xc = dx * cy - dz * sy;
+    const xs = (xc / zc + 0.5) * W;
+    const half = Math.min((8 * W * 0.5) / zc, W); // ~8 world units of reach
+    for (let px = Math.max(xs - half, 0); px < Math.min(xs + half, W); px += st) {
+      const cut = occlCut(px, zc);
+      if (cut > 0) ctx.rect(px, 0, st, cut);
+    }
+  }
+  ctx.clip();
   ctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H); // alpha over the terrain
+  ctx.restore();
 }
 
 // ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
