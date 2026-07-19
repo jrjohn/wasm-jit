@@ -676,6 +676,12 @@ fn validate(obj: &Value) -> Result<(), String> {
                     return Err("world view must be \"top\" or \"first_person\"".into());
                 }
             }
+            // §24 ambient: a world may carry a sound seed that plays while it
+            // renders — the ear's layer, validated against the sound fence
+            if let Some(amb) = world.get("ambient").and_then(|a| a.as_str()) {
+                compile_check(amb, &SOUND_PARAMS, &SOUND_IMPORTS, 4096)
+                    .map_err(|e| format!("world ambient sound failed to compile: {e}"))?;
+            }
             let cells = world
                 .get("cells")
                 .and_then(|c| c.as_array())

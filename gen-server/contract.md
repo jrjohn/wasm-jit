@@ -330,6 +330,12 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
   ("on" is the AUTHORED, initial ride; a being with a mind/behavior can also bind()/unbind() at
   RUNTIME to board or leave by its own choice — same host law, chosen instead of declared.)
+- "ambient": "<a sound-surface seed>" (optional) — an AMBIENT SOUND that plays while this
+  world is manifested (rain, wind, a river, birdsong). Same DSL as surface "sound": run(t) ->
+  a sample in −1..1, capabilities sin cos get set; keep it gentle (sum voices at ~0.05–0.15).
+  The world renders on the canvas AND the sound plays on the audio thread; press m to mute.
+  If the user asks to ADD sound to the current world (加上雨聲 / 風聲), return the SAME world
+  with an "ambient" field. e.g. rain: "sin(6.2832 * 90.0 * t + sin(t * 900.0) * 6.0) * (0.06 + 0.03 * sin(t * 3.1))"
 - "mind":{"persona":"<one line of character>"} gives a being its OWN live mind (a separate
   Claude) that reacts to world events and answers when the user writes "@<id> ...". When a
   scene has a named or human character (a fisherman, a driver, a traveler), give that entity a

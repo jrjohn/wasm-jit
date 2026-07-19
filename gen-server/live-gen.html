@@ -787,6 +787,8 @@ const KEYMAP = {
   ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back', Space: 'jump',
 };
 window.addEventListener('keydown', e => {
+  if ((e.key === 'm' || e.key === 'M') && (AUDIO.active || AUDIO.ambient) && document.activeElement !== $('prompt')) { soundMute(!AUDIO.muted); return; }
+
   const k = KEYMAP[e.code];
   if (!k || fieldView !== 'fp' || !fieldWorld) return;
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) return; // chat keeps its keys
@@ -1477,6 +1479,8 @@ function manifestField(world) {
   fieldWorld = compiled;
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
+  if (typeof world.ambient === 'string' && world.ambient.trim()) soundPlayAmbient(world.ambient);
+  else soundStop();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
   lastManifest = { surface: 'field', payload: world };
   // The viewpoint is YOURS: once you're in first person, you stay there across
@@ -2373,7 +2377,16 @@ async function ensureAudio() {
   })();
   return AUDIO.ready;
 }
-function soundStop() { if (AUDIO.node) AUDIO.node.port.postMessage({ stop: true }); AUDIO.active = false; }
+function soundStop() { if (AUDIO.node) AUDIO.node.port.postMessage({ stop: true }); AUDIO.active = false; AUDIO.ambient = false; }
+async function soundPlayAmbient(seed) { // §24 the ear's LAYER: sound rides on a world, the canvas keeps the world
+  let bytes;
+  try { bytes = compile_sound_wasm(seed); }
+  catch (e) { $('stage-status').textContent = 'ambient sound refused: ' + (e.message || e); return; }
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  AUDIO.node.port.postMessage({ bytes });
+  AUDIO.ambient = true; // playing, but NOT the sound surface — no scope, no takeover
+}
 function soundMute(on) { AUDIO.muted = on; if (AUDIO.gain) AUDIO.gain.gain.value = on ? 0 : 0.55; const b = $('sound-mute'); if (b) b.textContent = on ? '🔇 unmute' : '🔊 mute'; }
 async function manifestSound(seed) {
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null; SHD.prog = null; APP.key = null; stopFeeds();
@@ -2407,7 +2420,7 @@ function renderScope() { // the ear's picture: the live waveform on the canvas
   ctx.stroke();
 }
 window.__manifestSound = s => manifestSound(s);
-window.__soundState = () => ({ active: AUDIO.active, muted: AUDIO.muted, gain: AUDIO.gain ? AUDIO.gain.gain.value : null, ctx: AUDIO.ctx ? AUDIO.ctx.state : null });
+window.__soundState = () => ({ active: AUDIO.active, ambient: AUDIO.ambient, muted: AUDIO.muted, gain: AUDIO.gain ? AUDIO.gain.gain.value : null, ctx: AUDIO.ctx ? AUDIO.ctx.state : null });
 window.__soundBad = s => { try { compile_sound_wasm(s); return 'COMPILED'; } catch (e) { return 'rejected: ' + (e.message || e); } };
 window.__soundRMS = () => { const a = AUDIO.analyser; if (!a) return 0; a.getFloatTimeDomainData(AUDIO.buf); let s = 0; for (const v of AUDIO.buf) s += v * v; return Math.sqrt(s / AUDIO.buf.length); };
 
