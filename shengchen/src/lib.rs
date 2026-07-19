@@ -133,8 +133,11 @@ impl Event {
                 if *t >= *dur {
                     return (0.0, false);
                 }
-                let env = (-8.0 * *t / *dur).exp();
-                (bp.run(rng.bi()) * env * *amp, true)
+                // a sharp tick that dies fast — drops must stay SEPARATE, not smear:
+                // ~1ms broadband IMPACT (the "tak" of landing), then the narrow ring
+                let env = (-14.0 * *t / *dur).exp();
+                let impact = if *t < 0.0012 { rng.bi() * (1.0 - *t / 0.0012) * 0.4 } else { 0.0 };
+                (bp.run(rng.bi()) * env * *amp + impact * *amp, true)
             }
             Event::Bubble { t, dur, amp, f, ph } => {
                 *t += dt;
@@ -266,9 +269,10 @@ impl Voice {
         for kf in 0..3 {
             v += self.formants[kf].run(src) * self.fgain[kf];
         }
-        // the nasal hum — lips closed, the sound leaves through the nose
-        v = v * 0.5 + self.murmur.run(src) * self.nas * 0.9;
-        v * 1.4 * self.level
+        // the nasal hum — a colour on the voice, not its master: the probe showed
+        // murmur 10x the formants, making loudness track nasal (阿 faint, 吽 booming)
+        v = v * 1.5 + self.murmur.run(src) * self.nas * 0.33;
+        v * 1.25 * self.level
     }
 }
 
@@ -432,8 +436,12 @@ impl Engine {
             let r = &mut self.rng;
             (
                 1000.0 + b * 7000.0 * (0.6 + 0.4 * r.f()),
-                0.004 + 0.011 * r.f(),
-                2.2 + 2.4 * r.f(), // narrow-band filtering eats ~24dB; a drop is a bright transient
+                0.003 + 0.006 * r.f(),
+                {
+                    // most drops small, a few fat — the skew is what reads as "rain"
+                    let u = r.f();
+                    3.0 + 6.0 * u * u
+                },
             )
         };
         if let Some(seat) = self.seat(id) {
@@ -450,7 +458,7 @@ impl Engine {
             (
                 400.0 + p * 2600.0 * (0.75 + 0.25 * r.f()),
                 0.018 + 0.045 * r.f(),
-                0.10 + 0.10 * r.f(),
+                0.045 + 0.055 * r.f(), // a small thing in a large water — the bed carries the river
             )
         };
         if let Some(seat) = self.seat(id) {
@@ -833,6 +841,54 @@ mod tests {
         assert_eq!(e.seat_add(false), u32::MAX, "the world grew a 25th mouth");
         e.seat_remove(3);
         assert_eq!(e.seat_add(true), 3, "a dead seat was not reused");
+    }
+
+
+    #[test]
+    #[ignore] // diagnostic probe — run with --ignored --nocapture
+    fn probe_mantra() {
+        let mut e = Engine::new(SR);
+        let s = e.seat_add(false);
+        const SCORE: [(f32, f32, f32, f32); 9] = [
+            (0.0, 108.0, 0.0, 0.60),
+            (0.8, 110.0, 0.0, 0.25),
+            (2.6, 110.0, 0.0, 0.80),
+            (3.4, 114.0, 1.0, 0.05),
+            (6.2, 114.0, 1.0, 0.10),
+            (7.0, 106.0, 2.0, 0.30),
+            (9.0, 102.0, 2.0, 0.85),
+            (10.6, 100.0, 2.0, 0.95),
+            (11.4, 0.0, 2.0, 0.95),
+        ];
+        let blocks = (12.0 * SR / 128.0) as usize;
+        for b in 0..blocks {
+            let tt = b as f32 * 128.0 / SR;
+            let mut ctl = (0.0f32, 2.0f32, 0.95f32);
+            for w in SCORE.windows(2) {
+                let (t0, f0a, va, na) = w[0];
+                let (t1, f0b, vb, nb) = w[1];
+                if tt >= t0 && tt < t1 {
+                    let u = (tt - t0) / (t1 - t0);
+                    ctl = (f0a + (f0b - f0a) * u, va + (vb - va) * u, na + (nb - na) * u);
+                    break;
+                }
+            }
+            e.voice_set(s, ctl.0, ctl.1, ctl.2);
+            e.render(128);
+            if b % 172 == 0 { // ~every 0.5s
+                let r = {
+                    let n = 128 * 2;
+                    let ss: f32 = e.out[..n].iter().map(|v| v * v).sum();
+                    (ss / n as f32).sqrt()
+                };
+                let v = &e.seats[0].voice;
+                println!(
+                    "t={tt:5.2} ctl=({:6.1},{:4.2},{:4.2}) f0={:6.1} vow={:4.2} nas={:4.2} lvl={:4.2} rms={r:.4} y1[0]={:9.4} y1[1]={:9.4} y1[2]={:9.4} mur={:9.4}",
+                    ctl.0, ctl.1, ctl.2, v.f0, v.vow, v.nas, v.level,
+                    v.formants[0].y1, v.formants[1].y1, v.formants[2].y1, v.murmur.y
+                );
+            }
+        }
     }
 
     #[test]

@@ -66,30 +66,39 @@ fn main() {
         (rng_state >> 8) as f32 / 16_777_216.0
     };
 
-    // ---- 1. 嗡阿吽 — the mantra: three mouths of one breath ----
-    // 嗡 o+nasal → 阿 open → 吽 u+deep nasal; ~3s each, a breath between
+    // ---- 1. 嗡阿吽 — ONE BREATH: the throat never stops, only the MOUTH
+    // changes shape. o→a→u morph continuously; the nasal closes and opens;
+    // the tone glides. 字字相連 — that is what a mantra is.
     {
         let mut e = Engine::new(SR);
         let s = e.seat_add(false);
-        let wav = perform(&mut e, 11.0, |b, e| {
+        // piecewise-linear score over one breath: (time, f0, vowel, nasal)
+        const SCORE: [(f32, f32, f32, f32); 9] = [
+            (0.0, 108.0, 0.0, 0.60), // 嗡 begins already humming (m...)
+            (0.8, 110.0, 0.0, 0.25), // ...opens into o
+            (2.6, 110.0, 0.0, 0.80), // ...and closes back toward the nose
+            (3.4, 114.0, 1.0, 0.05), // MORPH into 阿 — no gap, the mouth opens
+            (6.2, 114.0, 1.0, 0.10), // 阿 held, open
+            (7.0, 106.0, 2.0, 0.30), // MORPH into 吽 — lips rounding
+            (9.0, 102.0, 2.0, 0.85), // 吽 sinks into the deep hum
+            (10.6, 100.0, 2.0, 0.95), // ...
+            (11.4, 0.0, 2.0, 0.95),  // the breath ends (only here)
+        ];
+        let wav = perform(&mut e, 12.0, |b, e| {
             let tt = t(b);
-            let (f0, vow, nas) = match tt {
-                x if x < 3.0 => {
-                    // 嗡: opens as o, closes into the nose
-                    let u = (x / 3.0).min(1.0);
-                    (110.0, 0.0, 0.15 + 0.75 * u)
+            // interpolate the score — every control glides, nothing jumps;
+            // the throat's own 60ms envelope rounds the final breath-out
+            let mut ctl = (0.0, 2.0, 0.95);
+            for w in SCORE.windows(2) {
+                let (t0, f0a, va, na) = w[0];
+                let (t1, f0b, vb, nb) = w[1];
+                if tt >= t0 && tt < t1 {
+                    let u = (tt - t0) / (t1 - t0);
+                    ctl = (f0a + (f0b - f0a) * u, va + (vb - va) * u, na + (nb - na) * u);
+                    break;
                 }
-                x if x < 3.4 => (0.0, 0.0, 0.0), // breath
-                x if x < 6.6 => (116.0, 1.0, 0.05), // 阿: open mouth
-                x if x < 7.0 => (0.0, 1.0, 0.0),   // breath
-                x if x < 10.4 => {
-                    // 吽: u closing into a deep hum, pitch settling down
-                    let u = ((x - 7.0) / 3.4).min(1.0);
-                    (104.0 - 6.0 * u, 2.0, 0.2 + 0.75 * u)
-                }
-                _ => (0.0, 2.0, 0.0),
-            };
-            e.voice_set(s, f0, vow, nas);
+            }
+            e.voice_set(s, ctl.0, ctl.1, ctl.2);
         });
         write_wav(&dir.join("1-om-ah-hum.wav"), &wav).unwrap();
     }
@@ -98,13 +107,13 @@ fn main() {
     {
         let mut e = Engine::new(SR);
         let s = e.seat_add(false);
-        e.breath_set(s, 0.10); // the distant hiss of a wet sky
+        e.breath_set(s, 0.02); // almost nothing — the drops ARE the rain
         let wav = perform(&mut e, 6.0, |b, e| {
             // intensity swells then eases — a shower passing over
             let u = (t(b) / 6.0) * std::f32::consts::PI;
             let intensity = 0.35 + 0.5 * u.sin();
             // Poisson-ish: expected drops per block = rate * blockdur
-            let expected = 90.0 * intensity * (128.0 / SR);
+            let expected = 26.0 * intensity * (128.0 / SR); // sparse enough to hear EACH drop
             let n = expected.floor() as usize + ((rnd() < expected.fract()) as usize);
             for _ in 0..n {
                 e.ev_drop(s, 0.25 + 0.55 * rnd());
@@ -163,9 +172,9 @@ fn main() {
     {
         let mut e = Engine::new(SR);
         let s = e.seat_add(false);
-        e.breath_set(s, 0.18);
+        e.breath_set(s, 0.32); // the WATER itself — the bed is the river, bubbles are its punctuation
         let wav = perform(&mut e, 6.0, |_b, e| {
-            let expected = 26.0 * (128.0 / SR);
+            let expected = 11.0 * (128.0 / SR);
             let n = expected.floor() as usize + ((rnd() < expected.fract()) as usize);
             for _ in 0..n {
                 e.ev_bubble(s, 0.1 + 0.6 * rnd());
@@ -200,12 +209,12 @@ fn main() {
         e.seat_pos(weng, 2.0, 1.0);
         e.listener(0.0, 0.0);
         e.breath_set(wind, 0.22);
-        e.breath_set(river, 0.10);
+        e.breath_set(river, 0.24);
         let mut bell_struck = false;
         let wav = perform(&mut e, 14.0, |b, e| {
             let tt = t(b);
             // river bubbles
-            let expected = 18.0 * (128.0 / SR);
+            let expected = 8.0 * (128.0 / SR);
             let n = expected.floor() as usize + ((rnd() < expected.fract()) as usize);
             for _ in 0..n {
                 e.ev_bubble(river, 0.1 + 0.5 * rnd());
@@ -217,18 +226,18 @@ fn main() {
                 e.ev_strike(bell, 98.0, 0.9);
                 bell_struck = true;
             }
-            // the fisherman hums 嗡阿吽 from t=4, one full cycle
+            // the fisherman hums 嗡阿吽 from t=4 — ONE BREATH, the mouth
+            // morphing o→a→u without the throat ever stopping (字字相連)
             let ct = tt - 4.0;
-            let (f0, vow, nas) = if ct < 0.0 {
-                (0.0, 0.0, 0.0)
+            let (f0, vow, nas) = if ct < 0.0 || ct > 9.6 {
+                (0.0, 2.0, 0.9)
             } else {
                 match ct {
-                    x if x < 3.0 => (110.0, 0.0, 0.2 + 0.7 * (x / 3.0)),
-                    x if x < 3.4 => (0.0, 0.0, 0.0),
-                    x if x < 6.4 => (116.0, 1.0, 0.05),
-                    x if x < 6.8 => (0.0, 1.0, 0.0),
-                    x if x < 9.8 => (104.0, 2.0, 0.25 + 0.65 * ((x - 6.8) / 3.0)),
-                    _ => (0.0, 2.0, 0.0),
+                    x if x < 2.6 => (108.0, 0.0, 0.6 - 0.35 * (x / 2.6) + 0.55 * (x / 2.6) * (x / 2.6)),
+                    x if x < 3.2 => (108.0 + 6.0 * ((x - 2.6) / 0.6), (x - 2.6) / 0.6, 0.1),
+                    x if x < 5.8 => (114.0, 1.0, 0.08),
+                    x if x < 6.4 => (114.0 - 8.0 * ((x - 5.8) / 0.6), 1.0 + (x - 5.8) / 0.6, 0.3),
+                    x => (106.0 - 5.0 * ((x - 6.4) / 3.2), 2.0, 0.3 + 0.6 * ((x - 6.4) / 3.2)),
                 }
             };
             e.voice_set(weng, f0, vow, nas);
