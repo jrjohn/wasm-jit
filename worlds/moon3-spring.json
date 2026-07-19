@@ -2,7 +2,7 @@
  "chat": [],
  "name": "moon3-spring",
  "payload": {
-  "ambient": "let gw = get(0.0) * 0.9995 + noise() * 0.0005;\nset(0.0, gw);\nbreath(0.16 + gw * 6.0);\nif noise() > 0.99993 { bubble(0.25); }\nif noise() > 0.99997 { drop(0.12); }\nlet bt = get(1.0) + 1.0;\nset(1.0, bt);\nif bt > 1400000.0 { strike(98.0, 0.85); set(1.0, 0.0); }\n0.0",
+  "ambient": "let gw = get(0.0) * 0.9995 + noise() * 0.0005;\nset(0.0, gw);\nbreath(0.16 + gw * 6.0);\nif noise() > 0.99993 { bubble(0.25); }\nif noise() > 0.99997 { drop(0.12); }\n0.0",
   "cells": [
    {
     "id": "plains",
@@ -43,7 +43,7 @@
      "persona": "孤舟蓑笠翁，獨釣寒江雪 — a solitary old man in a straw cloak and bamboo hat, fishing alone on a frozen river under falling snow. He speaks rarely, in short quiet lines, at peace with the silence and cold."
     },
     "on": "boat",
-    "sound_seed": "let ph = get(0.0) + 0.0000011;\nif ph > 1.0 { ph = 0.0; }\nset(0.0, ph);\nif ph < 0.3 { voice(108.0, 0.0, 0.3 + ph * 2.0); }\nif ph >= 0.3 { if ph < 0.36 { voice(0.0, 0.0, 0.0); } }\nif ph >= 0.36 { if ph < 0.62 { voice(114.0, 1.0, 0.08); } }\nif ph >= 0.62 { if ph < 0.68 { voice(0.0, 2.0, 0.0); } }\nif ph >= 0.68 { if ph < 0.96 { voice(104.0, 2.0, 0.85); } }\nif ph >= 0.96 { voice(0.0, 2.0, 0.0); }\n0.0",
+    "sound_seed": "let ph = get(0.0) + 0.00000026;\nif ph > 1.0 { ph = 0.0; }\nset(0.0, ph);\nif ph < 0.25 {\n let cp = ph * 4.0;\n if cp < 0.3 { voice(108.0, 0.0, 0.3 + cp * 2.0); }\n if cp >= 0.3 { if cp < 0.36 { voice(0.0, 0.0, 0.0); } }\n if cp >= 0.36 { if cp < 0.62 { voice(114.0, 1.0, 0.08); } }\n if cp >= 0.62 { if cp < 0.68 { voice(0.0, 2.0, 0.0); } }\n if cp >= 0.68 { if cp < 0.96 { voice(104.0, 2.0, 0.85); } }\n if cp >= 0.96 { voice(0.0, 2.0, 0.0); }\n} else {\n voice(0.0, 2.0, 0.0);\n}\n0.0",
     "type": "fisherman"
    },
    {
@@ -227,6 +227,16 @@
     },
     "skin_seed": "hsl(0.07,0.4,0.72);\ndisc(px,py-s*0.5,s*0.2);\nhsl(0.03,0.6,0.5);\ndisc(px,py+s*0.12,s*0.32);\n0.0",
     "type": "person"
+   },
+   {
+    "at": [
+     84,
+     14
+    ],
+    "id": "bell",
+    "skin_seed": "hsl(0.08, 0.55, 0.3);\ndisc(px, py, s * 0.3);\nhsl(0.07, 0.5, 0.2);\nline(px - s * 0.4, py - s * 0.34, px + s * 0.4, py - s * 0.34);\ndisc(px, py + s * 0.34, s * 0.09);\n0.0",
+    "sound_seed": "let bt = get(0.0) + 1.0;\nif bt < 1.5 { bt = 1050000.0; }\nset(0.0, bt);\nif bt > 1400000.0 { strike(98.0, 1.0); set(0.0, 0.0); }\n0.0",
+    "type": "bell"
    }
   ],
   "grid": 96,
