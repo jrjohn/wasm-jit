@@ -1355,14 +1355,34 @@ function snowing() { // is any snow on the ground? (cheap sample)
   return false;
 }
 
-function drawSnowfall(nowSec, W, H) { // host weather effect — pure rendering, replay-free
-  ctx.fillStyle = 'rgba(240,244,250,.8)';
-  for (let i = 0; i < 90; i++) {
-    const sp = 26 + (i % 5) * 9;
-    const x = ((i * 131.7) % W + nowSec * (9 + (i % 4) * 5)) % W;
-    const y = ((i * 89.3) % H + nowSec * sp) % H;
-    ctx.fillRect(x, y, 2, 2);
+// §26b snow that FALLS — a host particle pool (was: a scrolling hash pattern).
+// Each flake keeps its own speed, sway and size; bigger = nearer = faster,
+// so the fall gains depth. Still pure rendering, replay-free — host weather.
+let SNOWP = null;
+function drawSnowfall(nowSec, W, H) {
+  if (!SNOWP || SNOWP.w !== W || SNOWP.h !== H) {
+    SNOWP = { w: W, h: H, t: nowSec, p: [] };
+    for (let i = 0; i < 260; i++) SNOWP.p.push({
+      x: Math.random() * W, y: Math.random() * H,
+      v: 16 + Math.random() * 26,      // fall speed (px/s) before depth scaling
+      a: Math.random() * 6.283,        // sway phase
+      s: 0.7 + Math.random() * 1.9,    // size = pseudo-depth layer
+      d: 0.5 + Math.random() * 0.9,    // sway rate
+    });
   }
+  const dt = Math.min(Math.max(nowSec - SNOWP.t, 0), 0.1);
+  SNOWP.t = nowSec;
+  ctx.fillStyle = 'rgb(240,244,250)';
+  for (const f of SNOWP.p) {
+    f.y += f.v * f.s * dt;                                       // nearer falls faster
+    f.x += Math.sin(nowSec * f.d + f.a) * 13 * dt + 4 * f.s * dt; // sway + a breath of wind
+    if (f.y > H) { f.y = -4; f.x = Math.random() * W; }
+    if (f.x > W) f.x -= W; else if (f.x < 0) f.x += W;
+    ctx.globalAlpha = 0.3 + 0.5 * Math.min(f.s / 1.8, 1);
+    const r = f.s * 1.4;
+    ctx.fillRect(f.x, f.y, r, r);
+  }
+  ctx.globalAlpha = 1;
 }
 
 // ---- the eye, upgraded (畫質: the data was never blocky — only the renderer) ----
@@ -2481,7 +2501,7 @@ void main(){
     const TFS = `#version 300 es
 precision highp float;
 uniform sampler2D field; uniform float grid; uniform vec3 ldir; uniform vec3 eye;
-uniform float shOn; uniform mat4 lvp; uniform sampler2D shmap;
+uniform float shOn; uniform mat4 lvp; uniform sampler2D shmap; uniform float tsec;
 in vec2 vgp; in vec3 vwp;
 out vec4 frag;
 ${FPT_SAMPLE}
@@ -2517,13 +2537,24 @@ void main(){
   float hx = surfOf(smp(vgp + vec2(e, 0.0))) - surfOf(smp(vgp - vec2(e, 0.0)));
   float hz = surfOf(smp(vgp + vec2(0.0, e))) - surfOf(smp(vgp - vec2(0.0, e)));
   vec3 nn = normalize(vec3(-hx, 2.0 * e, -hz));
+  float wdepth = min(s.g / 3.0, 1.0) * smoothstep(0.02, 0.06, s.g);
+  if (wdepth > 0.003) { // §26 the water breathes: crossing micro-waves tilt the normal
+    vec2 wn = vec2(
+      sin(vgp.x * 2.6 + tsec * 1.5) * 0.05 + sin((vgp.x + vgp.y) * 1.7 + tsec * 0.8) * 0.03,
+      sin(vgp.y * 3.1 - tsec * 1.1) * 0.045 + sin((vgp.x - vgp.y) * 2.1 + tsec * 0.6) * 0.028);
+    nn = normalize(mix(nn, normalize(vec3(wn.x, 1.0, wn.y)), wdepth));
+  }
   vec3 L = normalize(ldir);
   float sh = shadowAt(vwp, nn, L);
   float diff = max(dot(nn, -L), 0.0);
-  float wdepth = min(s.g / 3.0, 1.0) * smoothstep(0.02, 0.06, s.g);
   vec3 amb = mix(vec3(0.40, 0.42, 0.48), vec3(0.56, 0.58, 0.64), nn.y * 0.5 + 0.5);
-  float dk = mix(0.55, 0.18, wdepth); // water lies flat — mute the hillshade under it
+  float dk = mix(0.55, 0.30, wdepth); // the waves may glint; the flat lies calm
   vec3 c = palette(s) * (amb + dk * diff * sh);
+  if (wdepth > 0.003) { // 月光鋪水路 — the moon's road on the breathing water
+    vec3 V = normalize(eye - vwp);
+    vec3 Hh = normalize(V - L);
+    c += wdepth * pow(max(dot(nn, Hh), 0.0), 110.0) * vec3(0.85, 0.9, 1.0) * 0.55 * sh;
+  }
   float d = length(vwp - eye);
   float fog = pow(min(d / (grid * 1.15), 1.0), 1.35) * 0.8; // same veil as the CPU eye
   c = mix(c, vec3(0.227, 0.365, 0.518), fog);
@@ -2597,7 +2628,8 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
     const uni = pr => ({ vp: gl.getUniformLocation(pr, 'vp'), ldir: gl.getUniformLocation(pr, 'ldir'),
       eye: gl.getUniformLocation(pr, 'eye'), shOn: gl.getUniformLocation(pr, 'shOn'),
       lvp: gl.getUniformLocation(pr, 'lvp'), shmap: gl.getUniformLocation(pr, 'shmap'),
-      field: gl.getUniformLocation(pr, 'field'), grid: gl.getUniformLocation(pr, 'grid') });
+      field: gl.getUniformLocation(pr, 'field'), grid: gl.getUniformLocation(pr, 'grid'),
+      tsec: gl.getUniformLocation(pr, 'tsec') });
     return { prog, bbProg, vao, icount: idx.length, fieldTex, staging: null, grid: 0,
              u: uni(prog),
              ub: { vpsz: gl.getUniformLocation(bbProg, 'vpsz'), zc: gl.getUniformLocation(bbProg, 'zc'),
@@ -2611,6 +2643,7 @@ function drawTerrainPass(vpM, L, eye, shOn, lvp) {
   gl.uniformMatrix4fv(T.u.vp, false, vpM); gl.uniformMatrix4fv(T.u.lvp, false, lvp);
   gl.uniform3fv(T.u.ldir, L); gl.uniform3fv(T.u.eye, eye);
   gl.uniform1f(T.u.shOn, shOn); gl.uniform1f(T.u.grid, T.grid);
+  gl.uniform1f(T.u.tsec, performance.now() / 1000);
   gl.uniform1i(T.u.shmap, 0); gl.uniform1i(T.u.field, 1);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.fieldTex);
   gl.activeTexture(gl.TEXTURE0);
