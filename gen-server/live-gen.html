@@ -842,7 +842,12 @@ function updateCam(dt) {
 
 // Voxel-space column renderer: per screen column, march the ray far→near is
 // inverted here (near→far with a rising horizon clip) — classic heightmap FP.
+// §25: when WebGL2 is present this whole march retires — the lattice becomes a
+// real heightfield mesh sharing the bodies' depth buffer (renderFieldFPGL);
+// this CPU path stays as the fallback eye.
 function renderFieldFP() {
+  if (FPT === null) { FPT = initFPTerrain(); window.__fpPath = FPT ? 'gl' : 'cpu'; }
+  if (FPT) { renderFieldFPGL(); return; }
   const g = fieldWorld.grid, W = cv.width, H = cv.height;
   const K = 0.55;                                  // field height → world units
   const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
@@ -1791,7 +1796,8 @@ window.__injectBadFieldCell = () => {
 };
 
 // ---------------- draw surface ----------------
-const cv = $('cv'), ctx = cv.getContext('2d');
+const cv = $('cv');
+let ctx = cv.getContext('2d'); // let: §25 briefly points the shared pen at an offscreen skin card
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
 
@@ -2420,6 +2426,307 @@ function renderBodiesFP(list, W, H) {
   ctx.clip();
   ctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H); // alpha over the terrain
   ctx.restore();
+}
+
+// ---- §25 the eye made whole: the terrain itself enters the GL world ----
+// The FP ground was a CPU column-march (2px columns, coarse depth steps) — the
+// stepped look was the renderer, never the data. Here the SAME f64 lattice
+// becomes a heightfield mesh inside the D3 context: per-pixel palette + slope
+// light + fog, and ONE shared depth buffer, so bodies and billboards are
+// occluded by the land per pixel — §22c's silhouette approximation retires on
+// this path (it still guards the CPU fallback). 地非圖層,地即世界.
+let FPT = null; // null = untried, false = no WebGL2 (CPU fallback), object = ready
+function fpViewProj() { // the walker's pinhole, one matrix for land/body/billboard
+  const K = 0.55;
+  // bilinear eye height: the camera stops stair-stepping between cells as you walk
+  const ey = sampleF(0, cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const t0 = -cam.px * sy - cam.pz * cy;
+  const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  const vp = new Float32Array([
+    2 * cy, 0.16 * sy, az * sy, sy,
+    0, 1.9, 0, 0,
+    -2 * sy, 0.16 * cy, az * cy, cy,
+    2 * (-cam.px * cy + cam.pz * sy), -1.9 * ey + 0.16 * t0, az * t0 + bz, t0,
+  ]);
+  return { vp, eye: [cam.px, ey, cam.pz], az, bz };
+}
+const FPT_SAMPLE = `
+vec4 tx(int x, int y){ int gi = int(grid) - 1; return texelFetch(field, ivec2(clamp(x, 0, gi), clamp(y, 0, gi)), 0); }
+vec4 smp(vec2 gp){ // bilinear over the lattice; beyond the field lies the sea
+  float gi = grid - 1.0;
+  if (gp.x < 0.0 || gp.y < 0.0 || gp.x > gi || gp.y > gi) return vec4(0.0, 2.5, 0.0, 0.0);
+  vec2 f = fract(gp); ivec2 b = ivec2(floor(gp));
+  return mix(mix(tx(b.x, b.y), tx(b.x + 1, b.y), f.x),
+             mix(tx(b.x, b.y + 1), tx(b.x + 1, b.y + 1), f.x), f.y);
+}
+float surfOf(vec4 s){ return (s.r + min(s.g, 3.0) * 0.6) * 0.55; }`;
+function initFPTerrain() {
+  try {
+    if (!D3.gl && !initD3()) return false;
+    const gl = D3.gl;
+    const TVS = `#version 300 es
+precision highp float;
+in vec2 uv;
+uniform sampler2D field; uniform float grid; uniform mat4 vp;
+out vec2 vgp; out vec3 vwp;
+${FPT_SAMPLE}
+void main(){
+  vec2 gp = (uv * 1.4 - 0.2) * (grid - 1.0); // a margin of sea beyond every shore
+  vec4 s = smp(gp);
+  vwp = vec3(gp.x, surfOf(s), gp.y);
+  vgp = gp;
+  gl_Position = vp * vec4(vwp, 1.0);
+}`;
+    const TFS = `#version 300 es
+precision highp float;
+uniform sampler2D field; uniform float grid; uniform vec3 ldir; uniform vec3 eye;
+uniform float shOn; uniform mat4 lvp; uniform sampler2D shmap;
+in vec2 vgp; in vec3 vwp;
+out vec4 frag;
+${FPT_SAMPLE}
+vec3 palette(vec4 s){ // terrainColor with soft seams — the top eye's palette, shared look
+  float h = s.r, w = s.g, v = s.b, sn = s.a;
+  float k1 = clamp((h - 55.0) / 25.0, 0.0, 1.0);
+  vec3 peak  = vec3(235.0, 240.0, 245.0);
+  vec3 rock  = vec3(120.0 + k1 * 80.0, 110.0 + k1 * 95.0, 100.0 + k1 * 115.0);
+  vec3 grass = vec3(105.0 - v * 45.0, 128.0 + v * 55.0, 72.0 - v * 20.0);
+  vec3 sand  = vec3(189.0 - v * 30.0, 174.0 + v * 10.0, 127.0);
+  vec3 c = mix(sand, grass, smoothstep(7.0, 11.0, h));
+  c = mix(c, rock, smoothstep(53.0, 57.0, h));
+  c = mix(c, peak, smoothstep(78.0, 82.0, h));
+  float kw = min(w / 3.0, 1.0) * 0.85 * smoothstep(0.02, 0.06, w);
+  c = mix(c, vec3(25.0, 95.0, 190.0), kw);
+  float ks = min(sn, 1.0) * 0.9 * smoothstep(0.01, 0.03, sn) * (1.0 - smoothstep(0.02, 0.05, w));
+  c = mix(c, vec3(240.0, 244.0, 250.0), ks);
+  return c / 255.0;
+}
+float shadowAt(vec3 wp, vec3 nn, vec3 L){ // same law as the bodies' fragment eye
+  if (shOn < 0.5) return 1.0;
+  vec4 lp = lvp * vec4(wp, 1.0);
+  vec3 q = lp.xyz / lp.w * 0.5 + 0.5;
+  if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0 || q.z > 1.0) return 1.0;
+  float bias = max(0.0026, 0.007 * (1.0 - max(dot(nn, -L), 0.0)));
+  return q.z - bias > texture(shmap, q.xy).r ? 0.5 : 1.0;
+}
+void main(){
+  vec4 s = smp(vgp);
+  // soften the waterline: a 3-tap blur turns the stepped bank into a soft shore
+  s.g = (s.g + smp(vgp + vec2(0.45, 0.25)).g + smp(vgp - vec2(0.3, 0.45)).g) / 3.0;
+  float e = 0.6;
+  float hx = surfOf(smp(vgp + vec2(e, 0.0))) - surfOf(smp(vgp - vec2(e, 0.0)));
+  float hz = surfOf(smp(vgp + vec2(0.0, e))) - surfOf(smp(vgp - vec2(0.0, e)));
+  vec3 nn = normalize(vec3(-hx, 2.0 * e, -hz));
+  vec3 L = normalize(ldir);
+  float sh = shadowAt(vwp, nn, L);
+  float diff = max(dot(nn, -L), 0.0);
+  float wdepth = min(s.g / 3.0, 1.0) * smoothstep(0.02, 0.06, s.g);
+  vec3 amb = mix(vec3(0.40, 0.42, 0.48), vec3(0.56, 0.58, 0.64), nn.y * 0.5 + 0.5);
+  float dk = mix(0.55, 0.18, wdepth); // water lies flat — mute the hillshade under it
+  vec3 c = palette(s) * (amb + dk * diff * sh);
+  float d = length(vwp - eye);
+  float fog = pow(min(d / (grid * 1.15), 1.0), 1.35) * 0.8; // same veil as the CPU eye
+  c = mix(c, vec3(0.227, 0.365, 0.518), fog);
+  frag = vec4(c, 1.0);
+}`;
+    const BVS = `#version 300 es
+in vec2 pp; in vec2 tt;
+uniform vec2 vpsz; uniform float zc; uniform vec2 zab;
+out vec2 vt;
+void main(){ // a skin card pinned at its being's depth — the land depth-tests it
+  vec2 ndc = vec2(pp.x / vpsz.x * 2.0 - 1.0, 1.0 - pp.y / vpsz.y * 2.0);
+  gl_Position = vec4(ndc * zc, zab.x * zc + zab.y, zc);
+  vt = tt;
+}`;
+    const BFS = `#version 300 es
+precision mediump float;
+uniform sampler2D skin; in vec2 vt; out vec4 frag;
+void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
+    const mk = (vs, fs, binds) => {
+      const sh = (ty, src) => { const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+      const pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, fs));
+      for (const [i, nm] of binds) gl.bindAttribLocation(pr, i, nm);
+      gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+      return pr;
+    };
+    const prog = mk(TVS, TFS, [[0, 'uv']]);
+    const bbProg = mk(BVS, BFS, [[0, 'pp'], [1, 'tt']]);
+    // the ground plan: one static N×N sheet; height lives in the texture
+    const N = 256;
+    const pos = new Float32Array(N * N * 2);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const o = (j * N + i) * 2; pos[o] = i / (N - 1); pos[o + 1] = j / (N - 1); }
+    const idx = new Uint32Array((N - 1) * (N - 1) * 6);
+    let q = 0;
+    for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+      const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+      idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d;
+    }
+    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    const fieldTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.activeTexture(gl.TEXTURE0);
+    // billboard gear: one dynamic quad + one skin-card texture + one offscreen card
+    const bbVao = gl.createVertexArray(); gl.bindVertexArray(bbVao);
+    const bbBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bbBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(16), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+    gl.bindVertexArray(null);
+    const bbTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, bbTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.activeTexture(gl.TEXTURE0);
+    const bbCanvas = document.createElement('canvas');
+    bbCanvas.width = bbCanvas.height = 256; // skins draw at scale 60 within ±120 of center
+    const uni = pr => ({ vp: gl.getUniformLocation(pr, 'vp'), ldir: gl.getUniformLocation(pr, 'ldir'),
+      eye: gl.getUniformLocation(pr, 'eye'), shOn: gl.getUniformLocation(pr, 'shOn'),
+      lvp: gl.getUniformLocation(pr, 'lvp'), shmap: gl.getUniformLocation(pr, 'shmap'),
+      field: gl.getUniformLocation(pr, 'field'), grid: gl.getUniformLocation(pr, 'grid') });
+    return { prog, bbProg, vao, icount: idx.length, fieldTex, staging: null, grid: 0,
+             u: uni(prog),
+             ub: { vpsz: gl.getUniformLocation(bbProg, 'vpsz'), zc: gl.getUniformLocation(bbProg, 'zc'),
+                   zab: gl.getUniformLocation(bbProg, 'zab'), skin: gl.getUniformLocation(bbProg, 'skin') },
+             bbVao, bbBuf, bbTex, bbCanvas, bbCtx: bbCanvas.getContext('2d'), bbQuad: new Float32Array(16) };
+  } catch (e) { return false; }
+}
+function drawTerrainPass(vpM, L, eye, shOn, lvp) {
+  const T = FPT, gl = D3.gl;
+  gl.useProgram(T.prog);
+  gl.uniformMatrix4fv(T.u.vp, false, vpM); gl.uniformMatrix4fv(T.u.lvp, false, lvp);
+  gl.uniform3fv(T.u.ldir, L); gl.uniform3fv(T.u.eye, eye);
+  gl.uniform1f(T.u.shOn, shOn); gl.uniform1f(T.u.grid, T.grid);
+  gl.uniform1i(T.u.shmap, 0); gl.uniform1i(T.u.field, 1);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.fieldTex);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindVertexArray(T.vao);
+  gl.drawElements(gl.TRIANGLES, T.icount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+}
+function drawBillboardsGL(W, H, eyeH, tNow) {
+  const T = FPT, gl = D3.gl, K = 0.55, fov = 1.0;
+  const horizon = H * 0.42, focal = H * 0.95;
+  const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
+  const list = [];
+  for (const e of ENTITIES) {
+    if (e.bodyRun) continue; // its true body already stands in the world
+    const dx = e.x - cam.px, dz = e.y - cam.pz;
+    const zc = dx * sinY + dz * cosY;
+    if (zc < 1.2) continue;
+    const off = (dx * cosY - dz * sinY) / zc;
+    if (Math.abs(off) > fov * 0.7) continue;
+    list.push({ e, zc, off });
+  }
+  if (!list.length) return;
+  list.sort((a, b) => b.zc - a.zc); // far → near under one shared depth truth
+  const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  gl.useProgram(T.bbProg);
+  gl.uniform2f(T.ub.vpsz, W, H);
+  gl.uniform2f(T.ub.zab, az, bz);
+  gl.uniform1i(T.ub.skin, 2);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, T.bbTex);
+  gl.bindVertexArray(T.bbVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, T.bbBuf);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false); // tested by the land, but never writing over each other
+  const SS = 60, C = 256, bctx = T.bbCtx;
+  for (const { e, zc, off } of list) {
+    const sx = (off / fov + 0.5) * W;
+    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
+    const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
+    const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
+    const s = Math.max(3, (focal / zc) * 1.1);
+    bctx.clearRect(0, 0, C, C);
+    const keep = ctx; ctx = bctx; // the shared pen visits the skin card
+    try { drawSkin(e, C / 2, C / 2, SS, tNow); } finally { ctx = keep; }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, T.bbCanvas);
+    const half = s * (C / (2 * SS)), cyp = syg - s * 0.4; // card spans ±2s around the drawn center
+    const Q = T.bbQuad;
+    Q[0] = sx - half; Q[1] = cyp - half; Q[2] = 0; Q[3] = 0;
+    Q[4] = sx + half; Q[5] = cyp - half; Q[6] = 1; Q[7] = 0;
+    Q[8] = sx - half; Q[9] = cyp + half; Q[10] = 0; Q[11] = 1;
+    Q[12] = sx + half; Q[13] = cyp + half; Q[14] = 1; Q[15] = 1;
+    gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
+    gl.uniform1f(T.ub.zc, zc);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  gl.depthMask(true); gl.disable(gl.BLEND);
+  gl.bindVertexArray(null);
+  gl.activeTexture(gl.TEXTURE0);
+}
+function renderFieldFPGL() {
+  const T = FPT, R = D3, gl = R.gl;
+  const g = fieldWorld.grid, W = cv.width, H = cv.height, K = 0.55;
+  const tNow = performance.now() / 1000;
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+  sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  // the lattice → texture, fresh every frame (living cells rewrite the ground)
+  if (T.grid !== g) { T.grid = g; T.staging = new Float32Array(g * g * 4); }
+  const st = T.staging, n = g * g;
+  for (let i = 0; i < n; i++) {
+    st[i * 4] = FIELD[i]; st[i * 4 + 1] = FIELD[n + i];
+    st[i * 4 + 2] = FIELD[2 * n + i]; st[i * 4 + 3] = FIELD[3 * n + i];
+  }
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.fieldTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, g, g, 0, gl.RGBA, gl.FLOAT, st);
+  gl.activeTexture(gl.TEXTURE0);
+  // bodies → instance buffers (the host places, the seed shapes — §22b)
+  for (const k of ['sph', 'box', 'cyl', 'cone']) R.kinds[k].n = 0;
+  R.nt = 0; R.ordN = 0;
+  R.col = [0.55, 0.66, 0.9]; R.shine = 0.15; R.lumv = 0; R.patv = 0;
+  const S = bodyScene();
+  if (S) { S.camv = null; S.lightv = null; }
+  for (const e of ENTITIES) {
+    if (!e.bodyRun) continue;
+    sampleFieldAll(e.x, e.y, g, CPU_SMP);
+    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K;
+    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
+    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+  }
+  const { vp, eye } = fpViewProj();
+  const L = [-0.42, -0.85, -0.31];
+  const ll = Math.hypot(L[0], L[1], L[2]); L[0] /= ll; L[1] /= ll; L[2] /= ll;
+  if (R.gcv.width < W || R.gcv.height < H) { R.gcv.width = Math.max(R.gcv.width, W); R.gcv.height = Math.max(R.gcv.height, H); }
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST);
+  // pass 1 — the light's view: land AND bodies both cast (寺影落岸,丘影藏舟)
+  const lvp = m4mul(m4ortho(60, 60, 10, 260),
+    m4look(cam.px - L[0] * 90, -L[1] * 90, cam.pz - L[2] * 90, cam.px, 0, cam.pz));
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.white);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.shFBO);
+  gl.viewport(0, 0, 1024, 1024); gl.clear(gl.DEPTH_BUFFER_BIT);
+  drawTerrainPass(lvp, L, eye, 0, lvp);
+  d3drawAll({ vp: lvp, L, eye, shOn: 0, lvp });
+  // pass 2 — the walker's view: one depth buffer holds land, bodies, billboards
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.bindTexture(gl.TEXTURE_2D, R.shTex);
+  drawTerrainPass(vp, L, eye, 1, lvp);
+  d3drawAll({ vp, L, eye, shOn: 1, lvp });
+  drawBillboardsGL(W, H, eye[1], tNow);
+  gl.disable(gl.SCISSOR_TEST);
+  ctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H);
+  if (snowing()) drawSnowfall(tNow, W, H);
+  ctx.fillStyle = 'rgba(230,237,243,.55)';
+  ctx.font = '13px ui-monospace';
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
 }
 
 // ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
