@@ -870,9 +870,13 @@ function renderFieldFP() {
       }
     }
   }
+  // §22b true bodies first (real 3D, camera-matched), then the billboards
+  const embodied = ENTITIES.filter(e => e.bodyRun);
+  if (embodied.length && S_BODY) renderBodiesFP(embodied, W, H);
   // inhabitants as billboards (v1: no occlusion behind hills — noted limit)
   const K2 = K, sinY2 = Math.sin(cam.yaw), cosY2 = Math.cos(cam.yaw);
   for (const e of ENTITIES) {
+    if (e.bodyRun) continue; // its true body already stands in the world
     const dx = e.x - cam.px, dz = e.y - cam.pz;
     const zc = dx * sinY2 + dz * cosY2;
     if (zc < 1.2) continue;
@@ -1145,6 +1149,14 @@ function compileEntities(world, g) {
       } catch (e) { $('stage-status').textContent = `skin of '${ent.id}' rejected: ${e.message ?? e}`; }
     } else if (!SKINS[ent.type]) {
       recallGrownSkin(ent); // a bare novel type: reincarnate a saved skin from the library
+    }
+    // §22b the being's true 3D body — compiled through the draw3d fence; the
+    // HOST places it (base matrix), the seed only shapes it. 身在世界,形由種子.
+    if (typeof def.body_seed === 'string' && def.body_seed.trim() && bodyScene()) {
+      try {
+        const bb = compile_draw3d_wasm(def.body_seed);
+        ent.bodyRun = new WebAssembly.Instance(new WebAssembly.Module(bb), { env: d3env(S_BODY) }).exports.run;
+      } catch (e) { say('err', `entity '${ent.id}' body refused: ${e.message || e}`); }
     }
     if (ent.mind?.persona) mindRegister(ent);
     return ent;
@@ -2305,6 +2317,61 @@ function renderScene(S, t, tctx, W, H) {
     S.lastEmit = S.emitPending; S.onEmit(S.emitPending);
   }
 }
+// §22b bodies in the world — entities with a body_seed render through the REAL
+// 3D pipeline (shadows, materials), camera-matched EXACTLY to the walker's
+// pinhole. The host owns placement (base matrix) and the camera; the seed only
+// shapes its own body. 身在世界,形由種子.
+let S_BODY = null;
+function bodyScene() {
+  if (S_BODY) return S_BODY;
+  if (!D3.gl && !initD3()) return null;
+  S_BODY = mkScene3(null, { x: -1, y: -1, down: 0 }, [], null);
+  return S_BODY;
+}
+function renderBodiesFP(list, W, H) {
+  const R = D3, gl = R.gl, S = S_BODY, K = 0.55;
+  for (const k of ['sph', 'box', 'cyl', 'cone']) R.kinds[k].n = 0;
+  R.nt = 0; R.ordN = 0;
+  R.col = [0.55, 0.66, 0.9]; R.shine = 0.15; R.lumv = 0; R.patv = 0;
+  S.camv = null; S.lightv = null;
+  for (const e of list) {
+    sampleFieldAll(e.x, e.y, fieldWorld.grid, CPU_SMP);
+    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K;
+    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
+    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+  }
+  // the walker's pinhole as one matrix: clip.x = 2·xc, clip.y = 1.9·yc + 0.16·zc, w = zc
+  const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const t0 = -cam.px * sy - cam.pz * cy;
+  const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  const vp = new Float32Array([
+    2 * cy, 0.16 * sy, az * sy, sy,
+    0, 1.9, 0, 0,
+    -2 * sy, 0.16 * cy, az * cy, cy,
+    2 * (-cam.px * cy + cam.pz * sy), -1.9 * eye + 0.16 * t0, az * t0 + bz, t0,
+  ]);
+  const L = [-0.42, -0.85, -0.31];
+  const ll = Math.hypot(L[0], L[1], L[2]); L[0] /= ll; L[1] /= ll; L[2] /= ll;
+  if (R.gcv.width < W || R.gcv.height < H) { R.gcv.width = Math.max(R.gcv.width, W); R.gcv.height = Math.max(R.gcv.height, H); }
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST);
+  // shadow view follows the walker so nearby bodies stay in the map
+  const lvp = m4mul(m4ortho(60, 60, 10, 260),
+    m4look(cam.px - L[0] * 90, -L[1] * 90, cam.pz - L[2] * 90, cam.px, 0, cam.pz));
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.white);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.shFBO);
+  gl.viewport(0, 0, 1024, 1024); gl.clear(gl.DEPTH_BUFFER_BIT);
+  d3drawAll({ vp: lvp, L, eye: [cam.px, eye, cam.pz], shOn: 0, lvp });
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.bindTexture(gl.TEXTURE_2D, R.shTex);
+  d3drawAll({ vp, L, eye: [cam.px, eye, cam.pz], shOn: 1, lvp });
+  gl.disable(gl.SCISSOR_TEST);
+  ctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H); // alpha over the terrain
+}
+
 // ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
 // scene; bv(i) reads bound cell outputs, emit(v) fires the node's on_input. ----
 let SC3 = [];

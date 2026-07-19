@@ -763,6 +763,12 @@ fn validate(obj: &Value) -> Result<(), String> {
                         compile_check(seed, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000)
                             .map_err(|e| format!("entity '{id}' skin_seed failed to compile: {e}"))?;
                     }
+                    // §22b a being may carry a true 3D BODY — a draw3d cell the
+                    // host places at its coordinates (the fence: same 30 words)
+                    if let Some(seed) = ent.get("body_seed").and_then(|s| s.as_str()) {
+                        compile_check(seed, &DRAW3D_PARAMS, &DRAW3D_IMPORTS, 5_000_000)
+                            .map_err(|e| format!("entity '{id}' body_seed failed to compile: {e}"))?;
+                    }
                     // §24b 聲從身出: a being may carry a sound cell — its voice
                     // sits at ITS coordinates, spatialized by the world. The
                     // seed passes the same SOUND fence as the world's ambient.
