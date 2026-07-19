@@ -155,7 +155,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl, compile_sound_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
 await initSkins();
@@ -743,7 +743,7 @@ function manifestUi(schema) {
   wires = schema.wires ?? [];
   charts = [];
   WIDGETS = []; // a new UI = fresh grown-widget instances (the library remembers the looks)
-  LISTS = []; stopFeeds();
+  LISTS = []; stopFeeds(); soundStop();
   const stage = $('stage');
   stage.innerHTML = '';
   stage.appendChild(render(schema.tree));
@@ -1465,7 +1465,7 @@ function renderField() {
 }
 
 function manifestField(world) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds(); soundStop();
   drawRun = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
@@ -1783,7 +1783,7 @@ const env = {
 // keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds(); soundStop();
   fieldWorld = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
@@ -2310,8 +2310,109 @@ function makeScene3D(node) {
 // A pixel has no memory (no get/set), no drawing calls, no reach — the DSL
 // transpiles to GLSL and the GPU runs it at full resolution, per pixel.
 const SHD = { prog: null };
+
+// ---------------- sound surface (§24): the audio shader ----------------
+// Where "shader" runs the seed once per PIXEL, "sound" runs it once per audio
+// SAMPLE — 44100×/s inside an AudioWorklet, on the audio thread. run(t) -> a
+// sample in -1..1. The DSL's sin/cos ARE a synthesizer (additive, FM, bytebeat).
+// Narrowest fence with a memory: math + 32 slots. The master volume is a host
+// GainNode the seed can never reach — the ear is protected by law.
+const SOUND_WORKLET = `
+class SeedSynth extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.run = null; this.dead = false; this.n = 0; this.slots = new Float64Array(32);
+    this.port.onmessage = (e) => {
+      const d = e.data;
+      if (d.stop) { this.run = null; return; }
+      if (d.bytes) {
+        try {
+          const slots = this.slots;
+          const env = { sin: Math.sin, cos: Math.cos,
+            get: (i) => slots[i & 31] || 0, set: (i, v) => { slots[i & 31] = v; } };
+          this.run = new WebAssembly.Instance(new WebAssembly.Module(d.bytes), { env }).exports.run;
+          this.dead = false; this.n = 0; this.slots.fill(0);
+        } catch (err) { this.run = null; this.port.postMessage({ err: String(err) }); }
+      }
+    };
+  }
+  process(inputs, outputs) {
+    const out = outputs[0]; if (!out || !out[0]) return true;
+    const ch0 = out[0], sr = sampleRate;
+    if (!this.run || this.dead) { for (let i = 0; i < ch0.length; i++) ch0[i] = 0; return true; }
+    const run = this.run;
+    try {
+      for (let i = 0; i < ch0.length; i++) {
+        let v = run(this.n / sr);
+        if (!(v > -4 && v < 4)) v = 0;          // NaN / inf guard
+        v = v < -1 ? -1 : (v > 1 ? 1 : v);
+        for (let c = 0; c < out.length; c++) out[c][i] = v;
+        this.n++;
+      }
+    } catch (e) { this.dead = true; this.port.postMessage({ trapped: String(e) }); for (let i = 0; i < ch0.length; i++) ch0[i] = 0; }
+    return true;
+  }
+}
+registerProcessor('seed-synth', SeedSynth);
+`;
+let AUDIO = { ctx: null, node: null, gain: null, analyser: null, ready: null, active: false, muted: false, buf: null };
+async function ensureAudio() {
+  if (AUDIO.ready) return AUDIO.ready;
+  AUDIO.ready = (async () => {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const url = URL.createObjectURL(new Blob([SOUND_WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    const node = new AudioWorkletNode(ctx, 'seed-synth', { outputChannelCount: [1] });
+    const analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
+    const gain = ctx.createGain(); gain.gain.value = 0.55; // master ceiling — host law
+    node.connect(analyser); analyser.connect(gain); gain.connect(ctx.destination);
+    node.port.onmessage = (e) => { if (e.data.trapped || e.data.err) $('stage-status').textContent = 'sound cell silenced: ' + (e.data.trapped || e.data.err); };
+    AUDIO.ctx = ctx; AUDIO.node = node; AUDIO.gain = gain; AUDIO.analyser = analyser;
+    AUDIO.buf = new Float32Array(analyser.fftSize);
+    return AUDIO;
+  })();
+  return AUDIO.ready;
+}
+function soundStop() { if (AUDIO.node) AUDIO.node.port.postMessage({ stop: true }); AUDIO.active = false; }
+function soundMute(on) { AUDIO.muted = on; if (AUDIO.gain) AUDIO.gain.gain.value = on ? 0 : 0.55; const b = $('sound-mute'); if (b) b.textContent = on ? '🔇 unmute' : '🔊 mute'; }
+async function manifestSound(seed) {
+  drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null; SHD.prog = null; APP.key = null; stopFeeds();
+  const t0 = performance.now();
+  const bytes = compile_sound_wasm(seed); // the fence: over-reach dies right here
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  AUDIO.node.port.postMessage({ bytes });   // hand the wasm to the audio thread
+  AUDIO.active = true;
+  $('stage').innerHTML = '';
+  const bar = document.createElement('div'); bar.style.cssText = 'margin-bottom:.6rem';
+  const mb = document.createElement('button'); mb.id = 'sound-mute'; mb.textContent = AUDIO.muted ? '🔇 unmute' : '🔊 mute';
+  mb.onclick = () => soundMute(!AUDIO.muted); bar.appendChild(mb);
+  $('stage').appendChild(bar);
+  cv.style.display = 'block';
+  $('stage-status').textContent =
+    `manifested: ${bytes.length}-byte sound cell in ${(performance.now() - t0).toFixed(1)}ms — the seed IS the synth; it runs once per audio sample (${AUDIO.ctx.sampleRate}Hz). master volume is host law.`;
+  lastManifest = { surface: 'sound', payload: seed };
+  $('seed-box').style.display = 'block'; $('seed-json').textContent = seed;
+  document.title = 'live-gen SOUND OK';
+}
+function renderScope() { // the ear's picture: the live waveform on the canvas
+  const a = AUDIO.analyser; if (!a) return;
+  a.getFloatTimeDomainData(AUDIO.buf);
+  const b = AUDIO.buf, W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1220'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.beginPath();
+  const step = b.length / W;
+  for (let x = 0; x < W; x++) { const v = b[(x * step) | 0]; const y = H * 0.5 - v * H * 0.42; x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+}
+window.__manifestSound = s => manifestSound(s);
+window.__soundState = () => ({ active: AUDIO.active, muted: AUDIO.muted, gain: AUDIO.gain ? AUDIO.gain.gain.value : null, ctx: AUDIO.ctx ? AUDIO.ctx.state : null });
+window.__soundBad = s => { try { compile_sound_wasm(s); return 'COMPILED'; } catch (e) { return 'rejected: ' + (e.message || e); } };
+window.__soundRMS = () => { const a = AUDIO.analyser; if (!a) return 0; a.getFloatTimeDomainData(AUDIO.buf); let s = 0; for (const v of AUDIO.buf) s += v * v; return Math.sqrt(s / AUDIO.buf.length); };
+
 function manifestShader(seed) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds(); soundStop();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null;
   if (!D3.gl && !initD3()) { say('err', 'shader needs WebGL2 — unavailable here'); return; }
   const t0 = performance.now();
@@ -2380,7 +2481,7 @@ function renderShader(t) {
 }
 window.__manifestShader = s => manifestShader(s);
 function manifestDraw3d(seed) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds(); soundStop();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; SHD.prog = null;
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();
@@ -2418,6 +2519,8 @@ window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0,
       updateCam(dt);
       renderFieldFP();
     }
+  } else if (AUDIO.active) {
+    renderScope(); // §24: the audio runs on its own thread; here we draw its waveform
   } else if (SHD.prog) {
     renderShader(now / 1000); // L4: every pixel runs the seed
   } else if (D3.main && D3.main.run) {
@@ -2487,6 +2590,7 @@ async function send() {
     else if (d.surface === 'field') manifestField(d.world);
     else if (d.surface === 'draw3d') manifestDraw3d(d.seed);
     else if (d.surface === 'shader') manifestShader(d.seed);
+    else if (d.surface === 'sound') manifestSound(d.seed);
     else manifestDraw(d.seed);
   };
   try {
@@ -2617,6 +2721,7 @@ function manifestSaved(bundle) {
   else if (bundle.surface === 'field') manifestField(bundle.payload);
   else if (bundle.surface === 'draw3d') manifestDraw3d(bundle.payload);
   else if (bundle.surface === 'shader') manifestShader(bundle.payload);
+  else if (bundle.surface === 'sound') manifestSound(bundle.payload);
   else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
   restoreChat(bundle.chat);
   say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);

@@ -4,6 +4,7 @@ You generate UI, drawings, or living worlds for the wasm-jit live-manifestation 
   {"surface":"draw","seed":"..."}     — a 2D drawing script (single picture/animation)
   {"surface":"draw3d","seed":"..."}   — a 3D SCENE script (an object/scene the ask wants in three dimensions: a planet system, a city block, a tree, a molecule)
   {"surface":"shader","seed":"..."}   — a PER-PIXEL GPU shader (ONLY when the ask explicitly says shader / raymarch / per-pixel; generation is slow — never choose it otherwise)
+  {"surface":"sound","seed":"..."}    — a SYNTHESIZER: the seed runs once per audio sample. Use for the ask that wants a SOUND / tone / drone / chime / ambience / music (NOT for speech/voice — that is not a program).
   {"surface":"field","world":{...}}   — a LIVING WORLD on a shared terrain grid (mountains, rain, rivers, ecosystems — anything where many processes co-create a landscape over time)
 
 Both kinds of logic are written in the SEED DSL and will be compiled to sandboxed WebAssembly. The DSL is tiny and strict:
@@ -234,6 +235,20 @@ PIXEL on the GPU: params x, y (pixel coords, top-left origin), t, w, h. Capabili
 narrowest fence of all: sin cos min max abs sqrt floor + rgb/hsl/hue (set THIS pixel's colour)
 + mx()/my()/down() (pointer). NO get/set (a pixel has no memory), no drawing calls. Same DSL
 syntax; end with 0.0.
+
+=== surface "sound" — the seed IS a synthesizer (the ear's shader) ===
+"seed" = one DSL script, run(t) -> f64, called ONCE PER AUDIO SAMPLE (44100×/s). t = seconds.
+Return one sample in −1..1 (the host clamps; keep amplitudes well under 1 to avoid clipping —
+sum voices at ~0.2–0.3 each). Capabilities: sin cos + get(slot)/set(slot,v) (32 slots for
+envelopes, phase, simple sequencing). NO drawing, NO pointer, NO reach. The master volume is
+the host's, not yours.
+- a pure tone: sin(6.2832 * 440.0 * t) * 0.3
+- vibrato / FM: sin(6.2832 * 220.0 * t + sin(6.2832 * 6.0 * t) * 2.0) * 0.3
+- an envelope with the phase within a repeating note: let ph = t % 0.5; let env = max(1.0 - ph * 4.0, 0.0);
+  ... * env  (a plucked/bell decay every half second)
+- a chord = sum of a few sines at ratios (1, 1.25, 1.5) * small amplitudes
+- wind/noise-ish texture: high-frequency FM with slowly drifting amplitude
+- end with the sample expression (no semicolon), like every seed.
 
 === surface "field" — a living world ===
 "world" = {"grid":96,"view":"top"|"first_person","cells":[...]}

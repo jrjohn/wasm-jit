@@ -75,6 +75,9 @@ const SKIN_IMPORTS: [HostFn; 10] = wasm_jit::SKIN_IMPORTS;
 // Grown-widget ABI (詞彙自生成), shared with the browser for the same reason.
 const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
+// Sound ABI (§24 — the audio shader), shared likewise.
+const SOUND_PARAMS: [&str; 1] = wasm_jit::SOUND_PARAMS;
+const SOUND_IMPORTS: [HostFn; 4] = wasm_jit::SOUND_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
 const DRAW3D_IMPORTS: [HostFn; 30] = wasm_jit::DRAW3D_IMPORTS;
@@ -652,6 +655,15 @@ fn validate(obj: &Value) -> Result<(), String> {
             wasm_jit::parser::to_glsl(&prog)
                 .map_err(|e| format!("shader seed rejected: {e}"))?;
             Ok(())
+        }
+        Some("sound") => {
+            // §24: the seed runs once per audio sample — validate by compiling
+            let seed = obj
+                .get("seed")
+                .and_then(|s| s.as_str())
+                .ok_or("surface \"sound\" lacks \"seed\"")?;
+            compile_check(seed, &SOUND_PARAMS, &SOUND_IMPORTS, 4096)
+                .map_err(|e| format!("sound seed failed to compile: {e}"))
         }
         Some("field") => {
             let world = obj.get("world").ok_or("surface \"field\" lacks \"world\"")?;
@@ -1793,6 +1805,26 @@ mod tests {
             "cells":[{"id":"a","params":["x"],"script":"x"}],
             "tree":{"type":"feed","url":"https://x.y/z","plucks":[{"path":"p","cell":"missing"}]},"wires":[]}});
         assert!(validate(&ghost_pluck).unwrap_err().contains("unknown cell"));
+    }
+
+    #[test]
+    fn sound_surface_validates_and_rejects() {
+        // §24: a two-voice synth (bell + wind) with an envelope in the slots
+        let ok = serde_json::json!({"surface":"sound","seed":
+            "let phase = t % 8.0;\nlet decay = max(1.0 - phase * 0.4, 0.0);\nlet bell = sin(6.2832 * 523.25 * phase) * decay * 0.3;\nlet wind = sin(6.2832 * 110.0 * t + sin(t * 0.7) * 3.0) * (0.2 + 0.1 * sin(t * 0.31));\nset(0.0, get(0.0) * 0.99 + bell * 0.01);\nbell + wind"});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        let overreach = serde_json::json!({"surface":"sound","seed":"disc(1.0, 2.0, 3.0);\n0.0"});
+        assert!(validate(&overreach).unwrap_err().contains("failed to compile"));
+        let missing = serde_json::json!({"surface":"sound"});
+        assert!(validate(&missing).unwrap_err().contains("lacks"));
+    }
+
+    #[test]
+    fn sound_abi_matches_crate() {
+        assert_eq!(SOUND_IMPORTS.len(), wasm_jit::SOUND_IMPORTS.len());
+        for (a, b) in SOUND_IMPORTS.iter().zip(wasm_jit::SOUND_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
     }
 
     #[test]

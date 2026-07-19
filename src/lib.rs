@@ -279,6 +279,36 @@ pub fn compile_draw3d_wasm(src: &str) -> Result<Vec<u8>, JsError> {
     .map_err(|e| JsError::new(&e))
 }
 
+
+/// The SOUND ABI — the audio shader (§24, the ear's skin): where surface
+/// "shader" runs the seed once per PIXEL, surface "sound" runs it once per
+/// AUDIO SAMPLE (44100×/s in an AudioWorklet). run(t) -> one sample in -1..1.
+/// The narrowest fence with a memory: pure math + 32 slots for envelopes and
+/// sequencing. No pointer, no drawing, no reach — and the master volume is
+/// host law, outside the cell's world entirely.
+pub const SOUND_PARAMS: [&str; 1] = ["t"];
+pub const SOUND_IMPORTS: [codegen::HostFn; 4] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+];
+
+/// Compile a sound seed. Fuel is small and per-call: at 44.1kHz a runaway loop
+/// inside one sample would hang the audio thread — the meter traps it instead.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_sound_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &SOUND_PARAMS,
+        &SOUND_IMPORTS,
+        codegen::CompileOpts { fuel: Some(4096), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
 /// The GROWN-WIDGET ABI (詞彙自生成): a widget the fixed vocabulary lacks — a
 /// knob, a clock, a heatmap cell — enters as a fenced cell through the same
 /// drawing-primitive gate as a grown skin. `run(t, w, h)` every frame on its
