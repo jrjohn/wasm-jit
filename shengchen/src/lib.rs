@@ -133,11 +133,12 @@ impl Event {
                 if *t >= *dur {
                     return (0.0, false);
                 }
-                // a sharp tick that dies fast — drops must stay SEPARATE, not smear:
-                // ~1ms broadband IMPACT (the "tak" of landing), then the narrow ring
+                // a sharp tick that dies fast — drops must stay SEPARATE, not smear.
+                // The landing "tak" is the SAME watery body driven harder for ~1ms —
+                // a raw broadband click reads as static electricity, not water
                 let env = (-14.0 * *t / *dur).exp();
-                let impact = if *t < 0.0012 { rng.bi() * (1.0 - *t / 0.0012) * 0.4 } else { 0.0 };
-                (bp.run(rng.bi()) * env * *amp + impact * *amp, true)
+                let drive = if *t < 0.0012 { 3.2 } else { 1.0 };
+                (bp.run(rng.bi() * drive) * env * *amp, true)
             }
             Event::Bubble { t, dur, amp, f, ph } => {
                 *t += dt;
@@ -435,7 +436,7 @@ impl Engine {
             let b = bright.clamp(0.0, 1.0);
             let r = &mut self.rng;
             (
-                1000.0 + b * 7000.0 * (0.6 + 0.4 * r.f()),
+                900.0 + b * 5200.0 * (0.6 + 0.4 * r.f()),
                 0.003 + 0.006 * r.f(),
                 {
                     // most drops small, a few fat — the skew is what reads as "rain"

@@ -79,12 +79,12 @@ fn main() {
             (2.6, 110.0, 0.0, 0.80), // ...and closes back toward the nose
             (3.4, 114.0, 1.0, 0.05), // MORPH into 阿 — no gap, the mouth opens
             (6.2, 114.0, 1.0, 0.10), // 阿 held, open
-            (7.0, 106.0, 2.0, 0.30), // MORPH into 吽 — lips rounding
-            (9.0, 102.0, 2.0, 0.85), // 吽 sinks into the deep hum
-            (10.6, 100.0, 2.0, 0.95), // ...
-            (11.4, 0.0, 2.0, 0.95),  // the breath ends (only here)
+            (7.0, 104.0, 2.0, 0.35), // MORPH into 吽 — lips rounding
+            (8.2, 103.0, 2.0, 0.92), // 吽 sinks fast into the deep hum (short)
+            (9.25, 103.0, 2.0, 0.95), // hold the hum — PITCH STEADY, no dive
+            (9.4, 0.0, 2.0, 0.95),   // throat closes; the 60ms envelope fades it
         ];
-        let wav = perform(&mut e, 12.0, |b, e| {
+        let wav = perform(&mut e, 10.0, |b, e| {
             let tt = t(b);
             // interpolate the score — every control glides, nothing jumps;
             // the throat's own 60ms envelope rounds the final breath-out
@@ -229,15 +229,15 @@ fn main() {
             // the fisherman hums 嗡阿吽 from t=4 — ONE BREATH, the mouth
             // morphing o→a→u without the throat ever stopping (字字相連)
             let ct = tt - 4.0;
-            let (f0, vow, nas) = if ct < 0.0 || ct > 9.6 {
+            let (f0, vow, nas) = if ct < 0.0 || ct > 8.3 {
                 (0.0, 2.0, 0.9)
             } else {
                 match ct {
                     x if x < 2.6 => (108.0, 0.0, 0.6 - 0.35 * (x / 2.6) + 0.55 * (x / 2.6) * (x / 2.6)),
                     x if x < 3.2 => (108.0 + 6.0 * ((x - 2.6) / 0.6), (x - 2.6) / 0.6, 0.1),
-                    x if x < 5.8 => (114.0, 1.0, 0.08),
-                    x if x < 6.4 => (114.0 - 8.0 * ((x - 5.8) / 0.6), 1.0 + (x - 5.8) / 0.6, 0.3),
-                    x => (106.0 - 5.0 * ((x - 6.4) / 3.2), 2.0, 0.3 + 0.6 * ((x - 6.4) / 3.2)),
+                    x if x < 5.4 => (114.0, 1.0, 0.08),
+                    x if x < 6.0 => (114.0 - 10.0 * ((x - 5.4) / 0.6), 1.0 + (x - 5.4) / 0.6, 0.3),
+                    x => (104.0, 2.0, (0.35 + 0.6 * ((x - 6.0) / 1.8)).min(0.95)), // 吽 short, pitch STEADY
                 }
             };
             e.voice_set(weng, f0, vow, nas);
