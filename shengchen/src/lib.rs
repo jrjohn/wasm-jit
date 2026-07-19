@@ -188,10 +188,12 @@ impl Event {
 
 /// vowel formant targets (F1,F2,F3 in Hz + per-formant gains):
 /// index 0 = o(嗡), 1 = a(阿), 2 = u(吽) — the mantra's three mouths.
-const VOWELS: [([f32; 3], [f32; 3]); 3] = [
-    ([500.0, 900.0, 2450.0], [1.0, 0.70, 0.20]), // o
-    ([800.0, 1150.0, 2800.0], [1.0, 0.80, 0.30]), // a
-    ([330.0, 700.0, 2200.0], [1.0, 0.55, 0.15]), // u
+const VOWELS: [([f32; 3], [f32; 3]); 5] = [
+    ([500.0, 900.0, 2450.0], [1.0, 0.70, 0.20]), // 0 o
+    ([800.0, 1150.0, 2800.0], [1.0, 0.80, 0.30]), // 1 a
+    ([330.0, 700.0, 2200.0], [1.0, 0.55, 0.15]), // 2 u
+    ([320.0, 2350.0, 3000.0], [1.0, 0.45, 0.22]), // 3 i
+    ([520.0, 1850.0, 2550.0], [1.0, 0.60, 0.25]), // 4 e
 ];
 
 /// The throat: glottal pulse → three vowel formants → nasal murmur (the m of
@@ -212,26 +214,40 @@ struct Voice {
     murmur: Lp,
     soften: Lp,
     ctrl: u32, // control-rate divider for formant retuning
+    // consonants: frication is UNVOICED — a hiss shaped by the mouth, alive
+    // even while the glottis is closed (s, x, h; a stop's release burst)
+    fcf_t: f32,
+    flvl_t: f32,
+    flvl: f32,
+    fric: Reso,
+    fctrl: u32,
 }
 
 impl Voice {
+    fn set_fric(&mut self, cf: f32, level: f32) {
+        self.fcf_t = cf.clamp(300.0, 8000.0);
+        self.flvl_t = level.clamp(0.0, 1.0);
+    }
+
     fn set(&mut self, f0: f32, vowel: f32, nasal: f32) {
         self.f0_t = f0.clamp(0.0, 1000.0);
-        self.vow_t = vowel.clamp(0.0, 2.0);
+        self.vow_t = vowel.clamp(0.0, 4.0);
         self.nas_t = nasal.clamp(0.0, 1.0);
     }
 
     fn retune(&mut self, sr: f32) {
         // interpolate the vowel targets: 0..1 = o→a, 1..2 = a→u
-        let (ia, ib, u) = if self.vow <= 1.0 {
-            (0, 1, self.vow)
-        } else {
-            (1, 2, self.vow - 1.0)
-        };
+        let ia = (self.vow.floor() as usize).min(3);
+        let (ia, ib, u) = (ia, ia + 1, self.vow - ia as f32);
         let (fa, ga) = VOWELS[ia];
         let (fb, gb) = VOWELS[ib];
+        // register: a higher voice is a SHORTER vocal tract — above f0≈150Hz the
+        // formants migrate up (to ~+22% at soprano), which is what "female" IS
+        // acoustically; a chanting 翁 at 110Hz is untouched
+        let reg = ((self.f0 - 150.0) / 130.0).clamp(0.0, 1.0);
+        let tract = 1.0 + 0.22 * reg;
         for k in 0..3 {
-            let cf = fa[k] + (fb[k] - fa[k]) * u;
+            let cf = (fa[k] + (fb[k] - fa[k]) * u) * tract;
             self.formants[k].tune(sr, cf, 0.995);
             // nasal closure damps the mouth's formants
             self.fgain[k] = (ga[k] + (gb[k] - ga[k]) * u) * (1.0 - 0.7 * self.nas);
@@ -250,21 +266,34 @@ impl Voice {
         self.nas += k * (self.nas_t - self.nas);
         let want = if self.f0_t > 20.0 { 1.0 } else { 0.0 };
         self.level += (1.0 - (-dt / 0.06).exp()) * (want - self.level);
+        // frication first — it sounds through a closed throat (s… before 蓑's uo)
+        self.flvl += (1.0 - (-dt / 0.012).exp()) * (self.flvl_t - self.flvl);
+        let mut hiss = 0.0;
+        if self.flvl > 0.001 {
+            if self.fctrl == 0 {
+                self.fric.tune(sr, self.fcf_t.max(300.0), 0.965);
+                self.fctrl = 32;
+            }
+            self.fctrl -= 1;
+            hiss = self.fric.run(rng.bi()) * self.flvl * 1.15;
+        }
         if self.level < 0.001 {
-            return 0.0;
+            return hiss;
         }
         if self.ctrl == 0 {
             self.retune(sr);
             self.ctrl = 32;
         }
         self.ctrl -= 1;
-        // vibrato — the living unevenness of a held tone
-        self.vib += core::f32::consts::TAU * 5.3 * dt;
-        let f = self.f0.max(20.0) * (1.0 + 0.011 * self.vib.sin());
+        // vibrato — the living unevenness of a held tone; a singing (higher)
+        // register carries a slightly deeper vibrato and more air in the tone
+        let reg = ((self.f0 - 150.0) / 130.0).clamp(0.0, 1.0);
+        self.vib += core::f32::consts::TAU * (5.3 + 0.6 * reg) * dt;
+        let f = self.f0.max(20.0) * (1.0 + (0.011 + 0.007 * reg) * self.vib.sin());
         self.ph = (self.ph + f * dt).fract();
         // glottal source: soft saw + breath
         let saw = 2.0 * self.ph - 1.0;
-        let src = self.soften.run(saw) + rng.bi() * 0.015;
+        let src = self.soften.run(saw) + rng.bi() * (0.015 + 0.022 * reg);
         // three formants carve the buzz into a mouth
         let mut v = 0.0;
         for kf in 0..3 {
@@ -273,7 +302,7 @@ impl Voice {
         // the nasal hum — a colour on the voice, not its master: the probe showed
         // murmur 10x the formants, making loudness track nasal (阿 faint, 吽 booming)
         v = v * 1.5 + self.murmur.run(src) * self.nas * 0.33;
-        v * 1.25 * self.level
+        v * 1.25 * self.level + hiss
     }
 }
 
@@ -490,6 +519,12 @@ impl Engine {
         }
     }
 
+    pub fn voice_fric(&mut self, id: u32, cf: f32, level: f32) {
+        if let Some(seat) = self.seat(id) {
+            seat.voice.set_fric(cf, level);
+        }
+    }
+
     pub fn breath_set(&mut self, id: u32, level: f32) {
         if let Some(seat) = self.seat(id) {
             seat.breath.level_t = level.clamp(0.0, 1.0);
@@ -625,6 +660,11 @@ pub extern "C" fn ev_strike(seat: u32, f0: f32, energy: f32) {
 #[no_mangle]
 pub extern "C" fn voice_set(seat: u32, f0: f32, vowel: f32, nasal: f32) {
     with(|e| e.voice_set(seat, f0, vowel, nasal), ())
+}
+
+#[no_mangle]
+pub extern "C" fn voice_fric(seat: u32, cf: f32, level: f32) {
+    with(|e| e.voice_fric(seat, cf, level), ())
 }
 
 #[no_mangle]
@@ -831,6 +871,21 @@ mod tests {
         let _settle = run_secs(&mut e, 1.0);
         let calm = run_secs(&mut e, 0.5);
         assert!(calm < 1e-3, "wind will not still: {calm}");
+    }
+
+    #[test]
+    fn frication_sounds_through_a_closed_throat() {
+        // s/x/h are UNVOICED: throat closed (f0=0), hiss on -> sound; hiss off -> silence
+        let mut e = Engine::new(SR);
+        let s = e.seat_add(false);
+        e.voice_set(s, 0.0, 1.0, 0.0);
+        e.voice_fric(s, 5500.0, 0.6);
+        let hissing = run_secs(&mut e, 0.4);
+        assert!(hissing > 0.005, "the closed-throat hiss was silent: {hissing}");
+        e.voice_fric(s, 5500.0, 0.0);
+        let _settle = run_secs(&mut e, 0.2);
+        let quiet = run_secs(&mut e, 0.2);
+        assert!(quiet < 1e-4, "the hiss would not stop: {quiet}");
     }
 
     #[test]
