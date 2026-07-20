@@ -1204,6 +1204,8 @@ function compileEntities(world, g) {
                   alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
+                  shelter: (def.shelter && typeof def.shelter === 'object') ? def.shelter : null, // a roofed interior — no snow falls within
+
 
                   home: def.home ?? [def.at[0], def.at[1]], // where it first appeared — so it can find its way back
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
@@ -1433,6 +1435,13 @@ function snowing() { // is any snow on the ground? (cheap sample)
 // Each flake keeps its own speed, sway and size; bigger = nearer = faster,
 // so the fall gains depth. Still pure rendering, replay-free — host weather.
 let SNOWP = null;
+function projW(X, Y, Z, vp, W, H) { // a world point → the FP pinhole's screen coords
+  const cx = vp[0] * X + vp[4] * Y + vp[8] * Z + vp[12];
+  const cy = vp[1] * X + vp[5] * Y + vp[9] * Z + vp[13];
+  const cw = vp[3] * X + vp[7] * Y + vp[11] * Z + vp[15];
+  if (cw <= 0.06) return null;
+  return { sx: (cx / cw * 0.5 + 0.5) * W, sy: (0.5 - cy / cw * 0.5) * H };
+}
 function drawSnowfall(nowSec, W, H) {
   if (!SNOWP || SNOWP.w !== W || SNOWP.h !== H) {
     SNOWP = { w: W, h: H, t: nowSec, p: [] };
@@ -1446,12 +1455,37 @@ function drawSnowfall(nowSec, W, H) {
   }
   const dt = Math.min(Math.max(nowSec - SNOWP.t, 0), 0.1);
   SNOWP.t = nowSec;
+  // no snow falls under a roof: project each sheltered being's interior to a screen
+  // box and skip flakes there; stand beneath it and the fall quiets around you. 廟裡無雪。
+  const boxes = []; let calm = false, vp = null;
+  if (fieldView === 'fp' && fieldWorld) {
+    const K = 0.55;
+    for (const e of ENTITIES) {
+      const sh = e.shelter; if (!sh) continue;
+      const hw = sh.w ?? 2.9, hd = sh.d ?? 2.6, hh = sh.h ?? 5, y0 = sh.floor ?? 0.3;
+      if (Math.abs(cam.px - e.x) < hw && Math.abs(cam.pz - e.y) < hd) calm = true;
+      if (!vp) vp = fpViewProj().vp;
+      const surf = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
+      let minx = 1e9, miny = 1e9, maxx = -1e9, maxy = -1e9, n = 0;
+      for (let ix = -1; ix <= 1; ix += 2) for (let iz = -1; iz <= 1; iz += 2) for (let iy = 0; iy <= 1; iy++) {
+        const p = projW(e.x + ix * hw, surf + (iy ? hh : y0), e.y + iz * hd, vp, W, H);
+        if (!p) continue;
+        n++; minx = Math.min(minx, p.sx); maxx = Math.max(maxx, p.sx); miny = Math.min(miny, p.sy); maxy = Math.max(maxy, p.sy);
+      }
+      if (n >= 4) boxes.push([minx, miny, maxx, maxy]);
+    }
+  }
   ctx.fillStyle = 'rgb(240,244,250)';
+  let i = 0;
   for (const f of SNOWP.p) {
     f.y += f.v * f.s * dt;                                       // nearer falls faster
     f.x += Math.sin(nowSec * f.d + f.a) * 13 * dt + 4 * f.s * dt; // sway + a breath of wind
     if (f.y > H) { f.y = -4; f.x = Math.random() * W; }
     if (f.x > W) f.x -= W; else if (f.x < 0) f.x += W;
+    if (calm && (++i % 4)) continue;                            // sheltered: only a whisper gets through
+    let hid = false;
+    for (const b of boxes) if (f.x >= b[0] && f.x <= b[2] && f.y >= b[1] && f.y <= b[3]) { hid = true; break; }
+    if (hid) continue;                                          // this flake is under the roof
     ctx.globalAlpha = 0.3 + 0.5 * Math.min(f.s / 1.8, 1);
     const r = f.s * 1.4;
     ctx.fillRect(f.x, f.y, r, r);
