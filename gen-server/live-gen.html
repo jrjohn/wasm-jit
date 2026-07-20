@@ -1443,7 +1443,7 @@ function projW(X, Y, Z, vp, W, H) { // a world point → the FP pinhole's screen
   const cy = vp[1] * X + vp[5] * Y + vp[9] * Z + vp[13];
   const cw = vp[3] * X + vp[7] * Y + vp[11] * Z + vp[15];
   if (cw <= 0.06) return null;
-  return { sx: (cx / cw * 0.5 + 0.5) * W, sy: (0.5 - cy / cw * 0.5) * H };
+  return { sx: (cx / cw * 0.5 + 0.5) * W, sy: (0.5 - cy / cw * 0.5) * H, w: cw };
 }
 function drawSnowfall(nowSec, W, H) {
   if (!SNOWP || SNOWP.w !== W || SNOWP.h !== H) {
@@ -2817,12 +2817,12 @@ void main(){
   frag = vec4(c, 1.0);
 }`;
     const BVS = `#version 300 es
-in vec2 pp; in vec2 tt;
-uniform vec2 vpsz; uniform float zc; uniform vec2 zab;
+in vec2 pp; in vec2 tt; in float zv;
+uniform vec2 vpsz; uniform vec2 zab;
 out vec2 vt;
-void main(){ // a skin card pinned at its being's depth — the land depth-tests it
+void main(){ // a card at its being's depth — PER-VERTEX, so an angled plate depth-tests right
   vec2 ndc = vec2(pp.x / vpsz.x * 2.0 - 1.0, 1.0 - pp.y / vpsz.y * 2.0);
-  gl_Position = vec4(ndc * zc, zab.x * zc + zab.y, zc);
+  gl_Position = vec4(ndc * zv, zab.x * zv + zab.y, zv);
   vt = tt;
 }`;
     const BFS = `#version 300 es
@@ -2840,7 +2840,7 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
       return pr;
     };
     const prog = mk(TVS, TFS, [[0, 'uv']]);
-    const bbProg = mk(BVS, BFS, [[0, 'pp'], [1, 'tt']]);
+    const bbProg = mk(BVS, BFS, [[0, 'pp'], [1, 'tt'], [2, 'zv']]);
     // the ground plan: one static N×N sheet; height lives in the texture
     const N = 256;
     const pos = new Float32Array(N * N * 2);
@@ -2868,9 +2868,10 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
     // billboard gear: one dynamic quad + one skin-card texture + one offscreen card
     const bbVao = gl.createVertexArray(); gl.bindVertexArray(bbVao);
     const bbBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bbBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(16), gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(20), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 20, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16); // per-vertex depth
     gl.bindVertexArray(null);
     const bbTex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, bbTex);
@@ -2890,7 +2891,7 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
              u: uni(prog),
              ub: { vpsz: gl.getUniformLocation(bbProg, 'vpsz'), zc: gl.getUniformLocation(bbProg, 'zc'),
                    zab: gl.getUniformLocation(bbProg, 'zab'), skin: gl.getUniformLocation(bbProg, 'skin') },
-             bbVao, bbBuf, bbTex, bbCanvas, bbCtx: bbCanvas.getContext('2d'), bbQuad: new Float32Array(16) };
+             bbVao, bbBuf, bbTex, bbCanvas, bbCtx: bbCanvas.getContext('2d'), bbQuad: new Float32Array(20) };
   } catch (e) { return false; }
 }
 function drawTerrainPass(vpM, L, eye, shOn, lvp) {
@@ -2960,12 +2961,11 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
       const Q = T.bbQuad;
-      Q[0] = tl.sx; Q[1] = tl.sy; Q[2] = 0; Q[3] = 0;
-      Q[4] = tr.sx; Q[5] = tr.sy; Q[6] = 1; Q[7] = 0;
-      Q[8] = bl.sx; Q[9] = bl.sy; Q[10] = 0; Q[11] = 1;
-      Q[12] = br.sx; Q[13] = br.sy; Q[14] = 1; Q[15] = 1;
+      Q[0] = tl.sx; Q[1] = tl.sy; Q[2] = 0; Q[3] = 0; Q[4] = tl.w;
+      Q[5] = tr.sx; Q[6] = tr.sy; Q[7] = 1; Q[8] = 0; Q[9] = tr.w;
+      Q[10] = bl.sx; Q[11] = bl.sy; Q[12] = 0; Q[13] = 1; Q[14] = bl.w;
+      Q[15] = br.sx; Q[16] = br.sy; Q[17] = 1; Q[18] = 1; Q[19] = br.w;
       gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
-      gl.uniform1f(T.ub.zc, zc);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       continue;
     }
@@ -2978,12 +2978,11 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, T.bbCanvas);
     const half = s * (C / (2 * SS)), cyp = syg - s * 0.4; // card spans ±2s around the drawn center
     const Q = T.bbQuad;
-    Q[0] = sx - half; Q[1] = cyp - half; Q[2] = 0; Q[3] = 0;
-    Q[4] = sx + half; Q[5] = cyp - half; Q[6] = 1; Q[7] = 0;
-    Q[8] = sx - half; Q[9] = cyp + half; Q[10] = 0; Q[11] = 1;
-    Q[12] = sx + half; Q[13] = cyp + half; Q[14] = 1; Q[15] = 1;
+    Q[0] = sx - half; Q[1] = cyp - half; Q[2] = 0; Q[3] = 0; Q[4] = zc;
+    Q[5] = sx + half; Q[6] = cyp - half; Q[7] = 1; Q[8] = 0; Q[9] = zc;
+    Q[10] = sx - half; Q[11] = cyp + half; Q[12] = 0; Q[13] = 1; Q[14] = zc;
+    Q[15] = sx + half; Q[16] = cyp + half; Q[17] = 1; Q[18] = 1; Q[19] = zc;
     gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
-    gl.uniform1f(T.ub.zc, zc);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.depthMask(true); gl.disable(gl.BLEND);
