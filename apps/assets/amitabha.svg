@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="1000" viewBox="0 0 760 1000">
+  <defs>
+    <radialGradient id="aura" cx="50%" cy="40%" r="62%">
+      <stop offset="0%" stop-color="#6f5220"/>
+      <stop offset="48%" stop-color="#432c14"/>
+      <stop offset="100%" stop-color="#25140b"/>
+    </radialGradient>
+    <radialGradient id="mand" cx="50%" cy="46%" r="56%">
+      <stop offset="0%" stop-color="#f4e2a0"/>
+      <stop offset="55%" stop-color="#d3ab54"/>
+      <stop offset="100%" stop-color="#8f6a26"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff4cf"/>
+      <stop offset="62%" stop-color="#efcd76"/>
+      <stop offset="100%" stop-color="#c1963c"/>
+    </radialGradient>
+    <linearGradient id="skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f2d488"/>
+      <stop offset="100%" stop-color="#d3aa58"/>
+    </linearGradient>
+    <linearGradient id="robe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#bb3f27"/>
+      <stop offset="100%" stop-color="#7c2416"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="760" height="1000" fill="url(#aura)"/>
+
+  <!-- radiating light from the heart-centre -->
+  <g transform="translate(380,470)" stroke="#d5b464" stroke-width="2" opacity="0.22">
+    <line x1="0" y1="0" x2="0" y2="-420"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(20)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(40)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(60)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(80)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(100)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(120)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(140)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(160)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(180)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(200)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(220)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(240)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(260)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(280)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(300)"/>
+    <line x1="0" y1="0" x2="0" y2="-420" transform="rotate(320)"/><line x1="0" y1="0" x2="0" y2="-420" transform="rotate(340)"/>
+  </g>
+
+  <!-- body mandorla (舉身光) -->
+  <path d="M380 300 C 588 400 588 720 380 828 C 172 720 172 400 380 300 Z" fill="url(#mand)" opacity="0.9"/>
+  <path d="M380 326 C 556 416 556 706 380 800 C 204 706 204 416 380 326 Z" fill="none" stroke="#84631f" stroke-width="4" opacity="0.55"/>
+
+  <!-- head halo (圓光) -->
+  <circle cx="380" cy="402" r="112" fill="url(#halo)"/>
+  <circle cx="380" cy="402" r="112" fill="none" stroke="#b0862f" stroke-width="4"/>
+  <circle cx="380" cy="402" r="88" fill="none" stroke="#e8cf86" stroke-width="3" opacity="0.65"/>
+
+  <!-- ===== lotus throne ===== -->
+  <g transform="translate(380,806)">
+    <g fill="#e3b0c0" stroke="#c988a0" stroke-width="2">
+      <path d="M0 -8 C -96 -70 -196 -54 -232 6 C -184 22 -92 14 0 0 Z"/>
+      <path d="M0 -8 C 96 -70 196 -54 232 6 C 184 22 92 14 0 0 Z"/>
+      <path d="M0 -12 C -66 -108 -156 -118 -190 -78 C -152 -34 -70 -20 0 -6 Z"/>
+      <path d="M0 -12 C 66 -108 156 -118 190 -78 C 152 -34 70 -20 0 -6 Z"/>
+    </g>
+    <g fill="#f6dbe4" stroke="#d59bad" stroke-width="2">
+      <path d="M0 -6 C -58 -46 -126 -40 -156 8 C -120 30 -58 28 0 12 Z"/>
+      <path d="M0 -6 C 58 -46 126 -40 156 8 C 120 30 58 28 0 12 Z"/>
+      <path d="M0 -12 C -30 -72 -86 -82 -112 -44 C -84 -8 -32 4 0 -2 Z"/>
+      <path d="M0 -12 C 30 -72 86 -82 112 -44 C 84 -8 32 4 0 -2 Z"/>
+      <path d="M0 -16 C -18 -66 18 -66 0 -16 Z" fill="#fff0f5"/>
+    </g>
+    <ellipse cx="0" cy="-6" rx="60" ry="20" fill="#efe1ac" stroke="#c9b06d" stroke-width="2"/>
+  </g>
+
+  <!-- ===== the figure (broad lap → torso → small head) ===== -->
+  <g>
+    <!-- gold body base: broad shoulders tapering to the lap -->
+    <ellipse cx="380" cy="516" rx="106" ry="58" fill="url(#skin)"/>
+    <path d="M380 490 C 286 492 274 582 284 652 C 294 718 338 752 380 752 C 422 752 466 718 476 652 C 486 582 474 492 380 490 Z" fill="url(#skin)"/>
+    <ellipse cx="380" cy="710" rx="184" ry="86" fill="url(#skin)"/>
+    <!-- kasaya (袈裟) over the lap -->
+    <path d="M380 730 C 232 730 212 690 216 660 C 300 628 460 628 544 660 C 548 690 528 730 380 730 Z" fill="url(#robe)" stroke="#5f1a0f" stroke-width="3"/>
+    <!-- kasaya (袈裟), symmetric drape with a small throat V -->
+    <path d="M298 524 C 300 500 342 488 380 488 C 418 488 460 500 462 524 C 458 566 452 614 458 660 C 440 704 400 722 380 722 C 360 722 320 704 302 660 C 308 614 302 566 298 524 Z" fill="url(#robe)" stroke="#5f1a0f" stroke-width="3"/>
+    <path d="M380 490 C 366 492 356 512 380 532 C 404 512 394 492 380 490 Z" fill="url(#skin)"/>
+    <g stroke="#e6a978" stroke-width="3" fill="none" opacity="0.4">
+      <path d="M348 542 C 356 590 356 636 350 664"/>
+      <path d="M412 542 C 404 590 404 636 410 664"/>
+      <path d="M380 538 L 380 700"/>
+    </g>
+    <!-- feet soles at the lap front -->
+    <ellipse cx="336" cy="700" rx="30" ry="16" fill="url(#skin)" stroke="#b98a45" stroke-width="2"/>
+    <ellipse cx="424" cy="700" rx="30" ry="16" fill="url(#skin)" stroke="#b98a45" stroke-width="2"/>
+    <!-- hands in dhyana mudra, palms up, a lotus bud between -->
+    <ellipse cx="380" cy="690" rx="70" ry="24" fill="url(#skin)" stroke="#b98a45" stroke-width="2"/>
+    <ellipse cx="380" cy="682" rx="11" ry="16" fill="#f6dbe4" stroke="#d59bad" stroke-width="1.5"/>
+
+    <!-- neck + auspicious lines -->
+    <path d="M356 452 C 360 476 400 476 404 452 L 404 470 C 396 480 364 480 356 470 Z" fill="url(#skin)"/>
+    <g stroke="#b98a45" stroke-width="2" fill="none" opacity="0.55">
+      <path d="M360 464 C 372 470 388 470 400 464"/><path d="M360 472 C 372 478 388 478 400 472"/>
+    </g>
+
+    <!-- ears (long lobes) -->
+    <path d="M312 396 C 300 416 302 452 320 460 C 328 446 328 418 326 396 Z" fill="url(#skin)" stroke="#b98a45" stroke-width="2"/>
+    <path d="M448 396 C 460 416 458 452 440 460 C 432 446 432 418 434 396 Z" fill="url(#skin)" stroke="#b98a45" stroke-width="2"/>
+
+    <!-- head -->
+    <ellipse cx="380" cy="402" rx="66" ry="74" fill="url(#skin)" stroke="#b98a45" stroke-width="1.5"/>
+    <!-- hair cap (dark) over the crown, hairline mid-forehead -->
+    <path d="M316 396 C 314 330 446 330 444 396 C 436 372 414 360 380 360 C 346 360 324 372 316 396 Z" fill="#2b3a56"/>
+    <!-- ushnisha (rounded gold bump on the crown) -->
+    <path d="M356 340 C 356 314 404 314 404 340 C 396 330 364 330 356 340 Z" fill="#2b3a56"/>
+    <ellipse cx="380" cy="326" rx="20" ry="20" fill="#2b3a56"/>
+    <ellipse cx="380" cy="322" rx="12" ry="13" fill="url(#skin)" stroke="#b98a45" stroke-width="1.5"/>
+    <!-- hair curl dots along the hairline -->
+    <g fill="#20304a">
+      <circle cx="330" cy="384" r="5"/><circle cx="348" cy="372" r="5"/><circle cx="366" cy="366" r="5"/>
+      <circle cx="380" cy="364" r="5"/><circle cx="394" cy="366" r="5"/><circle cx="412" cy="372" r="5"/><circle cx="430" cy="384" r="5"/>
+    </g>
+
+    <!-- face: brows, downcast eyes, urna, nose, gentle smile -->
+    <g stroke="#7a5325" stroke-width="3" fill="none" stroke-linecap="round">
+      <path d="M338 400 C 350 392 366 392 376 400"/>
+      <path d="M384 400 C 394 392 410 392 422 400"/>
+      <path d="M336 388 C 350 380 368 380 378 388"/>
+      <path d="M382 388 C 392 380 410 380 424 388"/>
+      <path d="M380 400 L 380 426"/>
+      <path d="M371 430 C 376 435 384 435 389 430"/>
+      <path d="M360 444 C 371 454 389 454 400 444"/>
+    </g>
+    <circle cx="380" cy="392" r="5" fill="#f6f0e0" stroke="#c9a24a" stroke-width="1.5"/>
+    <ellipse cx="380" cy="438" rx="15" ry="6" fill="#e6a15c" opacity="0.35"/>
+  </g>
+</svg>

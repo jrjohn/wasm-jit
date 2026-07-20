@@ -1205,6 +1205,9 @@ function compileEntities(world, g) {
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
                   shelter: (def.shelter && typeof def.shelter === 'object') ? def.shelter : null, // a roofed interior — no snow falls within
+                  image: (typeof def.image === 'string') ? loadAsset(def.image) : null, // a host-served icon (佛畫) shown as a standing plate
+                  iconH: (Number.isFinite(def.iconH) && def.iconH > 0) ? def.iconH : 3.4,
+
 
 
                   home: def.home ?? [def.at[0], def.at[1]], // where it first appeared — so it can find its way back
@@ -2904,6 +2907,14 @@ function drawTerrainPass(vpM, L, eye, shOn, lvp) {
   gl.drawElements(gl.TRIANGLES, T.icount, gl.UNSIGNED_INT, 0);
   gl.bindVertexArray(null);
 }
+// host-served image assets (fenced: a being names an ID; the host maps it to its
+// OWN /apps/assets dir — never an arbitrary URL, so an image adds no outward reach).
+const ASSETS = {};
+function loadAsset(id) {
+  if (typeof id !== 'string' || !/^[a-z0-9_-]{1,40}$/i.test(id)) return null;
+  if (!ASSETS[id]) { const im = new Image(); im.src = `/apps/assets/${id}.png`; ASSETS[id] = im; }
+  return ASSETS[id];
+}
 function drawBillboardsGL(W, H, eyeH, tNow) {
   const T = FPT, gl = D3.gl, K = 0.55, fov = 1.0;
   const horizon = H * 0.42, focal = H * 0.95;
@@ -2936,7 +2947,26 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
     const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
     const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
+    if (e.image) { // a 佛畫: a host-served image plate, sized in world units, depth-tested like a skin
+      const img = e.image;
+      if (!img.complete || !img.naturalWidth) continue;   // still loading
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      const hpx = (e.iconH || 3.4) * focal / zc, wpx = hpx * (img.naturalWidth / img.naturalHeight);
+      const botY = syg, topY = syg - hpx, Q = T.bbQuad;
+      Q[0] = sx - wpx / 2; Q[1] = topY; Q[2] = 0; Q[3] = 0;
+      Q[4] = sx + wpx / 2; Q[5] = topY; Q[6] = 1; Q[7] = 0;
+      Q[8] = sx - wpx / 2; Q[9] = botY; Q[10] = 0; Q[11] = 1;
+      Q[12] = sx + wpx / 2; Q[13] = botY; Q[14] = 1; Q[15] = 1;
+      gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
+      gl.uniform1f(T.ub.zc, zc);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      continue;
+    }
     const s = Math.max(3, (focal / zc) * 1.1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     bctx.clearRect(0, 0, C, C);
     const keep = ctx; ctx = bctx; // the shared pen visits the skin card
     try { drawSkin(e, C / 2, C / 2, SS, tNow); } finally { ctx = keep; }
