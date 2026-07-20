@@ -1015,7 +1015,7 @@ window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === par
 window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line) } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, hx: e.hx ?? 1, hz: e.hz ?? 0, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
         mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
@@ -1280,6 +1280,21 @@ function tickEntities(t, g) {
       if (!e.on) continue;
       const carrier = ENTITIES.find(c => c.id === e.on);
       if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
+    }
+  }
+  // facing (host law): a flyer or swimmer leads with its head — the body turns to
+  // face where it is going, never drifting backward. Bodies author forward as +x;
+  // the host owns the yaw (身在世界,形由種子). Still beings keep their default facing.
+  for (const e of ENTITIES) {
+    if (e.hx === undefined) { e.hx = 1; e.hz = 0; }
+    if (!(e.realm === 'sky' || e.habitat === 'water')) continue;
+    const vx = e.x - (e._px ?? e.x), vz = e.y - (e._py ?? e.y);
+    const sp = Math.hypot(vx, vz);
+    if (sp > 0.004) {                                  // moving enough to have a heading
+      const tx = vx / sp, tz = vz / sp;
+      const a = Math.min(1, dt * 3.5);                 // ease the turn — banking, not snapping
+      e.hx += (tx - e.hx) * a; e.hz += (tz - e.hz) * a;
+      const n = Math.hypot(e.hx, e.hz) || 1; e.hx /= n; e.hz /= n;
     }
   }
   // pass 3: special relativity as host law — moving clocks run slow. v is the
@@ -2454,7 +2469,8 @@ function renderBodiesFP(list, W, H) {
     sampleFieldAll(e.x, e.y, fieldWorld.grid, CPU_SMP);
     // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
     const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
-    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
+    const hx = e.hx ?? 1, hz = e.hz ?? 0;   // yaw the body to face its heading (+x is forward)
+    R.stack = [Float64Array.from([hx, 0, -hz, e.x, 0, 1, 0, surf, hz, 0, hx, e.y])];
     try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
   }
   // the walker's pinhole as one matrix: clip.x = 2·xc, clip.y = 1.9·yc + 0.16·zc, w = zc
@@ -2904,7 +2920,8 @@ function renderFieldFPGL() {
     sampleFieldAll(e.x, e.y, g, CPU_SMP);
     // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
     const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
-    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
+    const hx = e.hx ?? 1, hz = e.hz ?? 0;   // yaw the body to face its heading (+x is forward)
+    R.stack = [Float64Array.from([hx, 0, -hz, e.x, 0, 1, 0, surf, hz, 0, hx, e.y])];
     try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
   }
   const { vp, eye } = fpViewProj();
