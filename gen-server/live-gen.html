@@ -789,7 +789,11 @@ let lastRaf = 0;
 // Perspective is the HOST's eye, never a property of the world — the AI can
 // only declare "view":"first_person"; rendering and movement stay vocabulary.
 let fieldView = 'top';   // 'top' | 'fp'
-const cam = { px: 48, pz: 78, yaw: 0, yoff: 0, vy: 0 };
+// pitch: the walker may now raise the eye (抬頭) — 0 = level (matches the old
+// fixed 0.16 horizon offset), positive = look up at the sky/moon. pitchT is the
+// eased target the look-up button drives; drag sets both at once.
+const cam = { px: 48, pz: 78, yaw: 0, yoff: 0, vy: 0, pitch: 0, pitchT: 0 };
+const PITCH_MIN = -0.35, PITCH_MAX = 1.15;
 const FKEYS = { left: 0, right: 0, fwd: 0, back: 0, jump: 0 };
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
@@ -808,6 +812,49 @@ window.addEventListener('keyup', e => {
   const k = KEYMAP[e.code];
   if (k) FKEYS[k] = 0;
 });
+
+// Look around with the pointer (drag = mouse-look; works with touch too, so the
+// kiosk can 抬頭 by dragging up). Drag right → turn right; drag up → look up.
+// The dpad buttons sit above the canvas (own z-layer), so a drag on them never
+// reaches here — walking and looking don't fight.
+(function () {
+  let on = false, lx = 0, ly = 0, moved = 0;
+  const start = e => {
+    if (fieldView !== 'fp' || !fieldWorld) return;
+    const p = (e.touches && e.touches[0]) || e;
+    on = true; moved = 0; lx = p.clientX; ly = p.clientY;
+  };
+  const move = e => {
+    if (!on) return;
+    const p = (e.touches && e.touches[0]) || e;
+    const dx = p.clientX - lx, dy = p.clientY - ly; lx = p.clientX; ly = p.clientY;
+    moved += Math.abs(dx) + Math.abs(dy);
+    cam.yaw += dx * 0.0042;
+    cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.pitch - dy * 0.0042));
+    cam.pitchT = cam.pitch;                 // a manual look overrides the eased target
+    if (moved > 6) e.preventDefault();
+  };
+  const end = () => { on = false; };
+  addEventListener('pointerdown', start); addEventListener('pointermove', move, { passive: false });
+  addEventListener('pointerup', end); addEventListener('pointercancel', end);
+})();
+
+// 抬頭: a plain look-up toggle for anyone who won't think to drag. Tap → the eye
+// eases up to the moon; tap again → back to level. Shown only while walking.
+let lookBtn = null;
+function ensureLookBtn() {
+  if (lookBtn) return lookBtn;
+  const b = document.createElement('button');
+  b.id = 'lookbtn'; b.type = 'button'; b.textContent = '🌙 抬頭 look up';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:65;' +
+    'border:1px solid #3a5573;border-radius:999px;padding:.5rem 1.1rem;background:#132033cc;' +
+    'color:#cfe6f4;font:14px/1 ui-monospace,monospace;cursor:pointer;display:none;backdrop-filter:blur(3px)';
+  b.addEventListener('click', () => {
+    cam.pitchT = cam.pitchT > 0.35 ? 0 : 0.72;   // toggle: up to the sky / back to level
+    b.textContent = cam.pitchT > 0.35 ? '🌙 平視 look level' : '🌙 抬頭 look up';
+  });
+  document.body.appendChild(b); lookBtn = b; return b;
+}
 
 function terrainH(x, z) {
   const g = fieldWorld.grid;
@@ -838,6 +885,8 @@ function updateCam(dt) {
   cam.vy -= 26 * dt;
   cam.yoff = Math.max(0, cam.yoff + cam.vy * dt);
   if (cam.yoff === 0) cam.vy = 0;
+  cam.pitchT = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.pitchT));
+  cam.pitch += (cam.pitchT - cam.pitch) * Math.min(1, dt * 6);   // ease the look-up toggle
 }
 
 // Voxel-space column renderer: per screen column, march the ray far→near is
@@ -926,7 +975,7 @@ function renderFieldFP() {
   if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
   ctx.font = '13px ui-monospace';
-  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump · drag / 🌙 抬頭 to look up at the moon', 12, H - 12);
 }
 
 function setFieldView(view) {
@@ -944,9 +993,13 @@ function setFieldView(view) {
     if (!wasFp) {
       const g = fieldWorld.grid;
       cam.px = g / 2; cam.pz = g - 8; cam.yaw = Math.PI; cam.yoff = 0; cam.vy = 0; // enter from the south
+      cam.pitch = 0; cam.pitchT = 0;
     }
     // the walker needs the keys — take them back from the chat box
     if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) document.activeElement.blur();
+    ensureLookBtn().style.display = 'block';
+  } else if (lookBtn) {
+    lookBtn.style.display = 'none';
   }
   if (fieldWorld && view === 'top') renderField();
 }
@@ -955,6 +1008,7 @@ function setFieldView(view) {
 window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from outside the module
 window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
 window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null) cam.pz = pz; if (yaw != null) cam.yaw = yaw; }; // e2e/compose: place the first-person camera
+window.__setPitch = p => { cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, p)); cam.pitchT = cam.pitch; }; // e2e: aim the eye up/down (抬頭)
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
@@ -2461,21 +2515,132 @@ function renderBodiesFP(list, W, H) {
 // occluded by the land per pixel — §22c's silhouette approximation retires on
 // this path (it still guards the CPU fallback). 地非圖層,地即世界.
 let FPT = null; // null = untried, false = no WebGL2 (CPU fallback), object = ready
-function fpViewProj() { // the walker's pinhole, one matrix for land/body/billboard
+// The eye's height as it walks. Normally it rides the terrain; but an entity may
+// be a WALKABLE surface (a bridge you can climb over instead of falling under it).
+// A bridge declares nothing new — the host recognises its shape and lifts the eye
+// onto the arch when you step within its footprint. 走上橋, 不掉下橋.
+function fpEyeY() {
   const K = 0.55;
-  // bilinear eye height: the camera stops stair-stepping between cells as you walk
-  const ey = sampleF(0, cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  let base = sampleF(0, cam.px, cam.pz) * K + 3.2;
+  for (const e of ENTITIES) {
+    if (e.type !== 'bridge') continue;
+    const lx = cam.px - e.x, lz = cam.pz - e.y;            // bridge-local (axis-aligned)
+    const halfW = 1.0, span = 5.75, ramp = 1.4;            // deck footprint from its body_seed
+    const peak = 3.8, curve = 0.0681;                       // arch: y = 3.8 − 0.0681·lz²
+    if (Math.abs(lx) > halfW || Math.abs(lz) > span + ramp) continue;
+    const az = Math.abs(lz);
+    let arch;
+    if (az <= span) arch = peak - curve * lz * lz + 0.15;  // on the deck (+plank top)
+    else { const endY = peak - curve * span * span + 0.15; // ramp the last stretch to the bank
+      arch = Math.max(0, endY * (1 - (az - span) / ramp)); }
+    const h = sampleF(0, e.x, e.y), w = sampleF(1, e.x, e.y);
+    const bb = (h + Math.min(w, 3) * 0.6) * K;              // the deck's own footing (matches its body base)
+    const deckEye = bb + arch + 3.2;
+    if (deckEye > base) base = deckEye;                     // step up onto the span
+  }
+  return base + cam.yoff;
+}
+
+// ---- the night sky as a fixed celestial dome (§ walk-in) ----
+// Stars, the Milky Way and the moon are drawn from the LOOK direction alone —
+// yaw + pitch — never from where you stand. So they don't slide as you walk: a
+// real sky overhead, not billboards pinned to the ground. 真正的天體, 不隨走位.
+const MOON_AZ = Math.PI - 0.25, MOON_ALT = 0.52;   // ahead of the entrance, mid-high — 抬頭 to meet it
+let SKY = null;
+function buildSky() {
+  let s = 0x9e3779b9 >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const dust = [], milky = [];
+  for (let i = 0; i < 440; i++) {                    // stardust over the whole dome
+    dust.push({ az: rnd() * 6.2832, alt: 0.02 + Math.pow(rnd(), 0.7) * 1.45,
+      mag: 0.25 + rnd() * 0.75, tw: rnd() * 6.2832, ts: 0.5 + rnd() * 1.6 });
+  }
+  const neb = [];
+  const ridge = az => 0.62 + 0.34 * Math.sin(az + 0.6);      // the band's wandering centre
+  for (let i = 0; i < 60; i++) {                     // the Milky Way's cloudy body (soft, additive)
+    const az = rnd() * 6.2832, alt = ridge(az) + (rnd() - 0.5) * 0.17;
+    if (alt < 0.05 || alt > 1.5) continue;
+    neb.push({ az, alt, size: 0.05 + rnd() * 0.09, mag: 0.05 + rnd() * 0.06 });
+  }
+  for (let i = 0; i < 470; i++) {                    // bright stars crowding the band
+    const az = rnd() * 6.2832, alt = ridge(az) + (rnd() + rnd() + rnd() - 1.5) * 0.095;
+    if (alt < 0.05 || alt > 1.5) continue;
+    milky.push({ az, alt, mag: 0.2 + rnd() * 0.6, tw: rnd() * 6.2832, ts: 0.4 + rnd() * 1.2 });
+  }
+  SKY = { dust, milky, neb };
+}
+function drawCelestialDome(W, H, tNow) {
+  if (!SKY) buildSky();
   const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
-  const t0 = -cam.px * sy - cam.pz * cy;
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const xs = 1.9 * H / W;                            // same aspect law as fpViewProj
+  const proj = (az, alt) => {
+    const ca = Math.cos(alt);
+    const dx = Math.sin(az) * ca, dy = Math.sin(alt), dz = Math.cos(az) * ca;
+    const dd = sy * dx + cy * dz, dr = cy * dx - sy * dz;
+    const depth = cp * dd + sp * dy;
+    if (depth <= 0.02) return null;
+    const up = cp * dy - sp * dd;
+    const ndcx = xs * dr / depth;
+    if (ndcx < -1.12 || ndcx > 1.12) return null;
+    const ndcy = 1.9 * up / depth + 0.16;
+    return { x: (ndcx * 0.5 + 0.5) * W, y: (0.5 - ndcy * 0.5) * H };
+  };
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';          // the galactic river: soft glow that sums into a band
+  for (const t of SKY.neb) {
+    const p = proj(t.az, t.alt); if (!p || p.y > H * 0.6) continue;
+    const R = t.size * W;
+    const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+    gr.addColorStop(0, `rgba(150,172,220,${t.mag.toFixed(3)})`); gr.addColorStop(1, 'rgba(150,172,220,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 6.2832); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  for (const t of SKY.milky) {                       // bright stars crowding the band
+    const p = proj(t.az, t.alt); if (!p || p.y > H * 0.62) continue;
+    const a = t.mag * (0.5 + 0.5 * Math.sin(tNow * t.ts + t.tw)) * 0.8;
+    ctx.fillStyle = `rgba(214,224,246,${a.toFixed(3)})`;
+    ctx.fillRect(p.x, p.y, t.mag > 0.6 ? 1.7 : 1.3, t.mag > 0.6 ? 1.7 : 1.3);
+  }
+  for (const t of SKY.dust) {                         // then the sharper stardust
+    const p = proj(t.az, t.alt); if (!p || p.y > H * 0.6) continue;
+    const a = t.mag * (0.55 + 0.45 * Math.sin(tNow * t.ts + t.tw));
+    const r = t.mag > 0.82 ? 1.6 : 1.0;
+    ctx.fillStyle = `rgba(236,241,255,${a.toFixed(3)})`;
+    ctx.fillRect(p.x, p.y, r, r);
+  }
+  const mp = proj(MOON_AZ, MOON_ALT);                 // and the moon, fixed in the sky
+  if (mp && mp.y < H * 0.72) {
+    const R = Math.max(15, W * 0.032);
+    const gr = ctx.createRadialGradient(mp.x, mp.y, 0, mp.x, mp.y, R * 3.4);
+    gr.addColorStop(0, 'rgba(255,251,232,0.42)'); gr.addColorStop(0.4, 'rgba(226,236,255,0.11)'); gr.addColorStop(1, 'rgba(226,236,255,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(mp.x, mp.y, R * 3.4, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = '#fdf6dc'; ctx.beginPath(); ctx.arc(mp.x, mp.y, R, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = 'rgba(208,204,178,0.32)';         // faint maria so it reads as a moon
+    ctx.beginPath(); ctx.arc(mp.x + R * 0.28, mp.y - R * 0.2, R * 0.34, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.arc(mp.x - R * 0.22, mp.y + R * 0.26, R * 0.22, 0, 6.2832); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function fpViewProj() { // the walker's pinhole, one matrix for land/body/billboard
+  // bilinear eye height (+ walkable bridge decks); no stair-stepping as you walk
+  const ey = fpEyeY();
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const t0 = -cam.px * sy - cam.pz * cy;              // depth translation
+  const r0 = -cam.px * cy + cam.pz * sy;              // right translation
   const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
   // aspect-correct horizontal scale: vertical FOV fixed (1.9), horizontal follows
   // the real canvas aspect so spheres stay round on any screen (wide OR tall)
   const xs = 1.9 * cv.height / cv.width;
+  // pitch rotates depth↔up about the eye's right axis; the old 0.16 horizon shift
+  // is kept as a principal-point offset, so pitch=0 is byte-identical to before.
   const vp = new Float32Array([
-    xs * cy, 0.16 * sy, az * sy, sy,
-    0, 1.9, 0, 0,
-    -xs * sy, 0.16 * cy, az * cy, cy,
-    xs * (-cam.px * cy + cam.pz * sy), -1.9 * ey + 0.16 * t0, az * t0 + bz, t0,
+    xs * cy, 1.9 * -sp * sy + 0.16 * cp * sy, az * cp * sy, cp * sy,
+    0, 1.9 * cp + 0.16 * sp, az * sp, sp,
+    -xs * sy, 1.9 * -sp * cy + 0.16 * cp * cy, az * cp * cy, cp * cy,
+    xs * r0, 1.9 * (-cp * ey - sp * t0) + 0.16 * (cp * t0 - sp * ey), az * (cp * t0 - sp * ey) + bz, cp * t0 - sp * ey,
   ]);
   return { vp, eye: [cam.px, ey, cam.pz], az, bz };
 }
@@ -2717,6 +2882,7 @@ function renderFieldFPGL() {
   const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
   sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  drawCelestialDome(W, H, tNow);   // stars, Milky Way, moon — before the terrain occludes them
   // the lattice → texture, fresh every frame (living cells rewrite the ground)
   if (T.grid !== g) { T.grid = g; T.staging = new Float32Array(g * g * 4); }
   const st = T.staging, n = g * g;
@@ -2768,7 +2934,7 @@ function renderFieldFPGL() {
   if (snowing()) drawSnowfall(tNow, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
   ctx.font = '13px ui-monospace';
-  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump · drag / 🌙 抬頭 to look up at the moon', 12, H - 12);
 }
 
 // ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
