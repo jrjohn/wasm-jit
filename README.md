@@ -4,6 +4,10 @@
 
 **🌊 Live: [arcana.boo](https://arcana.boo)** — the full anatomy of this architecture, with a playground where the wasm-jit compiler runs *in your browser*: edit a seed script, watch it recompile to WASM in milliseconds, and try to `fetch()` — refused at compile time, live.
 
+![A live seed reaching for the network — fetch(t) — refused at compile time, the error listing the ten capabilities it was actually granted](assets/fetch-refused.png)
+
+> The one-minute falsification, from the live playground: a seed that calls `fetch()` is **refused at compile time** — *"unknown function 'fetch' — granted capabilities: [sin, cos, hue, rgb, hsl, disc, ring, arc, line, glow]"*. The fence is the import table; a capability never granted cannot be seized, however clever the generator.
+
 ![A bar chart of Taiwan's reservoir water levels, generated from one plain-English sentence](assets/hero-chart.png)
 
 > Typed *"a bar chart of Taiwan's reservoir water levels, in English"* → a fuel-metered WASM cell renders it in ~1.4 ms, no chart library. *(Bar values are generated from the prompt, not live data.)*
@@ -16,7 +20,7 @@ Today's apps ship a fixed set of screens. This is the opposite — there is no p
 
 ![First-person view of a snowy night river: a stone arch bridge, a moored boat with a lit fishing lantern, a temple on the far bank, maples in autumn red, crows aloft](assets/hero-world.png)
 
-> The same substrate scales to a whole *living* world — this is `worlds/moon4.json`, the Tang poem 楓橋夜泊 grown from nothing but vocabulary: a maple bridge, a boat with its fishing lantern, 寒山寺 with the bell hanging inside it, a moon on the western ridge, crows, fish, frost falling all night. Terrain, weather, every body, skin, behaviour and *voice* is a separate capability-fenced cell — beings can beget, repaint themselves, name themselves, sense one another (§20–§21), carry true 3D bodies (§22b) and make their own sound (§24), while none can touch anything it wasn't granted. No cell knows the whole; the world emerges.
+> The same substrate scales to a whole *living* world — this is `worlds/moon4.json`, the Tang poem 楓橋夜泊 (*Mooring by Maple Bridge at Night*) grown from nothing but vocabulary: a maple bridge, a boat with its fishing lantern, 寒山寺 with the bell hanging inside it, a moon on the western ridge, crows, fish, frost falling all night. Terrain, weather, every body, skin, behaviour and *voice* is a separate capability-fenced cell — beings can beget, repaint themselves, name themselves, sense one another (§20–§21), carry true 3D bodies (§22b) and make their own sound (§24), while none can touch anything it wasn't granted. No cell knows the whole; the world emerges.
 
 ---
 
@@ -58,35 +62,11 @@ a chat box drives **Claude CLI running in a Docker container** (no volume mounts
 | 1 | home DSL (f64-scalar: let/while/**if-else**/arithmetic+%/comparison + built-in min/max/abs/sqrt/floor) | codegen rejects ungranted functions | every DSL seed |
 | 2 | **AssemblyScript** (TS syntax) / Rust→wasm / hand-written WAT | `Cell::from_wasm_bytes` audits import section ⊆ grants before instantiate | `assembly/buddha.ts` compiled by asc, drawn in the freeform-draw tab |
 
-## Grown since — beings, time, 3D, shaders (§19–§22 + L4)
+## Grown since the PoC — and it kept its fence
 
-Everything below was added through the same fence, without widening it an inch:
+The world kept growing on the *same* fence: beings that are born, age by their own relativistic proper time, and die; a self-growing widget vocabulary; **3D bodies** with real shadows; **per-pixel GPU shaders**; a from-scratch **sound engine** whose beings speak and sing (a Rust WASM module with a machine-checked **empty import table** — a thing that can touch nothing, only vibrate); and apps that **persist, hold lists, keep text, and pull live data** — all with no cell ever gaining a capability it wasn't granted. **Richness is unbounded; reach is fixed.**
 
-- **Beings with karma**: entities are born with `innate` seeds (one behavior script, many temperaments), age by **proper time** — dτ = dt·√(1−v²/c²), with the world's speed cap as its light speed (延促自在: a mayfly that flies near c outlives its still twin) — and die when a declared `lifespan` of *their own* time runs out. `bind()/unbind()` enter and leave a riding condition (a still fisherman on a 0.7c boat ages at the boat's rate, 物我合一); `st()` lets the skin show what the soul publishes (自性起用). The skin is the body's *appearance*, not its whole: the body — position, riding, lifespan, its own time — is held by host law, and a soul can only *request*.
-- **The vocabulary grows itself** (詞彙自生成): a control the host never wrote (a knob, a joystick) enters as a fenced cell with two wires — `bv(i)` reads bound values in, `emit(v)` speaks one event per frame out — archived in `/api/widgets`, recalled later by bare name.
-- **§22 draw3d — the seed writes the scene**: a transform stack instead of matrices (a seed can never write one), instanced sphere/box/cyl/cone + tri, Blinn-Phong + a real shadow map, an orbit/zoom camera when the seed omits `cam()`, and `pick()` so 3D objects are clickable; `scene3d` embeds a live 3D panel inside a generated UI (3D data viz as a one-line ask). A working windmill is a 1.2 KB seed.
-- **surface shader (L4) — the seed IS the fragment shader**: the same DSL transpiles to GLSL through the narrowest fence of all (pure math + colour verbs + pointer; no memory, no reach — over-reach dies at transpile) and every pixel runs it: `examples/shader-sdf-raymarch.dsl` renders a raymarched sphere on a checkered plane at full resolution, 60 fps.
-- **The ālaya ledger + streaming**: every validated generation is stored by its **cause** (the ask + the prior world it acted on) and replays in 0 ms on a repeat — no model call; a fresh cause streams in token by token (SSE), the schema visibly writing itself.
-
-## Bodies, voices, and one depth truth (§22b–§26)
-
-The world kept growing along the same fence. Four organs later, a being is no longer a picture that moves — it has **mass, a voice, and a place among things**:
-
-- **§22b 身在世界 — beings carry TRUE 3D bodies**: an inhabitant's `body_seed` is a full draw3d scene compiled through the same fence, so a being is real geometry in the world (shadows, materials) — not a billboard. The **host owns placement** (the base matrix, the ground it stands on, the thing it rides) and the **seed only shapes its own body**: 身在世界,形由種子. `rect`/`tri` fills gave skins volume, and 寒山寺 was repainted from sticks to mass — with the bell hanging **inside** it, because the riding law (§19 `bind`) says a bell mounted on a temple goes where the temple goes.
-- **§22c 山河遮眼 → §25 the eye made whole**: first-person terrain used to be a CPU column-march — the stepped, granular look was *the renderer, never the data* (the field is a continuous f64 lattice). It is now a **GL heightfield mesh** inside the same WebGL2 context the bodies use: a 256² sheet displaced in the vertex shader from the lattice texture, per-pixel palette + slope light + fog in the fragment shader, drawn into the same shadow map **and the same depth buffer**. So occlusion is no longer approximated per column — bodies and billboards are hidden by the land **per pixel**: a temple behind a ridge shows only its roof, and its shadow falls on the bank. (The CPU march stays as the fallback eye; `__fpPath` reports which one is live.)
-- **§26 the water breathes, the snow falls**: crossing sine waves tilt the water's normal per pixel and a moonlight specular lies on it (月光鋪水路); snow became a real particle pool where a flake's size *is* its depth — nearer falls faster and brighter. Both are host weather: pure rendering, replay-free.
-- **§24 聲塵 — the seed IS a synthesizer**: sound entered as a *layer* of a world, not a surface that replaces it. A `sound_seed` is a fenced cell whose output is a sample — ambient beds, and **聲從身出**: a being makes its own sound by its own law (the bell strikes, birds chirp, the fisherman chants), positioned by where it stands. Underneath sits **shengchen** (`shengchen/`), a from-scratch Rust sound-dust engine — formant voice, noise textures, a zhuyin→gesture compiler that can *sing words* — compiled to WASM with a machine-checked **empty import table**: the fence at its extreme, a thing that cannot touch anything, only vibrate.
-
-## Apps that remember and connect (the four App gaps, closed)
-
-Beyond "numbers in, picture out," a generated UI is now a real app — persistent, list-holding, text-keeping, live-data-fed — with the fence unmoved (no memory imports for the cell, no string ABI, no `fetch` in any cell):
-
-- **① Persistence (業)**: app state is keyed by the schema's hash — the same ask replays the same schema (the ledger), which hashes to the same identity, so the accumulated state returns on reload. No accounts; the host snapshots the slots outside the frame and pours them back after `init`. `💾 save world` packs the lived state alongside the schema.
-- **② Collections** — `ld(i)/sd(i,v)`: a host-owned 4096-slot f64 array (slots writ large) for lists/queues/tables, plus a `list` widget that windows onto it (row count from a cell; clicking a row fires `on_select` with the row index, so delete/toggle is cell logic).
-- **③ Strings as handles**: the host holds text; cells hold a numeric **handle**. `textinput` interns on Enter and fires the cell with the handle; `text` / `list(text:true)` render a value as the string it names. Interning dedups, so equal text = equal handle — a cell can compare and route strings but never read or forge them.
-- **④ Feeds** — the world delivers data: a `feed` node declares a url + dot-path plucks; the **host** fetches through `/api/feed` (server-enforced domain allowlist, timeout, size cap) and fires cells with numbers (strings arrive as handles). Cells never touch the network — authority sits at the schema layer, auditable, not in the cell. Verified live: "台北即時氣溫儀表板" wires open-meteo and shows the real current temperature.
-
-Everything above persists across reloads automatically — apps *remember*.
+→ The full account (§19–§26, with each mechanism glossed in plain language) lives in **[docs/GROWN.md](docs/GROWN.md)**.
 
 ## The power of wasm-jit (vs JS, honest version)
 
