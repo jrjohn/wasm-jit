@@ -1,5 +1,7 @@
 # wasm-jit
 
+[![CI](https://github.com/jrjohn/wasm-jit/actions/workflows/ci.yml/badge.svg)](https://github.com/jrjohn/wasm-jit/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Software with no fixed screen.** You say what you want — a chart of this week's rainfall, a lone fisherman on a snowy river — and the interface is generated and shown in milliseconds. The catch that makes it safe: everything generated is fenced so it can only do what you explicitly allow.
 
 **🌊 Live: [arcana.boo](https://arcana.boo)** — the full anatomy of this architecture, with a playground where the wasm-jit compiler runs *in your browser*: edit a seed script, watch it recompile to WASM in milliseconds, and try to `fetch()` — refused at compile time, live.
@@ -166,6 +168,21 @@ The six gaps named in docs §18 ("from PoC to live UI manifestation") are now bu
 - Tier 2 (external WASM) is not fuel-metered — its containment story is a Worker + `terminate()` (not built).
 - Strict CSP needs `'wasm-unsafe-eval'` (instantiating bytes at runtime is treated as eval-class).
 - Single flat scope (a duplicate `let` of the same name errors); module cache eviction is clear-at-capacity, not LRU.
+
+## Repository map
+
+| Path | What it is |
+|---|---|
+| `src/` | the core compiler — `parser.rs` → `codegen.rs` → `wasm-encoder`; `audit.rs` = the import-section capability fence |
+| `gen-server/` | the live-generation server (Axum): Claude → schema+seed → server-side `validate()` → browser; the feed proxy + its SSRF guards live here |
+| `leptos-poc/` + `api-server/` | the pure-Rust tabs demo and its API |
+| `shengchen/` | the from-scratch sound-dust engine (Rust → **zero-import** WASM) + the zhuyin→speech compiler |
+| `skins/` | curated inhabitant skins (Rust → WASM) |
+| `assemblyscript/` | external souls in AssemblyScript — the language-agnostic fence proof |
+| `worlds/` | saved worlds (e.g. `moon4.json`, 楓橋夜泊) — a world is a seed, not pixels |
+| `skins-grown/`, `widgets-grown/`, `inhabitants/`, `pkg-dust/` | archives the system grows for itself: recalled skins/widgets, packaged beings, the built sound engine |
+| `research/` | the in-fence misuse study — a committed **[preregistration](research/PREREGISTRATION.md)** + a red-team harness (`research/redteam/`) whose deterministic halves are CI-pinned tests |
+| `docs/` | the design essays (`docs/GROWN.md` = the organs grown after the PoC) |
 
 ## Files
 
