@@ -4,3 +4,4 @@ leptos-poc/dist
 worlds/
 gen-server/ledger/
 /ledger/
+.DS_Store

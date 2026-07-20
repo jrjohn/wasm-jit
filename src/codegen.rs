@@ -33,7 +33,7 @@ pub struct CompileOpts {
     /// Fuel budget per `run()` call. When set, every loop iteration burns one
     /// unit; hitting zero traps (`unreachable`) instead of hanging the thread.
     /// The remaining fuel is exported as the mutable i32 global `"fuel"`, so
-    /// the host can read per-call consumption. ~10–30% tax on loop-heavy code.
+    /// the host can read per-call consumption. Measured tax ≈0% on the benchmark kernel (see README).
     pub fuel: Option<u32>,
     /// Linear-memory grant, in 64KiB pages (min = max — the cell cannot grow
     /// it). Enables the `load(i)` / `store(i, v)` builtins over f64 slots

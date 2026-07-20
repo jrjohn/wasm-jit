@@ -1,0 +1,16 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The whole workspace: compiler fences (refusal paths), import-section
+      # audit, fuel structure, server-side validation, DSP laws — and the
+      # machine proof that the committed sound engine imports NOTHING
+      # (gen-server::dust_engine_wasm_has_zero_imports).
+      - run: cargo test --workspace
