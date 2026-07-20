@@ -879,8 +879,20 @@ function updateCam(dt) {
   const g = fieldWorld.grid;
   cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
   const mv = (FKEYS.fwd - FKEYS.back) * 11 * dt;
-  cam.px = Math.min(Math.max(cam.px + Math.sin(cam.yaw) * mv, 1), g - 2);
-  cam.pz = Math.min(Math.max(cam.pz + Math.cos(cam.yaw) * mv, 1), g - 2);
+  // a wall stops you (and you slide along it): a being may declare solid `collide`
+  // boxes; move each axis only if it wouldn't put the eye inside one. 牆擋人。
+  const R = 0.5;
+  const blocked = (x, z) => {
+    for (const e of ENTITIES) {
+      const cs = e.collide; if (!cs) continue;
+      for (const b of cs) if (Math.abs(x - (e.x + b.cx)) < b.hx + R && Math.abs(z - (e.y + b.cz)) < b.hz + R) return true;
+    }
+    return false;
+  };
+  const nx = Math.min(Math.max(cam.px + Math.sin(cam.yaw) * mv, 1), g - 2);
+  const nz = Math.min(Math.max(cam.pz + Math.cos(cam.yaw) * mv, 1), g - 2);
+  if (!blocked(nx, cam.pz)) cam.px = nx;
+  if (!blocked(cam.px, nz)) cam.pz = nz;
   if (cam.yoff <= 0 && FKEYS.jump) cam.vy = 10;
   cam.vy -= 26 * dt;
   cam.yoff = Math.max(0, cam.yoff + cam.vy * dt);
@@ -1208,6 +1220,8 @@ function compileEntities(world, g) {
                   image: (typeof def.image === 'string') ? loadAsset(def.image) : null, // a host-served icon (佛畫) shown as a standing plate
                   iconH: (Number.isFinite(def.iconH) && def.iconH > 0) ? def.iconH : 3.4,
                   physics: (def.physics && typeof def.physics === 'object') ? def.physics : null, // host-simulated dynamics (gravity/roll/bounce/kick)
+                  collide: Array.isArray(def.collide) ? def.collide : null, // solid footprint boxes the walker can't pass through
+
 
 
 
