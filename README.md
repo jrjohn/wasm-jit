@@ -10,6 +10,8 @@
 
 > The one-minute falsification, from the live playground: a seed that calls `fetch()` is **refused at compile time** — *"unknown function 'fetch' — granted capabilities: [sin, cos, hue, rgb, hsl, disc, ring, arc, line, glow]"*. The fence is the import table; a capability never granted cannot be seized, however clever the generator.
 
+**The research question (and how to falsify it).** Invalid artifacts fail closed — so the open *safety* question is what a **valid** artifact can still do *within* its grants. This repo commits a preregistration and a red-team harness before any data: **[research/PREREGISTRATION.md](research/PREREGISTRATION.md)** + **[research/redteam/](research/redteam/)**. Its deterministic fences — off-allowlist/SSRF exfiltration refused, a begotten child unable to out-reach its parent — are **CI-pinned tests you can run** (`cargo test --workspace`); the credit-funded half is whether an adversarial generator can still deceive a user *inside* the fence.
+
 ![A bar chart of Taiwan's reservoir water levels, generated from one plain-English sentence](assets/hero-chart.png)
 
 > Typed *"a bar chart of Taiwan's reservoir water levels, in English"* → a fuel-metered WASM cell renders it in ~1.4 ms, no chart library. *(Bar values are generated from the prompt, not live data.)*

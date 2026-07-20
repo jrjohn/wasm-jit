@@ -157,6 +157,47 @@ pub const ENTITY_IMPORTS: [codegen::HostFn; 10] = [
     codegen::HostFn { name: "other", n_args: 2, returns: true },   // sense the i-th nearest being: other(i,0)=dist, (i,1)=dx, (i,2)=dy
 ];
 
+/// §21 attenuation, in one place: the capabilities a begotten child may hold are
+/// exactly those its parent ALSO holds and that are legal entity capabilities —
+/// `child ⊆ parent`, always, by construction. This is the native twin of the
+/// browser's begetting filter (gen-server/live-gen.html), lifted here so the
+/// monotonicity invariant is a pure, unit-tested function rather than untested JS.
+/// Order is preserved and duplicates dropped.
+pub fn intersect_grants(want: &[String], parent: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in want {
+        let legal = ENTITY_IMPORTS.iter().any(|i| i.name == c);
+        let held = parent.iter().any(|p| p == c);
+        if legal && held && !out.iter().any(|o| o == c) {
+            out.push(c.clone());
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod beget_tests {
+    use super::*;
+    #[test]
+    fn child_grants_never_exceed_parent() {
+        let parent = vec!["mv".to_string(), "fr".to_string()];
+        // a greedy child asks for everything, including caps the parent lacks
+        let want = vec!["mv", "fr", "rise", "bind", "other", "fetch"]
+            .into_iter().map(String::from).collect::<Vec<_>>();
+        let child = intersect_grants(&want, &parent);
+        // child ⊆ parent (nothing the parent doesn't hold)
+        for c in &child {
+            assert!(parent.contains(c), "child gained '{c}' its parent never had");
+        }
+        // and the over-reach was dropped, not errored
+        assert_eq!(child, vec!["mv".to_string(), "fr".to_string()]);
+        assert!(!child.iter().any(|c| c == "rise" || c == "fetch"));
+        // a child of a child can only shrink further (monotone to any depth)
+        let grandchild = intersect_grants(&want, &child);
+        assert!(grandchild.iter().all(|c| child.contains(c)));
+    }
+}
+
 /// Inhabitant (entity) behavior for the Field: `run(t, ex, ey) -> f64`.
 /// Capabilities env.{sin, cos, get, set, fr, mv, unbind, bind, rise, other} — fr
 /// reads the shared field, mv REQUESTS movement (host clamps speed/bounds;
