@@ -1207,6 +1207,8 @@ function compileEntities(world, g) {
                   shelter: (def.shelter && typeof def.shelter === 'object') ? def.shelter : null, // a roofed interior — no snow falls within
                   image: (typeof def.image === 'string') ? loadAsset(def.image) : null, // a host-served icon (佛畫) shown as a standing plate
                   iconH: (Number.isFinite(def.iconH) && def.iconH > 0) ? def.iconH : 3.4,
+                  physics: (def.physics && typeof def.physics === 'object') ? def.physics : null, // host-simulated dynamics (gravity/roll/bounce/kick)
+
 
 
 
@@ -1229,6 +1231,7 @@ function compileEntities(world, g) {
     // 一中有多: one shared body/behaviour, yet each is born at its own moment of the
     // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
     ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
+    if (ent.physics) { ent.pvx = 0; ent.pvz = 0; ent.pvh = 0; ent.ph = Number.isFinite(ent.physics.h0) ? ent.physics.h0 : 0; } // dynamic state
     if (def.behavior) {
       ent.soul = 'scene (DSL)';
       const bytes = compile_entity_wasm(def.behavior);
@@ -1282,6 +1285,37 @@ function tickEntities(t, g) {
       // not the seed's discipline (魚不上山, the way the fence is not a request)
       if (e.habitat === 'water' && sampleF(1, nx, ny) < 0.3) { /* the water holds it */ }
       else { e.x = nx; e.y = ny; }
+    }
+  }
+  // physics (host law): a being may DECLARE `physics` and the host — not its soul —
+  // moves it: gravity, a bounce off the land, rolling downhill, and a shove when the
+  // walker bumps it. The cell only declares; the dynamics live in the trusted host,
+  // so this is a new world-law, not a capability the cell could abuse. 動則有力。
+  {
+    const K = 0.55;
+    for (const e of ENTITIES) {
+      const ph = e.physics; if (!ph) continue;
+      e.pvh -= (ph.g ?? 15) * dt;                                  // gravity
+      e.ph += e.pvh * dt;
+      if (e.ph <= 0) { e.ph = 0; e.pvh = -e.pvh * (ph.bounce ?? 0.5); if (Math.abs(e.pvh) < 0.5) e.pvh = 0; }
+      if (e.ph < 0.4) {                                            // resting on the land: roll downhill + friction
+        const gx = (sampleF(0, e.x + 0.7, e.y) - sampleF(0, e.x - 0.7, e.y)) * K;
+        const gz = (sampleF(0, e.x, e.y + 0.7) - sampleF(0, e.x, e.y - 0.7)) * K;
+        e.pvx -= gx * (ph.roll ?? 6) * dt; e.pvz -= gz * (ph.roll ?? 6) * dt;
+        const fr = Math.max(0, 1 - (ph.friction ?? 1.0) * dt);
+        e.pvx *= fr; e.pvz *= fr;
+      }
+      const dcx = e.x - cam.px, dcz = e.y - cam.pz, dc = Math.hypot(dcx, dcz); // the walker's shove
+      if (fieldView === 'fp' && dc < (ph.r ?? 0.8) + 0.9 && dc > 0.03) {
+        const k = 1 / dc;
+        e.pvx += dcx * k * (ph.kick ?? 5) * dt * 6; e.pvz += dcz * k * (ph.kick ?? 5) * dt * 6;
+        if (e.ph < 0.3) e.pvh = Math.max(e.pvh, 2.5);             // a little pop
+      }
+      e.x = Math.min(Math.max(e.x + e.pvx * dt, 0.5), g - 1.5);
+      e.y = Math.min(Math.max(e.y + e.pvz * dt, 0.5), g - 1.5);
+      if (e.x <= 0.5 || e.x >= g - 1.5) e.pvx = -e.pvx * 0.5;     // the world's edges
+      if (e.y <= 0.5 || e.y >= g - 1.5) e.pvz = -e.pvz * 0.5;
+      e.alt = e.ph / (60 * K); e.realm = 'ground';                // the renderer lifts a body by alt·60·K
     }
   }
   // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
