@@ -2468,11 +2468,14 @@ function fpViewProj() { // the walker's pinhole, one matrix for land/body/billbo
   const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
   const t0 = -cam.px * sy - cam.pz * cy;
   const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  // aspect-correct horizontal scale: vertical FOV fixed (1.9), horizontal follows
+  // the real canvas aspect so spheres stay round on any screen (wide OR tall)
+  const xs = 1.9 * cv.height / cv.width;
   const vp = new Float32Array([
-    2 * cy, 0.16 * sy, az * sy, sy,
+    xs * cy, 0.16 * sy, az * sy, sy,
     0, 1.9, 0, 0,
-    -2 * sy, 0.16 * cy, az * cy, cy,
-    2 * (-cam.px * cy + cam.pz * sy), -1.9 * ey + 0.16 * t0, az * t0 + bz, t0,
+    -xs * sy, 0.16 * cy, az * cy, cy,
+    xs * (-cam.px * cy + cam.pz * sy), -1.9 * ey + 0.16 * t0, az * t0 + bz, t0,
   ]);
   return { vp, eye: [cam.px, ey, cam.pz], az, bz };
 }

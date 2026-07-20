@@ -59,10 +59,13 @@ while c < nc {
   disc(cx - cs * 0.7, cy + 5.0, cs * 0.70);
   c = c + 1.0;
 }
+let waterH = 0.58 - golden * 0.5;
+let waterS = 0.3 + 0.35 * golden;
 let gy = horizon;
 while gy < h {
   let gf = (gy - horizon) / (h - horizon);
-  hsl(0.58 - golden * 0.2, 0.35, (0.10 + 0.06 * (1.0 - gf)) * (0.5 + 0.5 * day + 0.4 * golden));
+  let waterL = (0.05 + day * 0.26 + golden * 0.18) * (0.62 + 0.38 * (1.0 - gf));
+  hsl(waterH, waterS, waterL);
   line(0.0, gy, w, gy);
   gy = gy + 2.0;
 }
