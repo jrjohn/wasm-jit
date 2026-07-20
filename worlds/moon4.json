@@ -21,6 +21,12 @@
         "mode": "frame",
         "order": 3,
         "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 {\n   let sn = fr(3.0, x, y) + 0.0008;\n   if sn > 0.6 { sn = 0.6; }\n   fw(3.0, x, y, sn);\n  }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "terrace",
+        "mode": "once",
+        "order": 1.5,
+        "script": "let hc = fr(0.0, 78.0, 26.0);\nlet y = 20.0;\nwhile y < 32.0 {\n let x = 71.0;\n while x < 85.0 {\n  let ex = 5.2 - abs(x - 78.0);\n  let ey = 4.6 - abs(y - 26.0);\n  if ex > 0.0 { if ey > 0.0 {\n   let m = ex;\n   if ey < m { m = ey; }\n   if m > 1.0 { m = 1.0; }\n   let ho = fr(0.0, x, y);\n   fw(0.0, x, y, ho * (1.0 - m) + hc * m);\n   if m > 0.5 { fw(1.0, x, y, 0.0); }\n  } }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
       }
     ],
     "entities": [
