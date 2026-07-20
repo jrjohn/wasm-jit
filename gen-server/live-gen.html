@@ -1539,7 +1539,7 @@ function renderField() {
 }
 
 function manifestField(world) {
-  APP.key = null; soundStop(); stopFeeds(); soundStop();
+  APP.key = null; soundStop(); stopFeeds();
   drawRun = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
@@ -1889,7 +1889,7 @@ const env = {
 // keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
-  APP.key = null; soundStop(); stopFeeds(); soundStop();
+  APP.key = null; soundStop(); stopFeeds();
   fieldWorld = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
@@ -3014,7 +3014,7 @@ window.__soundSpectrum = () => { // e2e: formant peaks in the vocal band (proves
 };
 
 function manifestShader(seed) {
-  APP.key = null; soundStop(); stopFeeds(); soundStop();
+  APP.key = null; soundStop(); stopFeeds();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null;
   if (!D3.gl && !initD3()) { say('err', 'shader needs WebGL2 — unavailable here'); return; }
   const t0 = performance.now();
@@ -3083,7 +3083,7 @@ function renderShader(t) {
 }
 window.__manifestShader = s => manifestShader(s);
 function manifestDraw3d(seed) {
-  APP.key = null; soundStop(); stopFeeds(); soundStop();
+  APP.key = null; soundStop(); stopFeeds();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; SHD.prog = null;
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();
