@@ -183,7 +183,7 @@ pub fn compile_entity_wasm(src: &str) -> Result<Vec<u8>, JsError> {
 /// reaches form (the body). The skin still cannot fetch, read the page, touch
 /// any other being, or write anything — richness up, reach fixed.
 pub const SKIN_PARAMS: [&str; 6] = ["px", "py", "s", "t", "nx", "ny"];
-pub const SKIN_IMPORTS: [codegen::HostFn; 10] = [
+pub const SKIN_IMPORTS: [codegen::HostFn; 12] = [
     codegen::HostFn { name: "sin", n_args: 1, returns: true },
     codegen::HostFn { name: "cos", n_args: 1, returns: true },
     codegen::HostFn { name: "hue", n_args: 1, returns: false },
@@ -193,6 +193,8 @@ pub const SKIN_IMPORTS: [codegen::HostFn; 10] = [
     codegen::HostFn { name: "ring", n_args: 3, returns: false },
     codegen::HostFn { name: "arc", n_args: 5, returns: false },
     codegen::HostFn { name: "line", n_args: 4, returns: false },
+    codegen::HostFn { name: "rect", n_args: 4, returns: false }, // FILLED rect(x, y, w, h) — walls, platforms, beams: mass, not sticks
+    codegen::HostFn { name: "tri", n_args: 6, returns: false },  // FILLED triangle — roofs, sails, mountains' children
     codegen::HostFn { name: "st", n_args: 1, returns: true },   // read the being's published state slot (soul writes, skin reads)
 ];
 
@@ -275,6 +277,46 @@ pub fn compile_draw3d_wasm(src: &str) -> Result<Vec<u8>, JsError> {
         &DRAW3D_PARAMS,
         &DRAW3D_IMPORTS,
         codegen::CompileOpts { fuel: Some(5_000_000), memory_pages: None },
+    )
+    .map_err(|e| JsError::new(&e))
+}
+
+
+/// The SOUND ABI — the audio shader (§24, the ear's skin): where surface
+/// "shader" runs the seed once per PIXEL, surface "sound" runs it once per
+/// AUDIO SAMPLE (44100×/s in an AudioWorklet). run(t) -> one sample in -1..1.
+/// The narrowest fence with a memory: pure math + 32 slots for envelopes and
+/// sequencing. No pointer, no drawing, no reach — and the master volume is
+/// host law, outside the cell's world entirely.
+pub const SOUND_PARAMS: [&str; 1] = ["t"];
+pub const SOUND_IMPORTS: [codegen::HostFn; 11] = [
+    codegen::HostFn { name: "sin", n_args: 1, returns: true },
+    codegen::HostFn { name: "cos", n_args: 1, returns: true },
+    codegen::HostFn { name: "get", n_args: 1, returns: true },
+    codegen::HostFn { name: "set", n_args: 2, returns: false },
+    codegen::HostFn { name: "noise", n_args: 0, returns: true }, // white noise in -1..1 — filter it (get/set) for texture
+    // §24b the 聲塵 primitives — the host lends the PHYSICS (shengchen, a
+    // zero-import Rust engine on the audio thread); the cell's 自性 decides
+    // WHEN. 動則有聲: no call, no sound. Procedures, like the skin's disc().
+    codegen::HostFn { name: "drop", n_args: 1, returns: false }, // one raindrop: drop(bright 0..1)
+    codegen::HostFn { name: "bubble", n_args: 1, returns: false }, // one water bubble: bubble(pitch 0..1)
+    codegen::HostFn { name: "chirp", n_args: 3, returns: false }, // one bird syllable: chirp(f1, f2, dur<=0.3)
+    codegen::HostFn { name: "strike", n_args: 2, returns: false }, // one modal strike: strike(f0, energy 0..1)
+    codegen::HostFn { name: "voice", n_args: 3, returns: false }, // the throat: voice(f0, vowel 0..4, nasal 0..1); f0<=0 closes it
+    codegen::HostFn { name: "breath", n_args: 1, returns: false }, // wind/air layer: breath(level 0..1)
+];
+
+/// Compile a sound seed. Fuel is small and per-call: at 44.1kHz a runaway loop
+/// inside one sample would hang the audio thread — the meter traps it instead.
+#[cfg(feature = "js-api")]
+#[wasm_bindgen]
+pub fn compile_sound_wasm(src: &str) -> Result<Vec<u8>, JsError> {
+    let prog = parser::parse(src).map_err(|e| JsError::new(&e))?;
+    codegen::compile_with_opts(
+        &prog,
+        &SOUND_PARAMS,
+        &SOUND_IMPORTS,
+        codegen::CompileOpts { fuel: Some(4096), memory_pages: None },
     )
     .map_err(|e| JsError::new(&e))
 }

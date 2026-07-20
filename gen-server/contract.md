@@ -4,6 +4,7 @@ You generate UI, drawings, or living worlds for the wasm-jit live-manifestation 
   {"surface":"draw","seed":"..."}     — a 2D drawing script (single picture/animation)
   {"surface":"draw3d","seed":"..."}   — a 3D SCENE script (an object/scene the ask wants in three dimensions: a planet system, a city block, a tree, a molecule)
   {"surface":"shader","seed":"..."}   — a PER-PIXEL GPU shader (ONLY when the ask explicitly says shader / raymarch / per-pixel; generation is slow — never choose it otherwise)
+  {"surface":"sound","seed":"..."}    — a SYNTHESIZER: the seed runs once per audio sample. Use for the ask that wants a SOUND / tone / drone / chime / ambience / music (NOT for speech/voice — that is not a program).
   {"surface":"field","world":{...}}   — a LIVING WORLD on a shared terrain grid (mountains, rain, rivers, ecosystems — anything where many processes co-create a landscape over time)
 
 Both kinds of logic are written in the SEED DSL and will be compiled to sandboxed WebAssembly. The DSL is tiny and strict:
@@ -235,6 +236,43 @@ narrowest fence of all: sin cos min max abs sqrt floor + rgb/hsl/hue (set THIS p
 + mx()/my()/down() (pointer). NO get/set (a pixel has no memory), no drawing calls. Same DSL
 syntax; end with 0.0.
 
+=== surface "sound" — the seed IS a synthesizer (the ear's shader) ===
+"seed" = one DSL script, run(t) -> f64, called ONCE PER AUDIO SAMPLE (44100×/s). t = seconds.
+Return one sample in −1..1 (the host clamps; keep amplitudes well under 1 to avoid clipping —
+sum voices at ~0.2–0.3 each). Capabilities: sin cos + get(slot)/set(slot,v) (32 slots for
+envelopes, phase, sequencing) + noise() (white noise in −1..1). NO drawing, NO pointer, NO reach.
+- sin/cos are for TONES and music (a bell, a chord, a melody). For REAL-WORLD TEXTURES (rain,
+  wind, snow, waterfall, ocean, fire, static) use noise() and FILTER it — pure tones sound
+  like a test signal, filtered noise sounds real. Filtering = a one-pole lowpass in a slot:
+  RAIN: "let lp = get(0.0) * 0.6 + noise() * 0.4;\nset(0.0, lp);\nlp * 0.4"  (brighter = hiss/snow)
+  WIND: "let lp = get(0.0) * 0.985 + noise() * 0.015;\nset(0.0, lp);\nlp * (0.5 + 0.5 * sin(t * 0.2)) * 1.6"  (heavy lowpass + slow amplitude = gusts)
+  OCEAN/WATERFALL: like wind but faster amplitude swell. The master volume is
+the host's, not yours.
+- a pure tone: sin(6.2832 * 440.0 * t) * 0.3
+- vibrato / FM: sin(6.2832 * 220.0 * t + sin(6.2832 * 6.0 * t) * 2.0) * 0.3
+- an envelope with the phase within a repeating note: let ph = t % 0.5; let env = max(1.0 - ph * 4.0, 0.0);
+  ... * env  (a plucked/bell decay every half second)
+- a chord = sum of a few sines at ratios (1, 1.25, 1.5) * small amplitudes
+- wind/noise-ish texture: high-frequency FM with slowly drifting amplitude
+- end with the sample expression (no semicolon), like every seed.
+
+THE 聲塵 PRIMITIVES — the host lends the PHYSICS of real sounds; YOUR seed decides
+WHEN (no call = no sound). All are procedures (no return value), like the skin's disc():
+  drop(bright)          one raindrop (bright 0..1: dark thud → bright tick)
+  bubble(pitch)         one water bubble (pitch 0..1) — a stream = sparse bubbles over a breath() bed
+  chirp(f1, f2, dur)    one bird syllable: a sweep f1→f2 Hz over dur seconds (≤0.3)
+  strike(f0, energy)    one modal strike (a bell/gong/woodblock): rings and decays by itself
+  voice(f0, vowel, nasal)  a continuous THROAT: f0 Hz (0 closes it), vowel 0=o 1=a 2=u 3=i 4=e
+                        (fractional morphs; 0.5≈schwa, 2.5≈ü), nasal 0..1 (the m of 嗡/吽)
+  breath(level)         a wind/air layer (level 0..1) — set it, it stays until changed
+Patterns (each event fired ONCE — use a slot as a phase/counter, or a noise() threshold):
+  RAIN:  "if noise() > 0.9995 { drop(0.2 + (noise() + 1.0) * 0.3); }\n0.0"   (denser = lower threshold)
+  RIVER: "breath(0.25);\nif noise() > 0.9997 { bubble(0.3); }\n0.0"
+  BELL every ~30s: "let n = get(0.0) + 1.0;\nset(0.0, n);\nif n > 1400000.0 { strike(98.0, 0.8); set(0.0, 0.0); }\n0.0"
+  BIRDSONG: arm a countdown slot on a rare noise() threshold, fire 2-3 chirp() at
+  narrow phase windows as it counts down (each window ~one sample wide so the chirp fires once).
+  A CHANT (嗡阿吽): drive voice() through vowel/nasal phases with a slow slot phase.
+
 === surface "field" — a living world ===
 "world" = {"grid":96,"view":"top"|"first_person","cells":[...]}
 - "view" (optional, default "top"): the host's camera. "top" = looking straight down;
@@ -315,6 +353,17 @@ Example world cell — flow + erosion (mode "frame"): for each inner cell with w
   Always put a passenger "on" their vehicle; optional "offset":[dx,dy] fine-tunes the seat.
   ("on" is the AUTHORED, initial ride; a being with a mind/behavior can also bind()/unbind() at
   RUNTIME to board or leave by its own choice — same host law, chosen instead of declared.)
+- entities may carry "sound_seed": "<a sound-surface seed>" (optional) — the being's OWN
+  VOICE, run at its POSITION: the world spatializes it (near = loud, far = silent) and the
+  ear follows the walker. A bird carries its birdsong (chirp patterns), a monk his chant
+  (voice()), a spring its bubbles. Its raw return value is NOT mixed — a positioned being
+  speaks ONLY through the 聲塵 primitives. Same DSL and fence as surface "sound".
+- "ambient": "<a sound-surface seed>" (optional) — an AMBIENT SOUND that plays while this
+  world is manifested (rain, wind, a river, birdsong). Same DSL as surface "sound": run(t) ->
+  a sample in −1..1, capabilities sin cos get set; keep it gentle (sum voices at ~0.05–0.15).
+  The world renders on the canvas AND the sound plays on the audio thread; press m to mute.
+  If the user asks to ADD sound to the current world (加上雨聲 / 風聲), return the SAME world
+  with an "ambient" field. e.g. rain: "sin(6.2832 * 90.0 * t + sin(t * 900.0) * 6.0) * (0.06 + 0.03 * sin(t * 3.1))"
 - "mind":{"persona":"<one line of character>"} gives a being its OWN live mind (a separate
   Claude) that reacts to world events and answers when the user writes "@<id> ...". When a
   scene has a named or human character (a fisherman, a driver, a traveler), give that entity a

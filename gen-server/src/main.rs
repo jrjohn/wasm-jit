@@ -71,10 +71,13 @@ const ENTITY_TYPES: [&str; 4] = ["boat", "fisherman", "person", "car"];
 /// drawing audit as the draw surface.
 // Shared with the browser compiler via the crate (st included) so the two agree.
 const SKIN_PARAMS: [&str; 6] = wasm_jit::SKIN_PARAMS;
-const SKIN_IMPORTS: [HostFn; 10] = wasm_jit::SKIN_IMPORTS;
+const SKIN_IMPORTS: [HostFn; 12] = wasm_jit::SKIN_IMPORTS;
 // Grown-widget ABI (詞彙自生成), shared with the browser for the same reason.
 const WIDGET_PARAMS: [&str; 3] = wasm_jit::WIDGET_PARAMS;
 const WIDGET_IMPORTS: [HostFn; 17] = wasm_jit::WIDGET_IMPORTS;
+// Sound ABI (§24 — the audio shader), shared likewise.
+const SOUND_PARAMS: [&str; 1] = wasm_jit::SOUND_PARAMS;
+const SOUND_IMPORTS: [HostFn; 11] = wasm_jit::SOUND_IMPORTS;
 // Draw3d ABI (§22 — the seed writes the scene), shared likewise.
 const DRAW3D_PARAMS: [&str; 3] = wasm_jit::DRAW3D_PARAMS;
 const DRAW3D_IMPORTS: [HostFn; 30] = wasm_jit::DRAW3D_IMPORTS;
@@ -653,6 +656,15 @@ fn validate(obj: &Value) -> Result<(), String> {
                 .map_err(|e| format!("shader seed rejected: {e}"))?;
             Ok(())
         }
+        Some("sound") => {
+            // §24: the seed runs once per audio sample — validate by compiling
+            let seed = obj
+                .get("seed")
+                .and_then(|s| s.as_str())
+                .ok_or("surface \"sound\" lacks \"seed\"")?;
+            compile_check(seed, &SOUND_PARAMS, &SOUND_IMPORTS, 4096)
+                .map_err(|e| format!("sound seed failed to compile: {e}"))
+        }
         Some("field") => {
             let world = obj.get("world").ok_or("surface \"field\" lacks \"world\"")?;
             let grid = world.get("grid").and_then(|g| g.as_u64()).unwrap_or(96);
@@ -663,6 +675,12 @@ fn validate(obj: &Value) -> Result<(), String> {
                 if !matches!(view, "top" | "first_person") {
                     return Err("world view must be \"top\" or \"first_person\"".into());
                 }
+            }
+            // §24 ambient: a world may carry a sound seed that plays while it
+            // renders — the ear's layer, validated against the sound fence
+            if let Some(amb) = world.get("ambient").and_then(|a| a.as_str()) {
+                compile_check(amb, &SOUND_PARAMS, &SOUND_IMPORTS, 4096)
+                    .map_err(|e| format!("world ambient sound failed to compile: {e}"))?;
             }
             let cells = world
                 .get("cells")
@@ -744,6 +762,19 @@ fn validate(obj: &Value) -> Result<(), String> {
                     if let Some(seed) = skin_seed {
                         compile_check(seed, &SKIN_PARAMS, &SKIN_IMPORTS, 300_000)
                             .map_err(|e| format!("entity '{id}' skin_seed failed to compile: {e}"))?;
+                    }
+                    // §22b a being may carry a true 3D BODY — a draw3d cell the
+                    // host places at its coordinates (the fence: same 30 words)
+                    if let Some(seed) = ent.get("body_seed").and_then(|s| s.as_str()) {
+                        compile_check(seed, &DRAW3D_PARAMS, &DRAW3D_IMPORTS, 5_000_000)
+                            .map_err(|e| format!("entity '{id}' body_seed failed to compile: {e}"))?;
+                    }
+                    // §24b 聲從身出: a being may carry a sound cell — its voice
+                    // sits at ITS coordinates, spatialized by the world. The
+                    // seed passes the same SOUND fence as the world's ambient.
+                    if let Some(seed) = ent.get("sound_seed").and_then(|s| s.as_str()) {
+                        compile_check(seed, &SOUND_PARAMS, &SOUND_IMPORTS, 4096)
+                            .map_err(|e| format!("entity '{id}' sound_seed failed to compile: {e}"))?;
                     }
                     if let Some(realm) = ent.get("realm").and_then(|r| r.as_str()) {
                         if !matches!(realm, "sky" | "ground") {
@@ -828,13 +859,18 @@ Answer only from what these report. If a faculty does not tell you something (e.
 Reply with ONE JSON object only (no prose outside it):
 {"say":"<one short in-character sentence (reply to words, or react) — may be empty>",
  "thought":"<one short private thought>",
+ "sing":"<OPTIONAL: the actual words to be SPOKEN ALOUD in a real voice — the world lends you its voice (the browser's). This is different from 'say' (which is only shown as text): whatever you put in 'sing' is VOCALIZED. If the visitor asks you to sing, to speak aloud, to say something out loud, or to make up a song, you MUST put the sung/spoken words HERE in 'sing' (a short verse or line, under 120 chars) — do NOT just describe it in 'say'. YOUR MIND writes the words; the voice is the world's.>",
  "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
    <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
- "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2). px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
+ "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2), rect(x,y,w,h) [FILLED rectangle], tri(x1,y1,x2,y2,x3,y3) [FILLED triangle]. px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
  "attrs":{"name":"Ink","mood":"content"},   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>
  "remember":"<OPTIONAL — one short line (≤80 chars) worth keeping. It joins your journal and returns to you in every future perception. Choose rarely and fold well: the journal holds only 12 lines and the oldest falls away, so keep the ESSENCE of a moment, not its transcript (e.g. 'first snow tonight; the line stayed slack'). Remembering is pure data about yourself — it never widens what you can touch.>}
+
+SAY vs SING — a crucial difference: 'say' is only shown as TEXT; 'sing' is VOCALIZED aloud in a real voice. So if you are asked to sing/perform/speak aloud, the actual sung words go in 'sing', NOT in 'say'. Do not merely announce a song in 'say' and leave 'sing' empty — that produces silence. Sing the words themselves.
+Example — asked "sing me a short song": {"say":"", "thought":"a tune for them", "sing":"Down by the cold river the willow leans low, / the water knows secrets the old stones won't show."}
+Example — asked "say hello out loud": {"say":"", "sing":"Hello, traveller — well met on this road."}
 
 Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/second:
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
@@ -968,6 +1004,9 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(m) = obj.get("remember") {
                         resp["remember"] = m.clone(); // a moment the being chose to keep — its own folded past
+                    }
+                    if let Some(s) = obj.get("sing").filter(|v| v.is_string()) {
+                        resp["sing"] = s.clone(); // §24 words the world will vocalize (host-lent voice)
                     }
                     return (StatusCode::OK, Json(resp));
                 }
@@ -1468,6 +1507,9 @@ async fn main() {
         .route("/", get(index))
         .nest_service("/pkg", ServeDir::new("pkg"))
         .nest_service("/pkg-skins", ServeDir::new("pkg-skins"))
+        // §24b the 聲塵器 — the zero-import sound-dust engine (shengchen), a
+        // raw wasm the audio thread instantiates with an EMPTY import object
+        .nest_service("/pkg-dust", ServeDir::new("pkg-dust"))
         // version-skew guard: the page is no-store but /pkg used to be
         // heuristically cached — a fresh HTML importing a new export from a
         // stale pkg kills the whole module (dead buttons). no-cache = may
@@ -1793,6 +1835,70 @@ mod tests {
             "cells":[{"id":"a","params":["x"],"script":"x"}],
             "tree":{"type":"feed","url":"https://x.y/z","plucks":[{"path":"p","cell":"missing"}]},"wires":[]}});
         assert!(validate(&ghost_pluck).unwrap_err().contains("unknown cell"));
+    }
+
+    #[test]
+    fn sound_surface_validates_and_rejects() {
+        // §24: a two-voice synth (bell + wind) with an envelope in the slots
+        let ok = serde_json::json!({"surface":"sound","seed":
+            "let phase = t % 8.0;\nlet decay = max(1.0 - phase * 0.4, 0.0);\nlet bell = sin(6.2832 * 523.25 * phase) * decay * 0.3;\nlet wind = sin(6.2832 * 110.0 * t + sin(t * 0.7) * 3.0) * (0.2 + 0.1 * sin(t * 0.31));\nset(0.0, get(0.0) * 0.99 + bell * 0.01);\nbell + wind"});
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        let overreach = serde_json::json!({"surface":"sound","seed":"disc(1.0, 2.0, 3.0);\n0.0"});
+        assert!(validate(&overreach).unwrap_err().contains("failed to compile"));
+        let missing = serde_json::json!({"surface":"sound"});
+        assert!(validate(&missing).unwrap_err().contains("lacks"));
+    }
+
+    #[test]
+    fn entity_sound_seed_validates_and_rejects() {
+        // a bird that chirps by its own law — 聲從身出
+        let ok = serde_json::json!({
+            "surface": "field",
+            "world": {
+                "grid": 64,
+                "cells": [{"id":"ground","mode":"once","order":1,"script":"fw(0.0, 5.0, 5.0, 2.0);\n1.0"}],
+                "entities": [{"id": "b1", "type": "bird", "at": [10.0, 10.0],
+                    "skin_seed": "hue(0.6);\ndisc(px, py, s * 0.2);\n0.0",
+                    "sound_seed": "let ph = get(0.0) + 1.0;\nset(0.0, ph);\nif ph % 9000.0 < 1.0 { chirp(2500.0, 3200.0, 0.08); }\n0.0"}]
+            }
+        });
+        assert!(validate(&ok).is_ok(), "{:?}", validate(&ok));
+        // over-reach dies at the fence: mv() is an ENTITY faculty, not a sound one
+        let bad = serde_json::json!({
+            "surface": "field",
+            "world": {
+                "grid": 64,
+                "cells": [{"id":"ground","mode":"once","order":1,"script":"fw(0.0, 5.0, 5.0, 2.0);\n1.0"}],
+                "entities": [{"id": "b1", "type": "bird", "at": [10.0, 10.0],
+                    "skin_seed": "hue(0.6);\ndisc(px, py, s * 0.2);\n0.0",
+                    "sound_seed": "mv(0.1, 0.0);\n0.0"}]
+            }
+        });
+        let e = validate(&bad).unwrap_err();
+        assert!(e.contains("sound_seed"), "{e}");
+    }
+
+    #[test]
+    fn dust_engine_wasm_has_zero_imports() {
+        // the fence's extreme: the committed shengchen wasm imports NOTHING —
+        // it cannot touch anything; it can only vibrate. Machine-checked.
+        let bytes = std::fs::read("../pkg-dust/shengchen.wasm")
+            .expect("pkg-dust/shengchen.wasm missing — build shengchen for wasm32-unknown-unknown and copy it");
+        let mut imports = 0;
+        for payload in wasmparser::Parser::new(0).parse_all(&bytes) {
+            if let Ok(wasmparser::Payload::ImportSection(r)) = payload {
+                imports += r.count();
+            }
+        }
+        assert_eq!(imports, 0, "the dust engine grew hands — its import table must stay EMPTY");
+    }
+
+    #[test]
+    fn sound_abi_matches_crate() {
+        assert_eq!(SOUND_IMPORTS.len(), wasm_jit::SOUND_IMPORTS.len());
+        for (a, b) in SOUND_IMPORTS.iter().zip(wasm_jit::SOUND_IMPORTS.iter()) {
+            assert_eq!((a.name, a.n_args, a.returns), (b.name, b.n_args, b.returns));
+        }
     }
 
     #[test]

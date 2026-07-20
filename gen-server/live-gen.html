@@ -155,7 +155,7 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
-import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl } from './pkg/wasm_jit.js';
+import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl, compile_sound_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
 await initSkins();
@@ -743,7 +743,7 @@ function manifestUi(schema) {
   wires = schema.wires ?? [];
   charts = [];
   WIDGETS = []; // a new UI = fresh grown-widget instances (the library remembers the looks)
-  LISTS = []; stopFeeds();
+  LISTS = []; stopFeeds(); soundStop();
   const stage = $('stage');
   stage.innerHTML = '';
   stage.appendChild(render(schema.tree));
@@ -774,6 +774,15 @@ let fieldWorld = null;   // {grid, cells:[{id,mode,order,region,run,fails,quaran
 let FIELD = null;        // Float64Array(grid*grid*4): height, water, veg, snow
 let fieldCanvas = null;  // offscreen grid-sized canvas
 let lastTick = 0;
+let lastSndSync = 0; // §24b ear/voice position sync throttle
+let OCCL = null; // §22c per-column terrain silhouette by distance bucket
+const OCCL_META = { step: 2, ob: 2.5, nb: 0, cols: 0 };
+function occlCut(sx, zc) { // screen-y above which things at depth zc are visible
+  if (!OCCL || !OCCL_META.nb) return 1e9;
+  const c = Math.min(Math.max((sx / OCCL_META.step) | 0, 0), OCCL_META.cols - 1);
+  const k = Math.min(Math.max((zc / OCCL_META.ob) | 0, 0), OCCL_META.nb - 1);
+  return OCCL[c * OCCL_META.nb + k];
+}
 let lastRaf = 0;
 
 // ---- first-person view: the same field, seen from inside ----
@@ -787,6 +796,8 @@ const KEYMAP = {
   ArrowUp: 'fwd', KeyW: 'fwd', ArrowDown: 'back', KeyS: 'back', Space: 'jump',
 };
 window.addEventListener('keydown', e => {
+  if ((e.key === 'm' || e.key === 'M') && (AUDIO.active || AUDIO.ambient) && document.activeElement !== $('prompt')) { soundMute(!AUDIO.muted); return; }
+
   const k = KEYMAP[e.code];
   if (!k || fieldView !== 'fp' || !fieldWorld) return;
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) return; // chat keeps its keys
@@ -831,7 +842,12 @@ function updateCam(dt) {
 
 // Voxel-space column renderer: per screen column, march the ray far→near is
 // inverted here (near→far with a rising horizon clip) — classic heightmap FP.
+// §25: when WebGL2 is present this whole march retires — the lattice becomes a
+// real heightfield mesh sharing the bodies' depth buffer (renderFieldFPGL);
+// this CPU path stays as the fallback eye.
 function renderFieldFP() {
+  if (FPT === null) { FPT = initFPTerrain(); window.__fpPath = FPT ? 'gl' : 'cpu'; }
+  if (FPT) { renderFieldFPGL(); return; }
   const g = fieldWorld.grid, W = cv.width, H = cv.height;
   const K = 0.55;                                  // field height → world units
   const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
@@ -842,9 +858,16 @@ function renderFieldFP() {
   const maxD = g * 1.15;
   const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
   const smp = CPU_SMP;
+  // §22c occlusion truth: per column, the terrain silhouette (minY) reached by
+  // everything NEARER than each distance bucket — billboards and bodies are
+  // clipped against it, so a boat behind a bank hides and a temple sits on land
+  const OB = 2.5, ONB = Math.ceil(maxD / OB) + 1, OCols = Math.ceil(W / step) + 1;
+  if (!OCCL || OCCL.length !== OCols * ONB) OCCL = new Float32Array(OCols * ONB);
+  OCCL.fill(H); OCCL_META.step = step; OCCL_META.ob = OB; OCCL_META.nb = ONB; OCCL_META.cols = OCols;
   for (let sx = 0; sx < W; sx += step) {
     const off = (sx / W - 0.5) * fov;
     const dx = sinY + off * cosY, dz = cosY - off * sinY;
+    const ocol = (sx / step) | 0;
     let minY = H;
     for (let d = 1.6; d < maxD; d += 0.35 + d * 0.014) {
       const wx = cam.px + dx * d, wz = cam.pz + dz * d;
@@ -863,13 +886,24 @@ function renderFieldFP() {
         ctx.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
         ctx.fillRect(sx, Math.max(sy, 0), step, minY - Math.max(sy, 0));
         minY = sy;
+        const ok = Math.min((d / OB) | 0, ONB - 1);
+        if (minY < OCCL[ocol * ONB + ok]) OCCL[ocol * ONB + ok] = minY;
         if (minY <= 0) break;
       }
     }
+    // prefix-min: bucket k = silhouette of ALL terrain nearer than k·OB
+    for (let k = 1; k < ONB; k++) {
+      const i = ocol * ONB + k;
+      if (OCCL[i] > OCCL[i - 1]) OCCL[i] = OCCL[i - 1];
+    }
   }
+  // §22b true bodies first (real 3D, camera-matched), then the billboards
+  const embodied = ENTITIES.filter(e => e.bodyRun);
+  if (embodied.length && S_BODY) renderBodiesFP(embodied, W, H);
   // inhabitants as billboards (v1: no occlusion behind hills — noted limit)
   const K2 = K, sinY2 = Math.sin(cam.yaw), cosY2 = Math.cos(cam.yaw);
   for (const e of ENTITIES) {
+    if (e.bodyRun) continue; // its true body already stands in the world
     const dx = e.x - cam.px, dz = e.y - cam.pz;
     const zc = dx * sinY2 + dz * cosY2;
     if (zc < 1.2) continue;
@@ -882,7 +916,12 @@ function renderFieldFP() {
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K2;
     const sy = horizon + ((eye - surfaceY) * focal) / zc;
     const s = Math.max(3, (focal / zc) * 1.1);
+    // §22c the meeting of eye and thing passes through the LAND between them
+    const cut = occlCut(sx, zc);
+    if (cut <= 0) continue; // wholly behind a hill
+    ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, cut); ctx.clip();
     drawSkin(e, sx, sy - s * 0.4, s, performance.now() / 1000);
+    ctx.restore();
   }
   if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
@@ -1109,6 +1148,7 @@ function compileEntities(world, g) {
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
                   alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
+                habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   home: def.home ?? [def.at[0], def.at[1]], // where it first appeared — so it can find its way back
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
                   journal: [], // 宿念: a being's own remembered moments — bounded and lossy BY LAW; mostly self-chosen (the host marks only what it heard and its strongest acts)
@@ -1143,6 +1183,14 @@ function compileEntities(world, g) {
     } else if (!SKINS[ent.type]) {
       recallGrownSkin(ent); // a bare novel type: reincarnate a saved skin from the library
     }
+    // §22b the being's true 3D body — compiled through the draw3d fence; the
+    // HOST places it (base matrix), the seed only shapes it. 身在世界,形由種子.
+    if (typeof def.body_seed === 'string' && def.body_seed.trim() && bodyScene()) {
+      try {
+        const bb = compile_draw3d_wasm(def.body_seed);
+        ent.bodyRun = new WebAssembly.Instance(new WebAssembly.Module(bb), { env: d3env(S_BODY) }).exports.run;
+      } catch (e) { say('err', `entity '${ent.id}' body refused: ${e.message || e}`); }
+    }
     if (ent.mind?.persona) mindRegister(ent);
     return ent;
   });
@@ -1164,8 +1212,12 @@ function tickEntities(t, g) {
       if (e.on) continue;
       const len = Math.hypot(e.pending[0], e.pending[1]);
       const k = len > MAX_STEP ? MAX_STEP / len : 1; // host law: nobody teleports
-      e.x = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
-      e.y = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+      const nx = Math.min(Math.max(e.x + e.pending[0] * k, 0.5), g - 1.5);
+      const ny = Math.min(Math.max(e.y + e.pending[1] * k, 0.5), g - 1.5);
+      // 棲地律: a water being's step onto dry land does not land — host law,
+      // not the seed's discipline (魚不上山, the way the fence is not a request)
+      if (e.habitat === 'water' && sampleF(1, nx, ny) < 0.3) { /* the water holds it */ }
+      else { e.x = nx; e.y = ny; }
     }
   }
   // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
@@ -1248,6 +1300,8 @@ const skinEnv = {
   ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+  rect: (x, y, w, h) => { ctx.fillRect(x, y, Math.max(w, 0), Math.max(h, 0)); },
+  tri: (x1, y1, x2, y2, x3, y3) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.closePath(); ctx.fill(); },
   // §20.2: the body reads what the mind published — read-only view of the being's slots
   st: i => skinSelf ? (skinSelf.slots[i & 31] ?? 0) : 0,
 };
@@ -1301,14 +1355,34 @@ function snowing() { // is any snow on the ground? (cheap sample)
   return false;
 }
 
-function drawSnowfall(nowSec, W, H) { // host weather effect — pure rendering, replay-free
-  ctx.fillStyle = 'rgba(240,244,250,.8)';
-  for (let i = 0; i < 90; i++) {
-    const sp = 26 + (i % 5) * 9;
-    const x = ((i * 131.7) % W + nowSec * (9 + (i % 4) * 5)) % W;
-    const y = ((i * 89.3) % H + nowSec * sp) % H;
-    ctx.fillRect(x, y, 2, 2);
+// §26b snow that FALLS — a host particle pool (was: a scrolling hash pattern).
+// Each flake keeps its own speed, sway and size; bigger = nearer = faster,
+// so the fall gains depth. Still pure rendering, replay-free — host weather.
+let SNOWP = null;
+function drawSnowfall(nowSec, W, H) {
+  if (!SNOWP || SNOWP.w !== W || SNOWP.h !== H) {
+    SNOWP = { w: W, h: H, t: nowSec, p: [] };
+    for (let i = 0; i < 260; i++) SNOWP.p.push({
+      x: Math.random() * W, y: Math.random() * H,
+      v: 16 + Math.random() * 26,      // fall speed (px/s) before depth scaling
+      a: Math.random() * 6.283,        // sway phase
+      s: 0.7 + Math.random() * 1.9,    // size = pseudo-depth layer
+      d: 0.5 + Math.random() * 0.9,    // sway rate
+    });
   }
+  const dt = Math.min(Math.max(nowSec - SNOWP.t, 0), 0.1);
+  SNOWP.t = nowSec;
+  ctx.fillStyle = 'rgb(240,244,250)';
+  for (const f of SNOWP.p) {
+    f.y += f.v * f.s * dt;                                       // nearer falls faster
+    f.x += Math.sin(nowSec * f.d + f.a) * 13 * dt + 4 * f.s * dt; // sway + a breath of wind
+    if (f.y > H) { f.y = -4; f.x = Math.random() * W; }
+    if (f.x > W) f.x -= W; else if (f.x < 0) f.x += W;
+    ctx.globalAlpha = 0.3 + 0.5 * Math.min(f.s / 1.8, 1);
+    const r = f.s * 1.4;
+    ctx.fillRect(f.x, f.y, r, r);
+  }
+  ctx.globalAlpha = 1;
 }
 
 // ---- the eye, upgraded (畫質: the data was never blocky — only the renderer) ----
@@ -1465,7 +1539,7 @@ function renderField() {
 }
 
 function manifestField(world) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds();
   drawRun = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   const t0 = performance.now();
@@ -1477,6 +1551,14 @@ function manifestField(world) {
   fieldWorld = compiled;
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
+  const sndCells = [];
+  if (typeof world.ambient === 'string' && world.ambient.trim())
+    sndCells.push({ seed: world.ambient, id: '__ambient', positional: false });
+  for (const def of world.entities ?? []) {
+    if (typeof def.sound_seed === 'string' && def.sound_seed.trim())
+      sndCells.push({ seed: def.sound_seed, id: def.id, positional: true, x: def.at?.[0] ?? 0, y: def.at?.[1] ?? 0 });
+  }
+  if (sndCells.length) soundPlayCells(sndCells); else soundStop();
   priorSchema = world; // conversational iteration: "now let it rain" rides on this
   lastManifest = { surface: 'field', payload: world };
   // The viewpoint is YOURS: once you're in first person, you stay there across
@@ -1601,6 +1683,26 @@ function journalMark(ent, line) {
   if (ent.journal.length > JOURNAL_CAP) ent.journal.shift(); // the oldest moment falls away
 }
 
+// §24 the human voice — an ASSET the world lends, not a program the seed runs:
+// the being's mind (real Claude) writes the words; the browser speaks them.
+let VOICES = null;
+function speakAloud(ent, text) {
+  if (!('speechSynthesis' in window)) { say('thought', `(${ent.id} would sing, but this world has no voice)`); return; }
+  if (AUDIO && AUDIO.muted) return; // the mute covers the whole ear
+  say('being', `${ent.id} 🎵 ${text}`);
+  const u = new SpeechSynthesisUtterance(text.slice(0, 180));
+  if (!VOICES) VOICES = speechSynthesis.getVoices();
+  // a per-being timbre from a stable hash of its id — same being, same voice
+  let h = 0; for (let i = 0; i < ent.id.length; i++) h = (h * 31 + ent.id.charCodeAt(i)) >>> 0;
+  const pool = VOICES.filter(v => /en|zh/.test(v.lang));
+  if (pool.length) u.voice = pool[h % pool.length];
+  u.rate = 0.82 + (h % 20) / 100;   // sung, slow
+  u.pitch = 0.7 + (h % 40) / 100;
+  try { speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
+}
+if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => { VOICES = speechSynthesis.getVoices(); };
+window.__speakAloud = (id, text) => speakAloud({ id: id || 'weng' }, text); // e2e: drive the voice without a live mind
+
 async function mindBeat(ent, words) {
   const st = ent.mindState;
   if (!st || st.busy || !fieldWorld) return;
@@ -1620,6 +1722,7 @@ async function mindBeat(ent, words) {
     if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
     if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
     if (d.say) say('being', `${ent.id}: ${d.say}`);
+    if (typeof d.sing === 'string' && d.sing.trim()) speakAloud(ent, d.sing.trim()); // §24: the world lends a voice, the words are the being's
     if (d.intent && typeof d.intent === 'object') {
       for (const [k, v] of Object.entries(d.intent)) {
         const i = Number(k), val = Number(v);
@@ -1713,7 +1816,8 @@ window.__injectBadFieldCell = () => {
 };
 
 // ---------------- draw surface ----------------
-const cv = $('cv'), ctx = cv.getContext('2d');
+const cv = $('cv');
+let ctx = cv.getContext('2d'); // let: §25 briefly points the shared pen at an offscreen skin card
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
 
@@ -1774,6 +1878,8 @@ const env = {
   ring: (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), 0, 6.2832); ctx.stroke(); },
   arc: (x, y, r, a0, a1) => { ctx.beginPath(); ctx.arc(x, y, Math.max(r, 0), a0, a1); ctx.stroke(); },
   line: (x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); },
+  rect: (x, y, w, h) => { ctx.fillRect(x, y, Math.max(w, 0), Math.max(h, 0)); },
+  tri: (x1, y1, x2, y2, x3, y3) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.lineTo(x3, y3); ctx.closePath(); ctx.fill(); },
   glow: (x, y, r) => { r = Math.max(r, 0); if (!r) return; const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, drawA(0.55)); g.addColorStop(1, drawA(0)); const keep = ctx.fillStyle; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.fill(); ctx.fillStyle = keep; },
   // interaction loop capabilities
   mx: () => drawPtr.x, my: () => drawPtr.y, down: () => drawPtr.down,
@@ -1783,7 +1889,7 @@ const env = {
 // keepState=true is a HOT-PATCH: swap the cell's code, keep the data root so the
 // interaction it accumulated (a trail, a click count) survives the edit.
 function manifestDraw(seed, keepState) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds();
   fieldWorld = null;
   D3.main = null; SHD.prog = null; SC3 = []; WIDGETS = [];
   if (!keepState) drawRoot = new Float64Array(32); // a fresh drawing = a fresh data root
@@ -1941,7 +2047,7 @@ in vec3 p; in vec3 n;
 in vec4 r0; in vec4 r1; in vec4 r2;
 in vec4 q0; in vec4 q1; in vec4 q2;
 in vec4 m;
-uniform mat4 vp;
+uniform mat4 vp; uniform float shOn;
 out vec3 vn; out vec3 vc; out vec3 vwp; out vec3 vlp; out vec3 vmat; out float vd;
 void main(){
   vec3 wp = vec3(dot(r0.xyz, p) + r0.w, dot(r1.xyz, p) + r1.w, dot(r2.xyz, p) + r2.w);
@@ -1949,14 +2055,18 @@ void main(){
   vc = vec3(q0.w, q1.w, q2.w);
   vwp = wp; vlp = p; vmat = m.xyz;
   vec4 cp = vp * vec4(wp, 1.0);
+  // the light pass (shOn=0): a LUMINOUS thing casts light, not shadow — clip it
+  if (shOn < 0.5 && m.y > 0.5) cp = vec4(0.0, 0.0, -3.0, 1.0);
   vd = cp.w; gl_Position = cp;
 }`;
     const VS_T = `#version 300 es
 in vec3 p; in vec3 n; in vec3 col; in vec3 mm;
-uniform mat4 vp;
+uniform mat4 vp; uniform float shOn;
 out vec3 vn; out vec3 vc; out vec3 vwp; out vec3 vlp; out vec3 vmat; out float vd;
 void main(){ vn = n; vc = col; vwp = p; vlp = p; vmat = mm;
-  vec4 cp = vp * vec4(p, 1.0); vd = cp.w; gl_Position = cp; }`;
+  vec4 cp = vp * vec4(p, 1.0);
+  if (shOn < 0.5 && mm.y > 0.5) cp = vec4(0.0, 0.0, -3.0, 1.0);
+  vd = cp.w; gl_Position = cp; }`;
     const mk = (vs, fs, binds) => {
       const sh = (ty, src) => { const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
         if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
@@ -2269,6 +2379,395 @@ function renderScene(S, t, tctx, W, H) {
     S.lastEmit = S.emitPending; S.onEmit(S.emitPending);
   }
 }
+// §22b bodies in the world — entities with a body_seed render through the REAL
+// 3D pipeline (shadows, materials), camera-matched EXACTLY to the walker's
+// pinhole. The host owns placement (base matrix) and the camera; the seed only
+// shapes its own body. 身在世界,形由種子.
+let S_BODY = null;
+function bodyScene() {
+  if (S_BODY) return S_BODY;
+  if (!D3.gl && !initD3()) return null;
+  S_BODY = mkScene3(null, { x: -1, y: -1, down: 0 }, [], null);
+  return S_BODY;
+}
+function renderBodiesFP(list, W, H) {
+  const R = D3, gl = R.gl, S = S_BODY, K = 0.55;
+  for (const k of ['sph', 'box', 'cyl', 'cone']) R.kinds[k].n = 0;
+  R.nt = 0; R.ordN = 0;
+  R.col = [0.55, 0.66, 0.9]; R.shine = 0.15; R.lumv = 0; R.patv = 0;
+  S.camv = null; S.lightv = null;
+  for (const e of list) {
+    sampleFieldAll(e.x, e.y, fieldWorld.grid, CPU_SMP);
+    // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
+    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
+    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
+    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+  }
+  // the walker's pinhole as one matrix: clip.x = 2·xc, clip.y = 1.9·yc + 0.16·zc, w = zc
+  const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const t0 = -cam.px * sy - cam.pz * cy;
+  const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  const vp = new Float32Array([
+    2 * cy, 0.16 * sy, az * sy, sy,
+    0, 1.9, 0, 0,
+    -2 * sy, 0.16 * cy, az * cy, cy,
+    2 * (-cam.px * cy + cam.pz * sy), -1.9 * eye + 0.16 * t0, az * t0 + bz, t0,
+  ]);
+  const L = [-0.42, -0.85, -0.31];
+  const ll = Math.hypot(L[0], L[1], L[2]); L[0] /= ll; L[1] /= ll; L[2] /= ll;
+  if (R.gcv.width < W || R.gcv.height < H) { R.gcv.width = Math.max(R.gcv.width, W); R.gcv.height = Math.max(R.gcv.height, H); }
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST);
+  // shadow view follows the walker so nearby bodies stay in the map
+  const lvp = m4mul(m4ortho(60, 60, 10, 260),
+    m4look(cam.px - L[0] * 90, -L[1] * 90, cam.pz - L[2] * 90, cam.px, 0, cam.pz));
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.white);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.shFBO);
+  gl.viewport(0, 0, 1024, 1024); gl.clear(gl.DEPTH_BUFFER_BIT);
+  d3drawAll({ vp: lvp, L, eye: [cam.px, eye, cam.pz], shOn: 0, lvp });
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.bindTexture(gl.TEXTURE_2D, R.shTex);
+  d3drawAll({ vp, L, eye: [cam.px, eye, cam.pz], shOn: 1, lvp });
+  gl.disable(gl.SCISSOR_TEST);
+  // §22c composite through the terrain's silhouette: per body, per column,
+  // only the sky above the nearer land shows the body — 岸線裁寺, 丘背藏舟
+  ctx.save(); ctx.beginPath();
+  const st = OCCL_META.step;
+  for (const e of list) {
+    const dx = e.x - cam.px, dz = e.y - cam.pz;
+    const zc = dx * sy + dz * cy;
+    if (zc < 0.8) { ctx.rect(0, 0, W, H); continue; } // walking inside it — no clip
+    const xc = dx * cy - dz * sy;
+    const xs = (xc / zc + 0.5) * W;
+    const half = Math.min((8 * W * 0.5) / zc, W); // ~8 world units of reach
+    for (let px = Math.max(xs - half, 0); px < Math.min(xs + half, W); px += st) {
+      const cut = occlCut(px, zc);
+      if (cut > 0) ctx.rect(px, 0, st, cut);
+    }
+  }
+  ctx.clip();
+  ctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H); // alpha over the terrain
+  ctx.restore();
+}
+
+// ---- §25 the eye made whole: the terrain itself enters the GL world ----
+// The FP ground was a CPU column-march (2px columns, coarse depth steps) — the
+// stepped look was the renderer, never the data. Here the SAME f64 lattice
+// becomes a heightfield mesh inside the D3 context: per-pixel palette + slope
+// light + fog, and ONE shared depth buffer, so bodies and billboards are
+// occluded by the land per pixel — §22c's silhouette approximation retires on
+// this path (it still guards the CPU fallback). 地非圖層,地即世界.
+let FPT = null; // null = untried, false = no WebGL2 (CPU fallback), object = ready
+function fpViewProj() { // the walker's pinhole, one matrix for land/body/billboard
+  const K = 0.55;
+  // bilinear eye height: the camera stops stair-stepping between cells as you walk
+  const ey = sampleF(0, cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const t0 = -cam.px * sy - cam.pz * cy;
+  const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  const vp = new Float32Array([
+    2 * cy, 0.16 * sy, az * sy, sy,
+    0, 1.9, 0, 0,
+    -2 * sy, 0.16 * cy, az * cy, cy,
+    2 * (-cam.px * cy + cam.pz * sy), -1.9 * ey + 0.16 * t0, az * t0 + bz, t0,
+  ]);
+  return { vp, eye: [cam.px, ey, cam.pz], az, bz };
+}
+const FPT_SAMPLE = `
+vec4 tx(int x, int y){ int gi = int(grid) - 1; return texelFetch(field, ivec2(clamp(x, 0, gi), clamp(y, 0, gi)), 0); }
+vec4 smp(vec2 gp){ // bilinear over the lattice; beyond the field lies the sea
+  float gi = grid - 1.0;
+  if (gp.x < 0.0 || gp.y < 0.0 || gp.x > gi || gp.y > gi) return vec4(0.0, 2.5, 0.0, 0.0);
+  vec2 f = fract(gp); ivec2 b = ivec2(floor(gp));
+  return mix(mix(tx(b.x, b.y), tx(b.x + 1, b.y), f.x),
+             mix(tx(b.x, b.y + 1), tx(b.x + 1, b.y + 1), f.x), f.y);
+}
+float surfOf(vec4 s){ return (s.r + min(s.g, 3.0) * 0.6) * 0.55; }`;
+function initFPTerrain() {
+  try {
+    if (!D3.gl && !initD3()) return false;
+    const gl = D3.gl;
+    const TVS = `#version 300 es
+precision highp float;
+in vec2 uv;
+uniform sampler2D field; uniform float grid; uniform mat4 vp;
+out vec2 vgp; out vec3 vwp;
+${FPT_SAMPLE}
+void main(){
+  vec2 gp = (uv * 1.4 - 0.2) * (grid - 1.0); // a margin of sea beyond every shore
+  vec4 s = smp(gp);
+  vwp = vec3(gp.x, surfOf(s), gp.y);
+  vgp = gp;
+  gl_Position = vp * vec4(vwp, 1.0);
+}`;
+    const TFS = `#version 300 es
+precision highp float;
+uniform sampler2D field; uniform float grid; uniform vec3 ldir; uniform vec3 eye;
+uniform float shOn; uniform mat4 lvp; uniform sampler2D shmap; uniform float tsec;
+in vec2 vgp; in vec3 vwp;
+out vec4 frag;
+${FPT_SAMPLE}
+vec3 palette(vec4 s){ // terrainColor with soft seams — the top eye's palette, shared look
+  float h = s.r, w = s.g, v = s.b, sn = s.a;
+  float k1 = clamp((h - 55.0) / 25.0, 0.0, 1.0);
+  vec3 peak  = vec3(235.0, 240.0, 245.0);
+  vec3 rock  = vec3(120.0 + k1 * 80.0, 110.0 + k1 * 95.0, 100.0 + k1 * 115.0);
+  vec3 grass = vec3(105.0 - v * 45.0, 128.0 + v * 55.0, 72.0 - v * 20.0);
+  vec3 sand  = vec3(189.0 - v * 30.0, 174.0 + v * 10.0, 127.0);
+  vec3 c = mix(sand, grass, smoothstep(7.0, 11.0, h));
+  c = mix(c, rock, smoothstep(53.0, 57.0, h));
+  c = mix(c, peak, smoothstep(78.0, 82.0, h));
+  float kw = min(w / 3.0, 1.0) * 0.85 * smoothstep(0.02, 0.06, w);
+  c = mix(c, vec3(25.0, 95.0, 190.0), kw);
+  float ks = min(sn, 1.0) * 0.9 * smoothstep(0.01, 0.03, sn) * (1.0 - smoothstep(0.02, 0.05, w));
+  c = mix(c, vec3(240.0, 244.0, 250.0), ks);
+  return c / 255.0;
+}
+float shadowAt(vec3 wp, vec3 nn, vec3 L){ // same law as the bodies' fragment eye
+  if (shOn < 0.5) return 1.0;
+  vec4 lp = lvp * vec4(wp, 1.0);
+  vec3 q = lp.xyz / lp.w * 0.5 + 0.5;
+  if (q.x < 0.0 || q.x > 1.0 || q.y < 0.0 || q.y > 1.0 || q.z > 1.0) return 1.0;
+  float bias = max(0.0026, 0.007 * (1.0 - max(dot(nn, -L), 0.0)));
+  return q.z - bias > texture(shmap, q.xy).r ? 0.5 : 1.0;
+}
+void main(){
+  vec4 s = smp(vgp);
+  // soften the waterline: a 3-tap blur turns the stepped bank into a soft shore
+  s.g = (s.g + smp(vgp + vec2(0.45, 0.25)).g + smp(vgp - vec2(0.3, 0.45)).g) / 3.0;
+  float e = 0.6;
+  float hx = surfOf(smp(vgp + vec2(e, 0.0))) - surfOf(smp(vgp - vec2(e, 0.0)));
+  float hz = surfOf(smp(vgp + vec2(0.0, e))) - surfOf(smp(vgp - vec2(0.0, e)));
+  vec3 nn = normalize(vec3(-hx, 2.0 * e, -hz));
+  float wdepth = min(s.g / 3.0, 1.0) * smoothstep(0.02, 0.06, s.g);
+  if (wdepth > 0.003) { // §26 the water breathes: crossing micro-waves tilt the normal
+    vec2 wn = vec2(
+      sin(vgp.x * 2.6 + tsec * 1.5) * 0.05 + sin((vgp.x + vgp.y) * 1.7 + tsec * 0.8) * 0.03,
+      sin(vgp.y * 3.1 - tsec * 1.1) * 0.045 + sin((vgp.x - vgp.y) * 2.1 + tsec * 0.6) * 0.028);
+    nn = normalize(mix(nn, normalize(vec3(wn.x, 1.0, wn.y)), wdepth));
+  }
+  vec3 L = normalize(ldir);
+  float sh = shadowAt(vwp, nn, L);
+  float diff = max(dot(nn, -L), 0.0);
+  vec3 amb = mix(vec3(0.40, 0.42, 0.48), vec3(0.56, 0.58, 0.64), nn.y * 0.5 + 0.5);
+  float dk = mix(0.55, 0.24, wdepth); // the waves may glint; the flat lies calm
+  vec3 c = palette(s) * (amb + dk * diff * sh);
+  if (wdepth > 0.003) { // 月光鋪水路 — a narrow road, not a flood of milk
+    vec3 V = normalize(eye - vwp);
+    vec3 Hh = normalize(V - L);
+    c += wdepth * pow(max(dot(nn, Hh), 0.0), 160.0) * vec3(0.85, 0.9, 1.0) * 0.3 * sh;
+  }
+  float d = length(vwp - eye);
+  float fog = pow(min(d / (grid * 1.15), 1.0), 1.35) * 0.8; // same veil as the CPU eye
+  c = mix(c, vec3(0.227, 0.365, 0.518), fog);
+  frag = vec4(c, 1.0);
+}`;
+    const BVS = `#version 300 es
+in vec2 pp; in vec2 tt;
+uniform vec2 vpsz; uniform float zc; uniform vec2 zab;
+out vec2 vt;
+void main(){ // a skin card pinned at its being's depth — the land depth-tests it
+  vec2 ndc = vec2(pp.x / vpsz.x * 2.0 - 1.0, 1.0 - pp.y / vpsz.y * 2.0);
+  gl_Position = vec4(ndc * zc, zab.x * zc + zab.y, zc);
+  vt = tt;
+}`;
+    const BFS = `#version 300 es
+precision mediump float;
+uniform sampler2D skin; in vec2 vt; out vec4 frag;
+void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
+    const mk = (vs, fs, binds) => {
+      const sh = (ty, src) => { const o = gl.createShader(ty); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+      const pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, fs));
+      for (const [i, nm] of binds) gl.bindAttribLocation(pr, i, nm);
+      gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+      return pr;
+    };
+    const prog = mk(TVS, TFS, [[0, 'uv']]);
+    const bbProg = mk(BVS, BFS, [[0, 'pp'], [1, 'tt']]);
+    // the ground plan: one static N×N sheet; height lives in the texture
+    const N = 256;
+    const pos = new Float32Array(N * N * 2);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const o = (j * N + i) * 2; pos[o] = i / (N - 1); pos[o + 1] = j / (N - 1); }
+    const idx = new Uint32Array((N - 1) * (N - 1) * 6);
+    let q = 0;
+    for (let j = 0; j < N - 1; j++) for (let i = 0; i < N - 1; i++) {
+      const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+      idx[q++] = a; idx[q++] = c; idx[q++] = b; idx[q++] = b; idx[q++] = c; idx[q++] = d;
+    }
+    const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+    const fieldTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, fieldTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.activeTexture(gl.TEXTURE0);
+    // billboard gear: one dynamic quad + one skin-card texture + one offscreen card
+    const bbVao = gl.createVertexArray(); gl.bindVertexArray(bbVao);
+    const bbBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bbBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(16), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+    gl.bindVertexArray(null);
+    const bbTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, bbTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.activeTexture(gl.TEXTURE0);
+    const bbCanvas = document.createElement('canvas');
+    bbCanvas.width = bbCanvas.height = 256; // skins draw at scale 60 within ±120 of center
+    const uni = pr => ({ vp: gl.getUniformLocation(pr, 'vp'), ldir: gl.getUniformLocation(pr, 'ldir'),
+      eye: gl.getUniformLocation(pr, 'eye'), shOn: gl.getUniformLocation(pr, 'shOn'),
+      lvp: gl.getUniformLocation(pr, 'lvp'), shmap: gl.getUniformLocation(pr, 'shmap'),
+      field: gl.getUniformLocation(pr, 'field'), grid: gl.getUniformLocation(pr, 'grid'),
+      tsec: gl.getUniformLocation(pr, 'tsec') });
+    return { prog, bbProg, vao, icount: idx.length, fieldTex, staging: null, grid: 0,
+             u: uni(prog),
+             ub: { vpsz: gl.getUniformLocation(bbProg, 'vpsz'), zc: gl.getUniformLocation(bbProg, 'zc'),
+                   zab: gl.getUniformLocation(bbProg, 'zab'), skin: gl.getUniformLocation(bbProg, 'skin') },
+             bbVao, bbBuf, bbTex, bbCanvas, bbCtx: bbCanvas.getContext('2d'), bbQuad: new Float32Array(16) };
+  } catch (e) { return false; }
+}
+function drawTerrainPass(vpM, L, eye, shOn, lvp) {
+  const T = FPT, gl = D3.gl;
+  gl.useProgram(T.prog);
+  gl.uniformMatrix4fv(T.u.vp, false, vpM); gl.uniformMatrix4fv(T.u.lvp, false, lvp);
+  gl.uniform3fv(T.u.ldir, L); gl.uniform3fv(T.u.eye, eye);
+  gl.uniform1f(T.u.shOn, shOn); gl.uniform1f(T.u.grid, T.grid);
+  gl.uniform1f(T.u.tsec, performance.now() / 1000);
+  gl.uniform1i(T.u.shmap, 0); gl.uniform1i(T.u.field, 1);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.fieldTex);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindVertexArray(T.vao);
+  gl.drawElements(gl.TRIANGLES, T.icount, gl.UNSIGNED_INT, 0);
+  gl.bindVertexArray(null);
+}
+function drawBillboardsGL(W, H, eyeH, tNow) {
+  const T = FPT, gl = D3.gl, K = 0.55, fov = 1.0;
+  const horizon = H * 0.42, focal = H * 0.95;
+  const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
+  const list = [];
+  for (const e of ENTITIES) {
+    if (e.bodyRun) continue; // its true body already stands in the world
+    const dx = e.x - cam.px, dz = e.y - cam.pz;
+    const zc = dx * sinY + dz * cosY;
+    if (zc < 1.2) continue;
+    const off = (dx * cosY - dz * sinY) / zc;
+    if (Math.abs(off) > fov * 0.7) continue;
+    list.push({ e, zc, off });
+  }
+  if (!list.length) return;
+  list.sort((a, b) => b.zc - a.zc); // far → near under one shared depth truth
+  const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  gl.useProgram(T.bbProg);
+  gl.uniform2f(T.ub.vpsz, W, H);
+  gl.uniform2f(T.ub.zab, az, bz);
+  gl.uniform1i(T.ub.skin, 2);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, T.bbTex);
+  gl.bindVertexArray(T.bbVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, T.bbBuf);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false); // tested by the land, but never writing over each other
+  const SS = 60, C = 256, bctx = T.bbCtx;
+  for (const { e, zc, off } of list) {
+    const sx = (off / fov + 0.5) * W;
+    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
+    const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
+    const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
+    const s = Math.max(3, (focal / zc) * 1.1);
+    bctx.clearRect(0, 0, C, C);
+    const keep = ctx; ctx = bctx; // the shared pen visits the skin card
+    try { drawSkin(e, C / 2, C / 2, SS, tNow); } finally { ctx = keep; }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, T.bbCanvas);
+    const half = s * (C / (2 * SS)), cyp = syg - s * 0.4; // card spans ±2s around the drawn center
+    const Q = T.bbQuad;
+    Q[0] = sx - half; Q[1] = cyp - half; Q[2] = 0; Q[3] = 0;
+    Q[4] = sx + half; Q[5] = cyp - half; Q[6] = 1; Q[7] = 0;
+    Q[8] = sx - half; Q[9] = cyp + half; Q[10] = 0; Q[11] = 1;
+    Q[12] = sx + half; Q[13] = cyp + half; Q[14] = 1; Q[15] = 1;
+    gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
+    gl.uniform1f(T.ub.zc, zc);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  gl.depthMask(true); gl.disable(gl.BLEND);
+  gl.bindVertexArray(null);
+  gl.activeTexture(gl.TEXTURE0);
+}
+function renderFieldFPGL() {
+  const T = FPT, R = D3, gl = R.gl;
+  const g = fieldWorld.grid, W = cv.width, H = cv.height, K = 0.55;
+  const tNow = performance.now() / 1000;
+  const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
+  sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
+  ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  // the lattice → texture, fresh every frame (living cells rewrite the ground)
+  if (T.grid !== g) { T.grid = g; T.staging = new Float32Array(g * g * 4); }
+  const st = T.staging, n = g * g;
+  for (let i = 0; i < n; i++) {
+    st[i * 4] = FIELD[i]; st[i * 4 + 1] = FIELD[n + i];
+    st[i * 4 + 2] = FIELD[2 * n + i]; st[i * 4 + 3] = FIELD[3 * n + i];
+  }
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, T.fieldTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, g, g, 0, gl.RGBA, gl.FLOAT, st);
+  gl.activeTexture(gl.TEXTURE0);
+  // bodies → instance buffers (the host places, the seed shapes — §22b)
+  for (const k of ['sph', 'box', 'cyl', 'cone']) R.kinds[k].n = 0;
+  R.nt = 0; R.ordN = 0;
+  R.col = [0.55, 0.66, 0.9]; R.shine = 0.15; R.lumv = 0; R.patv = 0;
+  const S = bodyScene();
+  if (S) { S.camv = null; S.lightv = null; }
+  for (const e of ENTITIES) {
+    if (!e.bodyRun) continue;
+    sampleFieldAll(e.x, e.y, g, CPU_SMP);
+    // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
+    const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
+    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
+    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+  }
+  const { vp, eye } = fpViewProj();
+  const L = [-0.42, -0.85, -0.31];
+  const ll = Math.hypot(L[0], L[1], L[2]); L[0] /= ll; L[1] /= ll; L[2] /= ll;
+  if (R.gcv.width < W || R.gcv.height < H) { R.gcv.width = Math.max(R.gcv.width, W); R.gcv.height = Math.max(R.gcv.height, H); }
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.disable(gl.SCISSOR_TEST);
+  // pass 1 — the light's view: land AND bodies both cast (寺影落岸,丘影藏舟)
+  const lvp = m4mul(m4ortho(60, 60, 10, 260),
+    m4look(cam.px - L[0] * 90, -L[1] * 90, cam.pz - L[2] * 90, cam.px, 0, cam.pz));
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, R.white);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, R.shFBO);
+  gl.viewport(0, 0, 1024, 1024); gl.clear(gl.DEPTH_BUFFER_BIT);
+  drawTerrainPass(lvp, L, eye, 0, lvp);
+  d3drawAll({ vp: lvp, L, eye, shOn: 0, lvp });
+  // pass 2 — the walker's view: one depth buffer holds land, bodies, billboards
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.bindTexture(gl.TEXTURE_2D, R.shTex);
+  drawTerrainPass(vp, L, eye, 1, lvp);
+  d3drawAll({ vp, L, eye, shOn: 1, lvp });
+  drawBillboardsGL(W, H, eye[1], tNow);
+  gl.disable(gl.SCISSOR_TEST);
+  ctx.drawImage(R.gcv, 0, R.gcv.height - H, W, H, 0, 0, W, H);
+  if (snowing()) drawSnowfall(tNow, W, H);
+  ctx.fillStyle = 'rgba(230,237,243,.55)';
+  ctx.font = '13px ui-monospace';
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+}
+
 // ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
 // scene; bv(i) reads bound cell outputs, emit(v) fires the node's on_input. ----
 let SC3 = [];
@@ -2310,8 +2809,212 @@ function makeScene3D(node) {
 // A pixel has no memory (no get/set), no drawing calls, no reach — the DSL
 // transpiles to GLSL and the GPU runs it at full resolution, per pixel.
 const SHD = { prog: null };
+
+// ---------------- sound surface (§24): the audio shader ----------------
+// Where "shader" runs the seed once per PIXEL, "sound" runs it once per audio
+// SAMPLE — 44100×/s inside an AudioWorklet, on the audio thread. run(t) -> a
+// sample in -1..1. The DSL's sin/cos ARE a synthesizer (additive, FM, bytebeat).
+// Narrowest fence with a memory: math + 32 slots. The master volume is a host
+// GainNode the seed can never reach — the ear is protected by law.
+const SOUND_WORKLET = `
+class SeedSynth extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    // the 聲塵器 (zero-import dust engine) + a CHORUS of sound cells, each with
+    // its own seat in the world. 聲從身出 · 根塵和合 · 動則有聲 — engine law.
+    this.dust = null; this.dustMem = null; this.dustPtr = 0;
+    this.cells = []; this.n = 0;
+    this.port.onmessage = (e) => {
+      const d = e.data;
+      try {
+        if (d.dust) { // instantiated with an EMPTY import object — it can only vibrate
+          const inst = new WebAssembly.Instance(new WebAssembly.Module(d.dust), {});
+          this.dust = inst.exports; this.dust.init(sampleRate);
+          this.dustMem = new Float32Array(this.dust.memory.buffer);
+          this.dustPtr = this.dust.out_ptr() >>> 2;
+          this.port.postMessage({ dustReady: true });
+          return;
+        }
+        if (d.stop) { this.cells = []; if (this.dust) this.dust.clear(); return; }
+        if (d.bytes) { // a single ambient cell (surface "sound" / legacy ambient)
+          this.cells = []; if (this.dust) this.dust.clear();
+          this.addCell({ bytes: d.bytes, id: '__ambient', positional: false, x: 0, y: 0 });
+          this.n = 0; return;
+        }
+        if (d.cells) { // a world's chorus: ambient + per-being voices
+          this.cells = []; if (this.dust) this.dust.clear();
+          for (const c of d.cells) this.addCell(c);
+          this.n = 0; return;
+        }
+        if (d.seatpos && this.dust) {
+          const c = this.cells.find(x => x.id === d.seatpos.id);
+          if (c && c.seat >= 0) this.dust.seat_pos(c.seat, d.seatpos.x, d.seatpos.y);
+          return;
+        }
+        if (d.listener && this.dust) { this.dust.listener(d.listener.x, d.listener.y); return; }
+      } catch (err) { this.port.postMessage({ err: String(err) }); }
+    };
+  }
+  addCell(c) {
+    const slots = new Float64Array(32);
+    const seat = this.dust ? this.dust.seat_add(c.positional ? 1 : 0) : -1;
+    if (this.dust && seat >= 0 && c.positional) this.dust.seat_pos(seat, c.x || 0, c.y || 0);
+    const dust = this.dust, S = seat;
+    const env = { sin: Math.sin, cos: Math.cos,
+      get: (i) => slots[i & 31] || 0, set: (i, v) => { slots[i & 31] = v; },
+      noise: () => Math.random() * 2 - 1,
+      // §24b the 聲塵 primitives — the cell decides WHEN; the engine is the physics
+      drop:   (b) => { if (dust && S >= 0) dust.ev_drop(S, b); },
+      bubble: (q) => { if (dust && S >= 0) dust.ev_bubble(S, q); },
+      chirp:  (f1, f2, du) => { if (dust && S >= 0) dust.ev_chirp(S, f1, f2, du); },
+      strike: (f0, en) => { if (dust && S >= 0) dust.ev_strike(S, f0, en); },
+      voice:  (f0, vw, na) => { if (dust && S >= 0) dust.voice_set(S, f0, vw, na); },
+      breath: (l) => { if (dust && S >= 0) dust.breath_set(S, l); },
+    };
+    try {
+      const run = new WebAssembly.Instance(new WebAssembly.Module(c.bytes), { env }).exports.run;
+      this.cells.push({ run, id: c.id, seat, positional: !!c.positional, dead: false });
+    } catch (err) { this.port.postMessage({ err: String(err) }); }
+  }
+  process(inputs, outputs) {
+    const out = outputs[0]; if (!out || !out[0]) return true;
+    const L = out[0], R = out[1] || out[0], n = L.length, sr = sampleRate;
+    L.fill(0); if (R !== L) R.fill(0);
+    for (const c of this.cells) {
+      if (c.dead) continue;
+      try {
+        for (let i = 0; i < n; i++) {
+          let v = c.run((this.n + i) / sr);
+          // a positional being's RAW wave stays in its body — only what it
+          // sends through the seated primitives reaches the world's ear
+          if (!c.positional) {
+            if (!(v > -4 && v < 4)) v = 0;
+            v = v < -1 ? -1 : (v > 1 ? 1 : v);
+            L[i] += v; if (R !== L) R[i] += v;
+          }
+        }
+      } catch (e) { c.dead = true; this.port.postMessage({ trapped: c.id + ': ' + String(e) }); }
+    }
+    this.n += n;
+    if (this.dust) {
+      this.dust.render(n);
+      if (this.dustMem.buffer !== this.dust.memory.buffer) {
+        this.dustMem = new Float32Array(this.dust.memory.buffer);
+        this.dustPtr = this.dust.out_ptr() >>> 2;
+      }
+      const m = this.dustMem, q = this.dustPtr;
+      for (let i = 0; i < n; i++) { L[i] += m[q + 2 * i]; if (R !== L) R[i] += m[q + 2 * i + 1]; }
+    }
+    for (let i = 0; i < n; i++) {
+      L[i] = L[i] < -1 ? -1 : (L[i] > 1 ? 1 : L[i]);
+      if (R !== L) R[i] = R[i] < -1 ? -1 : (R[i] > 1 ? 1 : R[i]);
+    }
+    return true;
+  }
+}
+registerProcessor('seed-synth', SeedSynth);
+`;
+let AUDIO = { ctx: null, node: null, gain: null, analyser: null, ready: null, active: false, muted: false, buf: null };
+async function ensureAudio() {
+  if (AUDIO.ready) return AUDIO.ready;
+  AUDIO.ready = (async () => {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const url = URL.createObjectURL(new Blob([SOUND_WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    const node = new AudioWorkletNode(ctx, 'seed-synth', { outputChannelCount: [2] });
+    // the 聲塵器: fetched once, posted before any cells (port order guarantees it)
+    try {
+      const r = await fetch('/pkg-dust/shengchen.wasm');
+      if (r.ok) node.port.postMessage({ dust: new Uint8Array(await r.arrayBuffer()) });
+    } catch (e) { /* no dust engine — cells still run, primitives stay silent */ }
+    const analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
+    const gain = ctx.createGain(); gain.gain.value = 0.55; // master ceiling — host law
+    node.connect(analyser); analyser.connect(gain); gain.connect(ctx.destination);
+    node.port.onmessage = (e) => {
+      if (e.data.dustReady) { AUDIO.dustReady = true; return; }
+      if (e.data.trapped || e.data.err) $('stage-status').textContent = 'sound cell silenced: ' + (e.data.trapped || e.data.err);
+    };
+    AUDIO.ctx = ctx; AUDIO.node = node; AUDIO.gain = gain; AUDIO.analyser = analyser;
+    AUDIO.buf = new Float32Array(analyser.fftSize);
+    return AUDIO;
+  })();
+  return AUDIO.ready;
+}
+function soundStop() { if (AUDIO.node) AUDIO.node.port.postMessage({ stop: true }); AUDIO.active = false; AUDIO.ambient = false; }
+let SND_IDS = []; // positional sound-cell ids — seat positions follow their beings
+async function soundPlayCells(defs) { // §24b the world's CHORUS: ambient + 聲從身出
+  const cells = [];
+  SND_IDS = [];
+  for (const d of defs) {
+    try {
+      cells.push({ bytes: compile_sound_wasm(d.seed), id: d.id, positional: !!d.positional, x: d.x || 0, y: d.y || 0 });
+      if (d.positional) SND_IDS.push(d.id);
+    } catch (e) { say('err', `sound cell '${d.id}' refused: ${e.message || e}`); }
+  }
+  if (!cells.length) { soundStop(); return; }
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  AUDIO.node.port.postMessage({ cells });
+  AUDIO.ambient = true; // playing under the world — no scope takeover
+}
+async function soundPlayAmbient(seed) { // §24 the ear's LAYER: sound rides on a world, the canvas keeps the world
+  let bytes;
+  try { bytes = compile_sound_wasm(seed); }
+  catch (e) { $('stage-status').textContent = 'ambient sound refused: ' + (e.message || e); return; }
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  AUDIO.node.port.postMessage({ bytes });
+  AUDIO.ambient = true; // playing, but NOT the sound surface — no scope, no takeover
+}
+function soundMute(on) { AUDIO.muted = on; if (AUDIO.gain) AUDIO.gain.gain.value = on ? 0 : 0.55; const b = $('sound-mute'); if (b) b.textContent = on ? '🔇 unmute' : '🔊 mute'; }
+async function manifestSound(seed) {
+  drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null; SHD.prog = null; APP.key = null; stopFeeds();
+  const t0 = performance.now();
+  const bytes = compile_sound_wasm(seed); // the fence: over-reach dies right here
+  await ensureAudio();
+  if (AUDIO.ctx.state === 'suspended') { try { await AUDIO.ctx.resume(); } catch (e) {} }
+  AUDIO.node.port.postMessage({ bytes });   // hand the wasm to the audio thread
+  AUDIO.active = true;
+  $('stage').innerHTML = '';
+  const bar = document.createElement('div'); bar.style.cssText = 'margin-bottom:.6rem';
+  const mb = document.createElement('button'); mb.id = 'sound-mute'; mb.textContent = AUDIO.muted ? '🔇 unmute' : '🔊 mute';
+  mb.onclick = () => soundMute(!AUDIO.muted); bar.appendChild(mb);
+  $('stage').appendChild(bar);
+  cv.style.display = 'block';
+  $('stage-status').textContent =
+    `manifested: ${bytes.length}-byte sound cell in ${(performance.now() - t0).toFixed(1)}ms — the seed IS the synth; it runs once per audio sample (${AUDIO.ctx.sampleRate}Hz). master volume is host law.`;
+  lastManifest = { surface: 'sound', payload: seed };
+  $('seed-box').style.display = 'block'; $('seed-json').textContent = seed;
+  document.title = 'live-gen SOUND OK';
+}
+function renderScope() { // the ear's picture: the live waveform on the canvas
+  const a = AUDIO.analyser; if (!a) return;
+  a.getFloatTimeDomainData(AUDIO.buf);
+  const b = AUDIO.buf, W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0b1220'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.beginPath();
+  const step = b.length / W;
+  for (let x = 0; x < W; x++) { const v = b[(x * step) | 0]; const y = H * 0.5 - v * H * 0.42; x ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+}
+window.__manifestSound = s => manifestSound(s);
+window.__soundState = () => ({ active: AUDIO.active, ambient: AUDIO.ambient, muted: AUDIO.muted, gain: AUDIO.gain ? AUDIO.gain.gain.value : null, ctx: AUDIO.ctx ? AUDIO.ctx.state : null });
+window.__soundBad = s => { try { compile_sound_wasm(s); return 'COMPILED'; } catch (e) { return 'rejected: ' + (e.message || e); } };
+window.__soundRMS = () => { const a = AUDIO.analyser; if (!a) return 0; a.getFloatTimeDomainData(AUDIO.buf); let s = 0; for (const v of AUDIO.buf) s += v * v; return Math.sqrt(s / AUDIO.buf.length); };
+window.__soundSpectrum = () => { // e2e: formant peaks in the vocal band (proves a vowel, not a beep)
+  const a = AUDIO.analyser; if (!a) return null;
+  const n = a.frequencyBinCount, d = new Float32Array(n); a.getFloatFrequencyData(d);
+  const sr = AUDIO.ctx.sampleRate, hz = i => i * sr / (2 * n);
+  const peaks = []; let last = -1;
+  for (let i = 2; i < n - 2; i++) { const f = hz(i); if (f < 200 || f > 3400) continue;
+    if (d[i] > -62 && d[i] > d[i - 1] && d[i] > d[i + 1] && d[i] > d[i - 2] && d[i] > d[i + 2]) {
+      if (last < 0 || f - last > 150) { peaks.push(Math.round(f)); last = f; } } }
+  return { peaks: peaks.slice(0, 8), npeaks: peaks.length };
+};
+
 function manifestShader(seed) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; D3.main = null;
   if (!D3.gl && !initD3()) { say('err', 'shader needs WebGL2 — unavailable here'); return; }
   const t0 = performance.now();
@@ -2380,7 +3083,7 @@ function renderShader(t) {
 }
 window.__manifestShader = s => manifestShader(s);
 function manifestDraw3d(seed) {
-  APP.key = null; stopFeeds();
+  APP.key = null; soundStop(); stopFeeds();
   drawRun = null; fieldWorld = null; WIDGETS = []; SC3 = []; SHD.prog = null;
   if (!D3.gl && !initD3()) { say('err', 'draw3d needs WebGL2 — unavailable in this browser'); return; }
   const t0 = performance.now();
@@ -2418,6 +3121,22 @@ window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0,
       updateCam(dt);
       renderFieldFP();
     }
+    // §24b 根塵和合: the EAR follows the walker, each voice follows its body —
+    // what you hear is where you stand. Throttled; the engine smooths the rest.
+    if (AUDIO.node && AUDIO.ambient && now - lastSndSync > 150) {
+      lastSndSync = now;
+      const g = fieldWorld.grid;
+      const lx = fieldView === 'fp' ? cam.px : g / 2;
+      const ly = fieldView === 'fp' ? cam.pz : g / 2;
+      AUDIO.node.port.postMessage({ listener: { x: lx, y: ly } });
+      for (const id of SND_IDS) {
+        const e = ENTITIES.find(x => x.id === id);
+        if (e) AUDIO.node.port.postMessage({ seatpos: { id, x: e.x, y: e.y } });
+      }
+      window.__earState = { lx, ly, voices: SND_IDS.length };
+    }
+  } else if (AUDIO.active) {
+    renderScope(); // §24: the audio runs on its own thread; here we draw its waveform
   } else if (SHD.prog) {
     renderShader(now / 1000); // L4: every pixel runs the seed
   } else if (D3.main && D3.main.run) {
@@ -2487,6 +3206,7 @@ async function send() {
     else if (d.surface === 'field') manifestField(d.world);
     else if (d.surface === 'draw3d') manifestDraw3d(d.seed);
     else if (d.surface === 'shader') manifestShader(d.seed);
+    else if (d.surface === 'sound') manifestSound(d.seed);
     else manifestDraw(d.seed);
   };
   try {
@@ -2617,6 +3337,7 @@ function manifestSaved(bundle) {
   else if (bundle.surface === 'field') manifestField(bundle.payload);
   else if (bundle.surface === 'draw3d') manifestDraw3d(bundle.payload);
   else if (bundle.surface === 'shader') manifestShader(bundle.payload);
+  else if (bundle.surface === 'sound') manifestSound(bundle.payload);
   else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
   restoreChat(bundle.chat);
   say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
