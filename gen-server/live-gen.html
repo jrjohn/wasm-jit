@@ -1460,7 +1460,7 @@ function drawSnowfall(nowSec, W, H) {
         x: cam.px + (Math.random() - 0.5) * 2 * R,
         z: cam.pz + (Math.random() - 0.5) * 2 * R,
         y: eyeY + yBot + Math.random() * (yTop - yBot),
-        v: 1.8 + Math.random() * 3.0,                     // fall speed (world units/s)
+        v: 0.7 + Math.random() * 1.4,                     // fall speed (world units/s) — a gentle drift
         a: Math.random() * 6.283, d: 0.4 + Math.random() * 0.7,
       });
     }
