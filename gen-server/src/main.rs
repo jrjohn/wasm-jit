@@ -1170,25 +1170,52 @@ fn feed_host_allowed(host: &str, allow_txt: &str) -> bool {
 /// range — the addresses a feed must never be able to reach. Names are not resolved here.
 fn host_is_internal_ip(host: &str) -> bool {
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     // url crate brackets IPv6 literals; strip for parsing
     let h = host.trim_start_matches('[').trim_end_matches(']');
     match h.parse::<IpAddr>() {
-        Ok(IpAddr::V4(v4)) => {
-            v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
-                || v4.is_broadcast() || v4.octets()[0] == 0
-                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1])) // CGNAT 100.64/10
-        }
+        Ok(IpAddr::V4(v4)) => v4_is_internal(&v4),
         Ok(IpAddr::V6(v6)) => {
-            v6.is_loopback() || v6.is_unspecified()
+            if v6.is_loopback() || v6.is_unspecified()
                 || (v6.segments()[0] & 0xfe00) == 0xfc00  // ULA fc00::/7
                 || (v6.segments()[0] & 0xffc0) == 0xfe80  // link-local fe80::/10
-                || v6.to_ipv4_mapped().map_or(false, |m| m.is_private() || m.is_loopback())
+            {
+                return true;
+            }
+            // IPv4-mapped ::ffff:a.b.c.d — apply the FULL v4 predicate (not just
+            // private/loopback), so mapped link-local (169.254 metadata), CGNAT,
+            // broadcast and unspecified are caught too.
+            if let Some(m) = v6.to_ipv4_mapped() {
+                if v4_is_internal(&m) {
+                    return true;
+                }
+            }
+            // NAT64 well-known prefix 64:ff9b::/96 wraps a v4 in the low 32 bits.
+            let s = v6.segments();
+            if s[0] == 0x0064 && s[1] == 0xff9b && s[2..6].iter().all(|&x| x == 0) {
+                let v4 = Ipv4Addr::new((s[6] >> 8) as u8, (s[6] & 0xff) as u8,
+                                       (s[7] >> 8) as u8, (s[7] & 0xff) as u8);
+                if v4_is_internal(&v4) {
+                    return true;
+                }
+            }
+            false
         }
         Err(_) => false, // a name — allowlist still gates it
     }
 }
 
-/// a tiny local test feed for e2e (127.0.0.1 is allowlisted)
+/// The full IPv4 "must never be reachable" predicate, shared by the v4 path and
+/// the IPv4-mapped / NAT64 v6 paths so no encoding slips a private address past.
+fn v4_is_internal(v4: &std::net::Ipv4Addr) -> bool {
+    v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+        || v4.is_broadcast() || v4.octets()[0] == 0
+        || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]))       // CGNAT 100.64/10
+        || (v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0) // 192.0.0.0/24
+}
+
+/// a tiny local test feed for e2e (served directly at /api/feed-test — NOT via
+/// the proxy, and 127.0.0.1 is no longer on the feed allowlist)
 async fn feed_test() -> impl IntoResponse {
     Json(json!({ "n": 42, "s": "hello from the world", "nested": { "deep": 7 } }))
 }
@@ -1930,14 +1957,39 @@ mod tests {
         assert!(feed_host_allowed("sub.api.open-meteo.com", allow)); // subdomain ok
         assert!(!feed_host_allowed("evil.com", allow));
         assert!(!feed_host_allowed("api.open-meteo.com.evil.com", allow)); // suffix-spoof refused
-        // internal addresses are refused regardless of any allowlist entry
+        // internal addresses are refused regardless of any allowlist entry —
+        // incl. IPv4-mapped-IPv6 (link-local metadata, CGNAT) and NAT64 wrappers
         for ip in ["127.0.0.1", "10.0.0.5", "192.168.1.1", "169.254.169.254",
-                   "0.0.0.0", "100.64.0.1", "::1", "[::1]", "fc00::1", "fe80::1"] {
+                   "0.0.0.0", "100.64.0.1", "192.0.0.1", "::1", "[::1]", "fc00::1", "fe80::1",
+                   "[::ffff:127.0.0.1]", "[::ffff:169.254.169.254]", "[::ffff:10.0.0.1]",
+                   "[64:ff9b::7f00:1]", "[64:ff9b::a9fe:a9fe]"] {
             assert!(host_is_internal_ip(ip), "internal IP not blocked: {ip}");
         }
-        // a public resolver-style literal is NOT flagged internal (names still gated by allowlist)
-        assert!(!host_is_internal_ip("8.8.8.8"));
-        assert!(!host_is_internal_ip("api.open-meteo.com"));
+        // a public literal / name is NOT flagged internal (names still gated by allowlist)
+        for ok in ["8.8.8.8", "1.1.1.1", "api.open-meteo.com", "[2606:4700::1111]"] {
+            assert!(!host_is_internal_ip(ok), "public host wrongly flagged internal: {ok}");
+        }
+    }
+
+    #[tokio::test]
+    async fn feed_proxy_refuses_a_redirect() {
+        // the redirect-no-follow guard, actually FIRED: a live server that 302s
+        // must yield BAD_GATEWAY (refused), never the redirected body — the
+        // allowlist-bypass vector, closed and now exercised in CI (not just read).
+        use axum::{routing::get, Router};
+        let app = Router::new().route("/hop", get(|| async {
+            (StatusCode::FOUND, [(axum::http::header::LOCATION, "http://169.254.169.254/")], "")
+        }));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap(); });
+        // hit the redirecting server directly with the SAME client policy the proxy uses
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none()).build().unwrap();
+        let resp = client.get(format!("http://{addr}/hop")).send().await.unwrap();
+        assert!(resp.status().is_redirection(), "expected a 3xx to refuse");
+        // the proxy turns exactly this into BAD_GATEWAY (see feed_proxy) — the
+        // client never followed the Location into the internal host.
     }
 
     #[test]
@@ -1947,10 +1999,16 @@ mod tests {
         // Reproduced natively: a child reaching for a capability outside the subset is
         // REFUSED at compile time; the byte audit against the subset confirms clean bytes.
         use wasm_jit::audit::{audit, Grant};
-        // parent's grants: the always-present math + {mv, fr} — NOT rise.
+        // Derive the child's grants via the REAL attenuation rule (not a hand-built
+        // subset): a greedy child asks for rise too, but its parent lacks it, so
+        // intersect_grants drops it — child ⊆ parent, then it compiles against THAT.
+        let parent = vec!["sin".to_string(), "cos".to_string(), "mv".to_string(), "fr".to_string()];
+        let want = ["sin", "cos", "mv", "fr", "rise"].iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let child_names = wasm_jit::intersect_grants(&want, &parent);
+        assert!(!child_names.iter().any(|c| c == "rise"), "attenuation let rise through");
         let subset: Vec<HostFn> = ENTITY_IMPORTS.iter().cloned()
-            .filter(|i| matches!(i.name, "sin" | "cos" | "mv" | "fr")).collect();
-        // (a) over-reach dies at COMPILE time — rise() is not in the parent's subset
+            .filter(|i| child_names.iter().any(|c| c == i.name)).collect();
+        // (a) over-reach dies at COMPILE time — rise() is not in the child's grants
         let over = compile_entity_subset("rise(0.02);\n0.0", &subset);
         assert!(over.is_err(), "a child grabbed rise() its parent never had (compile let it through)");
         assert!(format!("{over:?}").contains("rise"), "wrong refusal: {over:?}");
