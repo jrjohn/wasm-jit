@@ -2583,7 +2583,15 @@ function buildSky() {
     if (alt < 0.05 || alt > 1.5) continue;
     milky.push({ az, alt, mag: 0.2 + rnd() * 0.6, tw: rnd() * 6.2832, ts: 0.4 + rnd() * 1.2 });
   }
-  SKY = { dust, milky, neb };
+  const clouds = [];                                  // a few night clouds, slowly adrift
+  for (let i = 0; i < 5; i++) {
+    const puffs = [], np = 4 + (rnd() * 3 | 0), w = 0.10 + rnd() * 0.08;
+    for (let j = 0; j < np; j++)
+      puffs.push({ dx: (rnd() - 0.5) * w * 2, dy: (rnd() - 0.5) * 0.05, r: 0.5 + rnd() * 0.6, a: 0.14 + rnd() * 0.12 });
+    clouds.push({ az0: rnd() * 6.2832, alt: 0.12 + rnd() * 0.30, size: 0.05 + rnd() * 0.04,
+      drift: (0.006 + rnd() * 0.010) * (rnd() < 0.5 ? 1 : -1), puffs });
+  }
+  SKY = { dust, milky, neb, clouds };
 }
 function drawCelestialDome(W, H, tNow) {
   if (!SKY) buildSky();
@@ -2635,6 +2643,18 @@ function drawCelestialDome(W, H, tNow) {
     ctx.fillStyle = 'rgba(208,204,178,0.32)';         // faint maria so it reads as a moon
     ctx.beginPath(); ctx.arc(mp.x + R * 0.28, mp.y - R * 0.2, R * 0.34, 0, 6.2832); ctx.fill();
     ctx.beginPath(); ctx.arc(mp.x - R * 0.22, mp.y + R * 0.26, R * 0.22, 0, 6.2832); ctx.fill();
+  }
+  for (const c of SKY.clouds) {                        // clouds drift across, veiling stars
+    const caz = c.az0 + tNow * c.drift;
+    for (const pf of c.puffs) {
+      const p = proj(caz + pf.dx, c.alt + pf.dy); if (!p || p.y > H * 0.6) continue;
+      const R = c.size * pf.r * W;
+      const gr = ctx.createRadialGradient(p.x, p.y - R * 0.15, 0, p.x, p.y, R);
+      gr.addColorStop(0, `rgba(134,140,154,${(pf.a * 1.35).toFixed(3)})`);   // moonlit grey, distinct from the blue galaxy
+      gr.addColorStop(0.55, `rgba(88,96,114,${(pf.a * 0.9).toFixed(3)})`);
+      gr.addColorStop(1, 'rgba(88,96,114,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 6.2832); ctx.fill();
+    }
   }
   ctx.restore();
 }
