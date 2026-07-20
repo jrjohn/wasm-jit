@@ -2947,18 +2947,23 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
     const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
     const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
-    if (e.image) { // a 佛畫: a host-served image plate, sized in world units, depth-tested like a skin
-      const img = e.image;
+    if (e.image) { // a 佛畫: a host image plate FIXED at the being's spot, facing +z, projected by
+      const img = e.image; //   the SAME matrix as the bodies — so it stays put in the shrine (no drift)
       if (!img.complete || !img.naturalWidth) continue;   // still loading
+      const vp = fpViewProj().vp, K2 = 0.55;
+      const floorY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2 + (e.alt ?? 0) * 60 * K2;
+      const Hq = e.iconH || 3.2, Wq = Hq * (img.naturalWidth / img.naturalHeight), z = e.y;
+      const tl = projW(e.x - Wq / 2, floorY + Hq, z, vp, W, H), tr = projW(e.x + Wq / 2, floorY + Hq, z, vp, W, H);
+      const bl = projW(e.x - Wq / 2, floorY, z, vp, W, H), br = projW(e.x + Wq / 2, floorY, z, vp, W, H);
+      if (!tl || !tr || !bl || !br) continue;             // (partly) behind the eye
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-      const hpx = (e.iconH || 3.4) * focal / zc, wpx = hpx * (img.naturalWidth / img.naturalHeight);
-      const botY = syg, topY = syg - hpx, Q = T.bbQuad;
-      Q[0] = sx - wpx / 2; Q[1] = topY; Q[2] = 0; Q[3] = 0;
-      Q[4] = sx + wpx / 2; Q[5] = topY; Q[6] = 1; Q[7] = 0;
-      Q[8] = sx - wpx / 2; Q[9] = botY; Q[10] = 0; Q[11] = 1;
-      Q[12] = sx + wpx / 2; Q[13] = botY; Q[14] = 1; Q[15] = 1;
+      const Q = T.bbQuad;
+      Q[0] = tl.sx; Q[1] = tl.sy; Q[2] = 0; Q[3] = 0;
+      Q[4] = tr.sx; Q[5] = tr.sy; Q[6] = 1; Q[7] = 0;
+      Q[8] = bl.sx; Q[9] = bl.sy; Q[10] = 0; Q[11] = 1;
+      Q[12] = br.sx; Q[13] = br.sy; Q[14] = 1; Q[15] = 1;
       gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
       gl.uniform1f(T.ub.zc, zc);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
