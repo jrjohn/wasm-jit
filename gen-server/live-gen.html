@@ -1203,6 +1203,8 @@ function compileEntities(world, g) {
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
                   alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
+                  walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
+
                   home: def.home ?? [def.at[0], def.at[1]], // where it first appeared — so it can find its way back
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
                   journal: [], // 宿念: a being's own remembered moments — bounded and lossy BY LAW; mostly self-chosen (the host marks only what it heard and its strongest acts)
@@ -1219,6 +1221,9 @@ function compileEntities(world, g) {
     // same dharma, different karma. The soul may transform them (set), and the
     // skin sees them through st() — a being's innate nature is visible in form.
     if (ent.innate) ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
+    // 一中有多: one shared body/behaviour, yet each is born at its own moment of the
+    // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
+    ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
     if (def.behavior) {
       ent.soul = 'scene (DSL)';
       const bytes = compile_entity_wasm(def.behavior);
@@ -1618,6 +1623,7 @@ function manifestField(world) {
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   fieldWorld = compiled;
+  SKY_BODIES = Array.isArray(world.sky?.bodies) ? world.sky.bodies : []; // the world's declared sky (moon, …)
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
   const sndCells = [];
@@ -2471,7 +2477,7 @@ function renderBodiesFP(list, W, H) {
     const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
     const hx = e.hx ?? 1, hz = e.hz ?? 0;   // yaw the body to face its heading (+x is forward)
     R.stack = [Float64Array.from([hx, 0, -hz, e.x, 0, 1, 0, surf, hz, 0, hx, e.y])];
-    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+    try { e.bodyRun((e.tau ?? 0) + (e.bornPhase ?? 0), W, H); } catch (err) { e.bodyRun = null; }
   }
   // the walker's pinhole as one matrix: clip.x = 2·xc, clip.y = 1.9·yc + 0.16·zc, w = zc
   const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
@@ -2539,15 +2545,15 @@ function fpEyeY() {
   const K = 0.55;
   let base = sampleF(0, cam.px, cam.pz) * K + 3.2;
   for (const e of ENTITIES) {
-    if (e.type !== 'bridge') continue;
-    const lx = cam.px - e.x, lz = cam.pz - e.y;            // bridge-local (axis-aligned)
-    const halfW = 1.0, span = 5.75, ramp = 1.4;            // deck footprint from its body_seed
-    const peak = 3.8, curve = 0.0681;                       // arch: y = 3.8 − 0.0681·lz²
+    const wk = e.walkable; if (!wk) continue;               // a being may DECLARE a walkable surface (a deck you climb)
+    const lx = cam.px - e.x, lz = cam.pz - e.y;             // surface-local (axis-aligned)
+    const halfW = wk.width ?? 1.0, span = wk.span ?? 5.75, ramp = wk.ramp ?? 1.4;
+    const peak = wk.peak ?? 3.8, curve = wk.curve ?? 0.0681, top = wk.top ?? 0.15;   // arch: y = peak − curve·lz²
     if (Math.abs(lx) > halfW || Math.abs(lz) > span + ramp) continue;
     const az = Math.abs(lz);
     let arch;
-    if (az <= span) arch = peak - curve * lz * lz + 0.15;  // on the deck (+plank top)
-    else { const endY = peak - curve * span * span + 0.15; // ramp the last stretch to the bank
+    if (az <= span) arch = peak - curve * lz * lz + top;    // on the deck (+surface top)
+    else { const endY = peak - curve * span * span + top;  // ramp the last stretch to the bank
       arch = Math.max(0, endY * (1 - (az - span) / ramp)); }
     const h = sampleF(0, e.x, e.y), w = sampleF(1, e.x, e.y);
     const bb = (h + Math.min(w, 3) * 0.6) * K;              // the deck's own footing (matches its body base)
@@ -2561,7 +2567,9 @@ function fpEyeY() {
 // Stars, the Milky Way and the moon are drawn from the LOOK direction alone —
 // yaw + pitch — never from where you stand. So they don't slide as you walk: a
 // real sky overhead, not billboards pinned to the ground. 真正的天體, 不隨走位.
-const MOON_AZ = Math.PI - 0.25, MOON_ALT = 0.52;   // ahead of the entrance, mid-high — 抬頭 to meet it
+// the sky's bodies are DECLARED by the world (data), not fixed in the host — a
+// world opts into a moon (or a sun, later) with an azimuth/elevation. 月亮回歸世界。
+let SKY_BODIES = [];   // [{kind:'moon', azimuth, elevation, size}]
 let SKY = null;
 function buildSky() {
   let s = 0x9e3779b9 >>> 0;
@@ -2633,9 +2641,11 @@ function drawCelestialDome(W, H, tNow) {
     ctx.fillStyle = `rgba(236,241,255,${a.toFixed(3)})`;
     ctx.fillRect(p.x, p.y, r, r);
   }
-  const mp = proj(MOON_AZ, MOON_ALT);                 // and the moon, fixed in the sky
-  if (mp && mp.y < H * 0.72) {
-    const R = Math.max(15, W * 0.032);
+  for (const bd of SKY_BODIES) {                       // the moon (and any sky body the world declares), fixed aloft
+    if (bd.kind !== 'moon') continue;
+    const mp = proj(bd.azimuth ?? (Math.PI - 0.25), bd.elevation ?? 0.52);
+    if (!mp || mp.y >= H * 0.72) continue;
+    const R = Math.max(15, W * (bd.size ?? 0.032));
     const gr = ctx.createRadialGradient(mp.x, mp.y, 0, mp.x, mp.y, R * 3.4);
     gr.addColorStop(0, 'rgba(255,251,232,0.42)'); gr.addColorStop(0.4, 'rgba(226,236,255,0.11)'); gr.addColorStop(1, 'rgba(226,236,255,0)');
     ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(mp.x, mp.y, R * 3.4, 0, 6.2832); ctx.fill();
@@ -2942,7 +2952,7 @@ function renderFieldFPGL() {
     const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
     const hx = e.hx ?? 1, hz = e.hz ?? 0;   // yaw the body to face its heading (+x is forward)
     R.stack = [Float64Array.from([hx, 0, -hz, e.x, 0, 1, 0, surf, hz, 0, hx, e.y])];
-    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+    try { e.bodyRun((e.tau ?? 0) + (e.bornPhase ?? 0), W, H); } catch (err) { e.bodyRun = null; }
   }
   const { vp, eye } = fpViewProj();
   const L = [-0.42, -0.85, -0.31];
