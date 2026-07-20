@@ -1124,24 +1124,67 @@ async fn feed_proxy(
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "http(s) only".to_string());
     }
     let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    // SSRF defense-in-depth: an IP literal that names a private/loopback/link-local
+    // host is refused BEFORE the allowlist, so no dev allowlist entry can open the
+    // internal network. (DNS rebinding — an allowlisted NAME resolving to a private
+    // IP — remains out of scope for this proxy; documented, not silently claimed.)
+    if host_is_internal_ip(&host) {
+        return (StatusCode::FORBIDDEN, [(CONTENT_TYPE, "text/plain")],
+                format!("'{host}' resolves to an internal address — refused"));
+    }
     let allow = tokio::fs::read_to_string("gen-server/feeds-allow.txt").await.unwrap_or_default();
-    let ok = allow.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .any(|l| host == l || host.ends_with(&format!(".{l}")));
-    if !ok {
+    if !feed_host_allowed(&host, &allow) {
         return (StatusCode::FORBIDDEN, [(CONTENT_TYPE, "text/plain")],
                 format!("'{host}' is not in the feed allowlist (gen-server/feeds-allow.txt)"));
     }
-    let client = match reqwest::Client::builder().timeout(Duration::from_secs(8)).build() {
+    // No redirect following: a 3xx from an allowlisted host must not be able to
+    // walk the fetch onto an unlisted (internal) host — the classic allowlist bypass.
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+    {
         Ok(c) => c,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, [(CONTENT_TYPE, "text/plain")], format!("client: {e}")),
     };
     match client.get(parsed).send().await {
+        Ok(resp) if resp.status().is_redirection() => (StatusCode::BAD_GATEWAY,
+            [(CONTENT_TYPE, "text/plain")], "feed tried to redirect — refused (allowlist bypass guard)".to_string()),
         Ok(resp) => match resp.text().await {
             Ok(body) if body.len() <= 262_144 => (StatusCode::OK, [(CONTENT_TYPE, "application/json")], body),
             Ok(_) => (StatusCode::PAYLOAD_TOO_LARGE, [(CONTENT_TYPE, "text/plain")], "feed too large (256KB cap)".to_string()),
             Err(e) => (StatusCode::BAD_GATEWAY, [(CONTENT_TYPE, "text/plain")], format!("read: {e}")),
         },
         Err(e) => (StatusCode::BAD_GATEWAY, [(CONTENT_TYPE, "text/plain")], format!("fetch: {e}")),
+    }
+}
+
+/// A host is allowed iff it exactly equals, or is a subdomain of, an allowlist entry.
+/// Pure (no I/O) so the fence is unit-testable in CI.
+fn feed_host_allowed(host: &str, allow_txt: &str) -> bool {
+    allow_txt.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .any(|l| host == l || host.ends_with(&format!(".{l}")))
+}
+
+/// True if `host` is an IP literal in a private / loopback / link-local / unspecified
+/// range — the addresses a feed must never be able to reach. Names are not resolved here.
+fn host_is_internal_ip(host: &str) -> bool {
+    use std::net::IpAddr;
+    // url crate brackets IPv6 literals; strip for parsing
+    let h = host.trim_start_matches('[').trim_end_matches(']');
+    match h.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+                || v4.is_broadcast() || v4.octets()[0] == 0
+                || (v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1])) // CGNAT 100.64/10
+        }
+        Ok(IpAddr::V6(v6)) => {
+            v6.is_loopback() || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00  // ULA fc00::/7
+                || (v6.segments()[0] & 0xffc0) == 0xfe80  // link-local fe80::/10
+                || v6.to_ipv4_mapped().map_or(false, |m| m.is_private() || m.is_loopback())
+        }
+        Err(_) => false, // a name — allowlist still gates it
     }
 }
 
@@ -1876,6 +1919,58 @@ mod tests {
         });
         let e = validate(&bad).unwrap_err();
         assert!(e.contains("sound_seed"), "{e}");
+    }
+
+    #[test]
+    fn feed_allowlist_and_ssrf_guard() {
+        // Study 1b in miniature, pinned in CI: the feed fence refuses everything
+        // off the allowlist AND every internal address, before any request goes out.
+        let allow = "api.open-meteo.com\napi.frankfurter.app\n";
+        assert!(feed_host_allowed("api.open-meteo.com", allow));
+        assert!(feed_host_allowed("sub.api.open-meteo.com", allow)); // subdomain ok
+        assert!(!feed_host_allowed("evil.com", allow));
+        assert!(!feed_host_allowed("api.open-meteo.com.evil.com", allow)); // suffix-spoof refused
+        // internal addresses are refused regardless of any allowlist entry
+        for ip in ["127.0.0.1", "10.0.0.5", "192.168.1.1", "169.254.169.254",
+                   "0.0.0.0", "100.64.0.1", "::1", "[::1]", "fc00::1", "fe80::1"] {
+            assert!(host_is_internal_ip(ip), "internal IP not blocked: {ip}");
+        }
+        // a public resolver-style literal is NOT flagged internal (names still gated by allowlist)
+        assert!(!host_is_internal_ip("8.8.8.8"));
+        assert!(!host_is_internal_ip("api.open-meteo.com"));
+    }
+
+    #[test]
+    fn begotten_child_cannot_out_reach_its_parent() {
+        // §21 attenuation, pinned in CI. The begetting path compiles the child soul
+        // against its PARENT's subset of the ABI (src/lib.rs compile_entity_wasm_grants).
+        // Reproduced natively: a child reaching for a capability outside the subset is
+        // REFUSED at compile time; the byte audit against the subset confirms clean bytes.
+        use wasm_jit::audit::{audit, Grant};
+        // parent's grants: the always-present math + {mv, fr} — NOT rise.
+        let subset: Vec<HostFn> = ENTITY_IMPORTS.iter().cloned()
+            .filter(|i| matches!(i.name, "sin" | "cos" | "mv" | "fr")).collect();
+        // (a) over-reach dies at COMPILE time — rise() is not in the parent's subset
+        let over = compile_entity_subset("rise(0.02);\n0.0", &subset);
+        assert!(over.is_err(), "a child grabbed rise() its parent never had (compile let it through)");
+        assert!(format!("{over:?}").contains("rise"), "wrong refusal: {over:?}");
+        // (b) an in-subset child compiles AND passes the byte-audit against the subset
+        let ok = compile_entity_subset("mv(fr(0.0, ex, ey) * 0.0, 0.0);\n0.0", &subset)
+            .expect("in-subset child should compile");
+        let grants = [
+            Grant { module: "env", name: "sin" }, Grant { module: "env", name: "cos" },
+            Grant { module: "env", name: "mv" }, Grant { module: "env", name: "fr" },
+        ];
+        assert!(audit(&ok, &grants).is_ok(), "in-subset child failed subset audit: {:?}", audit(&ok, &grants));
+    }
+
+    // compile an entity seed against a SUBSET of the ABI — exactly what the browser's
+    // begetting path does (compile_entity_wasm_grants), so over-reach dies at compile.
+    fn compile_entity_subset(src: &str, subset: &[HostFn]) -> Result<Vec<u8>, String> {
+        use wasm_jit::codegen::{self, CompileOpts};
+        let prog = wasm_jit::parser::parse(src)?;
+        codegen::compile_with_opts(&prog, &ENTITY_PARAMS, subset,
+            CompileOpts { fuel: Some(ENTITY_FUEL), memory_pages: None })
     }
 
     #[test]

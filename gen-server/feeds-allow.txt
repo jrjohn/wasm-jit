@@ -1,5 +1,5 @@
-# feed allowlist — one host (suffix) per line; the proxy refuses everything else
+# feed allowlist — one host (suffix) per line; the proxy refuses everything else.
+# No loopback/private entries: SSRF is blocked in code (see host_is_internal_ip).
 api.open-meteo.com
 api.frankfurter.app
 api.coingecko.com
-127.0.0.1
