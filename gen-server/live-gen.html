@@ -3039,27 +3039,31 @@ class SeedSynth extends AudioWorkletProcessor {
     // the 聲塵器 (zero-import dust engine) + a CHORUS of sound cells, each with
     // its own seat in the world. 聲從身出 · 根塵和合 · 動則有聲 — engine law.
     this.dust = null; this.dustMem = null; this.dustPtr = 0;
-    this.cells = []; this.n = 0;
+    this.cells = []; this.n = 0; this.pending = null;
     this.port.onmessage = (e) => {
       const d = e.data;
       try {
-        if (d.dust) { // instantiated with an EMPTY import object — it can only vibrate
-          const inst = new WebAssembly.Instance(new WebAssembly.Module(d.dust), {});
-          this.dust = inst.exports; this.dust.init(sampleRate);
-          this.dustMem = new Float32Array(this.dust.memory.buffer);
-          this.dustPtr = this.dust.out_ptr() >>> 2;
-          this.port.postMessage({ dustReady: true });
+        if (d.dust) {
+          // worklets can't await; async instantiate (Promise) dodges the >4KB SYNC-compile
+          // limit Safari enforces even in a worklet. EMPTY imports — it can only vibrate.
+          WebAssembly.instantiate(d.dust, {}).then(res => {
+            this.dust = res.instance.exports; this.dust.init(sampleRate);
+            this.dustMem = new Float32Array(this.dust.memory.buffer);
+            this.dustPtr = this.dust.out_ptr() >>> 2;
+            this.port.postMessage({ dustReady: true });
+            if (this.pending) { const q = this.pending; this.pending = null; for (const c of q) this.addCell(c); }
+          }).catch(err => this.port.postMessage({ err: String(err) }));
           return;
         }
-        if (d.stop) { this.cells = []; if (this.dust) this.dust.clear(); return; }
+        if (d.stop) { this.cells = []; this.pending = null; if (this.dust) this.dust.clear(); return; }
         if (d.bytes) { // a single ambient cell (surface "sound" / legacy ambient)
-          this.cells = []; if (this.dust) this.dust.clear();
-          this.addCell({ bytes: d.bytes, id: '__ambient', positional: false, x: 0, y: 0 });
+          this.cells = []; this.pending = null; if (this.dust) this.dust.clear();
+          this.queueCell({ bytes: d.bytes, id: '__ambient', positional: false, x: 0, y: 0 });
           this.n = 0; return;
         }
         if (d.cells) { // a world's chorus: ambient + per-being voices
-          this.cells = []; if (this.dust) this.dust.clear();
-          for (const c of d.cells) this.addCell(c);
+          this.cells = []; this.pending = null; if (this.dust) this.dust.clear();
+          for (const c of d.cells) this.queueCell(c);
           this.n = 0; return;
         }
         if (d.seatpos && this.dust) {
@@ -3071,6 +3075,7 @@ class SeedSynth extends AudioWorkletProcessor {
       } catch (err) { this.port.postMessage({ err: String(err) }); }
     };
   }
+  queueCell(c) { if (this.dust) this.addCell(c); else (this.pending || (this.pending = [])).push(c); } // wait for the engine
   addCell(c) {
     const slots = new Float64Array(32);
     const seat = this.dust ? this.dust.seat_add(c.positional ? 1 : 0) : -1;
@@ -3087,10 +3092,9 @@ class SeedSynth extends AudioWorkletProcessor {
       voice:  (f0, vw, na) => { if (dust && S >= 0) dust.voice_set(S, f0, vw, na); },
       breath: (l) => { if (dust && S >= 0) dust.breath_set(S, l); },
     };
-    try {
-      const run = new WebAssembly.Instance(new WebAssembly.Module(c.bytes), { env }).exports.run;
-      this.cells.push({ run, id: c.id, seat, positional: !!c.positional, dead: false });
-    } catch (err) { this.port.postMessage({ err: String(err) }); }
+    WebAssembly.instantiate(c.bytes, { env }).then(res => {   // async — dodges the sync-compile size limit
+      this.cells.push({ run: res.instance.exports.run, id: c.id, seat, positional: !!c.positional, dead: false });
+    }).catch(err => this.port.postMessage({ err: String(err) }));
   }
   process(inputs, outputs) {
     const out = outputs[0]; if (!out || !out[0]) return true;
