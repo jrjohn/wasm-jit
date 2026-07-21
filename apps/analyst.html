@@ -81,45 +81,49 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>本機資料分析台 🔒 <span style="font-size:.8rem;color:#8b949e;font-weight:400">AI 幫你分析它看不到的資料</span></h1>
-  <p class="lede">把 CSV 拖進來——<b>檔案不上傳</b>,只留在這個瀏覽器分頁裡。送給 Claude 的<b>只有欄位名與型別</b>,
+  <div style="display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap">
+    <h1 style="margin:0"><span id="t-title">本機資料分析台</span> 🔒
+      <span style="font-size:.8rem;color:#8b949e;font-weight:400" id="t-sub">AI 幫你分析它看不到的資料</span></h1>
+    <span class="chip" id="langbtn" style="font-size:.7rem;padding:.15rem .6rem">EN</span>
+  </div>
+  <p class="lede" id="t-lede">把 CSV 拖進來——<b>檔案不上傳</b>,只留在這個瀏覽器分頁裡。送給 Claude 的<b>只有欄位名與型別</b>,
     <b>一列資料都不送</b>。它寫出<b>受圍籬的 cell</b>,cell <b>在你的機器上</b>跑你的真資料。
     cell 的 import table 裡<b>沒有網路</b>——想把資料傳出去,<b>編譯期就死</b>。
     所以你<b>不需要信任</b>它寫的程式。</p>
 
   <div class="panel" style="margin-bottom:1rem">
-    <p class="phead">▸ 分析結果(活的,在你機器上算 · 可切換三種視角)</p>
+    <p class="phead">▸ <span id="t-result">分析結果</span></p>
     <div id="stage"><span style="color:#6e7681;font-size:.8rem">載入中…</span></div>
   </div>
 
   <div class="panel">
     <div class="drop" id="drop">
-      拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦
+      <span id="t-drop">拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u></span>
       <div style="margin-top:.5rem">
-        <span class="chip" id="sampleTemp" style="border-color:#3fb95066;color:#7ee787">🌡 緯度帶 1880–2025(NASA)</span>
-        <span class="chip" id="sampleCountry" style="border-color:#3fb95066;color:#7ee787">🌍 181 國 1950–2025(含經緯度)</span>
-        <span class="chip" id="sample">📄 擬真薪資範例(合成)</span>
+        <span class="chip" id="sampleTemp" style="border-color:#3fb95066;color:#7ee787" id="t-stemp">🌡 緯度帶 1880–2025(NASA)</span>
+        <span class="chip" id="sampleCountry" style="border-color:#3fb95066;color:#7ee787" id="t-scountry">🌍 181 國 1950–2025(含經緯度)</span>
+        <span class="chip" id="sample"><span id="t-ssalary">📄 擬真薪資範例(合成)</span></span>
       </div>
       <input type="file" id="file" accept=".csv,text/csv" style="display:none">
     </div>
     <div id="loaded" style="display:none">
       <div class="bar">
-        <textarea id="intent" placeholder="想怎麼改?例如:改成由高到低排名 / 只看北極區歷年變化 / 改成圓餅"></textarea>
-        <button id="go" disabled>送出</button>
+        <textarea id="intent"></textarea>
+        <button id="go" disabled><span id="t-send">送出</span></button>
       </div>
       <div class="chips" id="chips"></div>
       <div class="status" id="status">載入編譯器…</div>
       <details style="margin-top:.9rem">
-        <summary style="cursor:pointer;font-size:.74rem;color:#6e7681">▸ 你的資料 &amp; 送出去的到底是什麼(點開看證據)</summary>
+        <summary style="cursor:pointer;font-size:.74rem;color:#6e7681"><span id="t-proof">▸ 你的資料 &amp; 送出去的到底是什麼</span></summary>
         <div class="cols" style="margin-top:.6rem">
           <div>
-            <p class="phead">▸ 你的資料(只在本機,前 5 列)</p>
+            <p class="phead">▸ <span id="t-yours">你的資料</span></p>
             <div style="overflow:auto;max-height:210px"><table class="prev" id="prev"></table></div>
-            <label class="toggle"><input type="checkbox" id="anon"> 連欄位名都隱藏(送出 c0/c1/c2…)</label>
+            <label class="toggle"><input type="checkbox" id="anon"> <span id="t-anon">連欄位名都隱藏</span></label>
           </div>
           <div>
-            <div class="leak"><h4>↗ 離開你電腦的全部內容</h4><pre id="leak"></pre></div>
-            <div class="stay"><h4>⛔ 留在本機、一個 byte 都沒送</h4><div id="stay"></div></div>
+            <div class="leak"><h4 id="t-leak">↗ 離開你電腦的全部內容</h4><pre id="leak"></pre></div>
+            <div class="stay"><h4 id="t-stay">⛔ 留在本機、一個 byte 都沒送</h4><div id="stay"></div></div>
           </div>
         </div>
       </details>
@@ -127,13 +131,86 @@
   </div>
 
   <div class="panel" style="margin-top:1rem">
-    <p class="phead">▸ 證據:AI 寫的 CELL(受圍籬)</p>
+    <p class="phead">▸ <span id="t-evid">證據</span></p>
     <div id="evidence"><span style="color:#6e7681;font-size:.8rem">分析後這裡會顯示每支 cell 的原始碼 + import table</span></div>
   </div>
 
 <script>
 const $ = id => document.getElementById(id);
+
+// ── i18n ───────────────────────────────────────────────────────────
+const I18N = {
+  zh: {
+    title: '本機資料分析台', sub: 'AI 幫你分析它看不到的資料',
+    lede: '把 CSV 拖進來——<b>檔案不上傳</b>,只留在這個瀏覽器分頁裡。送給 Claude 的<b>只有欄位名與型別</b>,<b>一列資料都不送</b>。它寫出<b>受圍籬的 cell</b>,cell <b>在你的機器上</b>跑你的真資料。cell 的 import table 裡<b>沒有網路</b>——想把資料傳出去,<b>編譯期就死</b>。所以你<b>不需要信任</b>它寫的程式。',
+    result: '分析結果(活的,在你機器上算 · 可切換視角)', evidence: '證據:AI 寫的 CELL(受圍籬)',
+    drop: '拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦',
+    sTemp: '🌡 緯度帶 1880–2025(NASA)', sCountry: '🌍 181 國 1950–2025(含經緯度)', sSalary: '📄 擬真薪資範例(合成)',
+    ask: '想怎麼改?例如:改成由高到低排名 / 只看北極區歷年變化 / 改成圓餅', send: '送出',
+    proof: '你的資料 & 送出去的到底是什麼(點開看證據)',
+    yours: '你的資料(只在本機,前 5 列)', anon: '連欄位名都隱藏(送出 c0/c1/c2…)',
+    leak: '↗ 離開你電腦的全部內容', stay: '⛔ 留在本機、一個 byte 都沒送',
+    vBar: '長條', vPie: '圓餅', vLine: '折線', vGlobe: '🌍 地球',
+    hintGlobe: '顏色 = 對應的那根長條 · 大小/粗細 = |數值| · 拖曳可轉、滾輪縮放、點選連動',
+    hintInset: '顏色同左圖 · 粗細=|值| · 點左圖→球轉過去 · 拖球可轉 · 指到球上看名稱',
+    idle: '◉ 自動展示中 — 碰一下就交還給你',
+    foot: '同一份資料多種視角 · 值由受圍籬 cell 在本機算 · 版面由 {n}-byte layout cell 算',
+    noApi: '這是離線展示版:<b>AI 生成需要本機的 server</b>。其餘全部可用——換視角、轉地球、拖自己的 CSV 進來,一切都在你的瀏覽器裡算。',
+    ready: '編譯器就緒 —— 拖一份 CSV 進來,或點上面的範例',
+    loaded: '已載入 {r} 列 × {c} 欄 —— 全部留在本機',
+    working: '🔒 只把欄位 schema 送出去,資料留在本機…', done: '✓ 算完了 —— 全程在你的機器上',
+    fence: '圍籬:每支 cell 只能 import {f} —— <b>沒有網路</b>。它讀得到你的資料(<code>ld</code>),但沒有能力送出去;這裡 <code>sd</code> 也是 no-op,連改都改不了。',
+    fenceBtn: '按這裡:把 fetch 塞進一支 cell 試編譯', fenceQ: '想確認圍籬是真的?',
+    changed: '你剛才那句話,改的不是參數 —— 是程式本身。',
+  },
+  en: {
+    title: 'Local Data Workbench', sub: 'AI analyses data it never sees',
+    lede: 'Drop a CSV — <b>the file is not uploaded</b>; it stays in this browser tab. Claude receives <b>only column names and types</b>, <b>never a single row</b>. It writes <b>capability-fenced cells</b> that run <b>on your machine</b> over your real data. A cell\'s import table has <b>no network</b> — a reach to send data out <b>dies at compile time</b>. So you <b>don\'t have to trust</b> the code it wrote.',
+    result: 'Result (live, computed on your machine · switch views)', evidence: 'Evidence: the fenced CELL the AI wrote',
+    drop: 'Drop a <b>CSV</b> here, or <u>click to choose</u> — it never leaves this computer',
+    sTemp: '🌡 Latitude bands 1880–2025 (NASA)', sCountry: '🌍 181 countries 1950–2025 (with coords)', sSalary: '📄 Sample payroll (synthetic)',
+    ask: 'How should it change? e.g. rank high to low / only the Arctic over time / make it a pie', send: 'Send',
+    proof: 'Your data & exactly what was sent (open to inspect)',
+    yours: 'Your data (local only, first 5 rows)', anon: 'Hide column names too (send c0/c1/c2…)',
+    leak: '↗ Everything that left your computer', stay: '⛔ Stayed local — not one byte sent',
+    vBar: 'Bar', vPie: 'Pie', vLine: 'Line', vGlobe: '🌍 Globe',
+    hintGlobe: 'colour = its bar · size/thickness = |value| · drag to turn, wheel to zoom, click to link',
+    hintInset: 'same colours as the chart · click a bar → globe turns · drag to spin · hover for names',
+    idle: '◉ auto-demo — touch anything to take over',
+    foot: 'one dataset, several views · values computed locally by fenced cells · layout by a {n}-byte cell',
+    noApi: 'Offline demo: <b>live AI generation needs the local server</b>. Everything else works — switch views, spin the globe, drop your own CSV; it all runs in your browser.',
+    ready: 'Compiler ready — drop a CSV, or try a sample above',
+    loaded: 'Loaded {r} rows × {c} columns — all of it stayed local',
+    working: '🔒 Sending only the column schema; your rows stay here…', done: '✓ Done — computed entirely on your machine',
+    fence: 'Fence: every cell may import only {f} — <b>no network</b>. It can read your data (<code>ld</code>) but has no way to send it out; <code>sd</code> is a no-op here, so it cannot even modify it.',
+    fenceBtn: 'Click: put fetch() in a cell and try to compile', fenceQ: 'Want to check the fence is real?',
+    changed: 'That sentence changed the program itself — not a parameter.',
+  },
+};
+let LANG = (localStorage.getItem('analyst.lang') || (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+if (!I18N[LANG]) LANG = 'zh';
+const T = (k, vars) => { let t = (I18N[LANG] && I18N[LANG][k]) || (I18N.zh[k] || k);
+  if (vars) for (const p in vars) t = t.split('{' + p + '}').join(vars[p]);
+  return t; };
+const REGION_EN = { '全球':'Global','北半球':'N. Hemisphere','南半球':'S. Hemisphere',
+  '北緯24-90':'24–90°N','南北緯24以內':'24°S–24°N','南緯24-90':'24–90°S',
+  '北極區64-90N':'Arctic 64–90N','北高緯44-64N':'44–64°N','北中緯24-44N':'24–44°N','赤道-24N':'EQ–24N',
+  '24S-赤道':'24S–EQ','南中緯24-44S':'24–44°S','南高緯44-64S':'44–64°S','南極區64-90S':'Antarctic 64–90S',
+  '熱帶':'Tropical','副熱帶':'Subtropical','溫帶':'Temperate','寒帶':'Polar','北':'North','南':'South','赤道':'Equator' };
+const L10N = name => LANG === 'en' ? (REGION_EN[name] || name) : name;
 const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function applyI18N() {
+  const set = (id, k, html) => { const e = $(id); if (!e) return; if (html) e.innerHTML = T(k); else e.textContent = T(k); };
+  document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-Hant';
+  set('t-title', 'title'); set('t-sub', 'sub'); set('t-lede', 'lede', true);
+  set('t-result', 'result'); set('t-evid', 'evidence'); set('t-drop', 'drop', true);
+  set('t-stemp', 'sTemp'); set('t-scountry', 'sCountry'); set('t-ssalary', 'sSalary');
+  set('t-send', 'send'); set('t-proof', 'proof'); set('t-yours', 'yours'); set('t-anon', 'anon');
+  set('t-leak', 'leak'); set('t-stay', 'stay');
+  const it = $('intent'); if (it) it.placeholder = T('ask');
+  const lb = $('langbtn'); if (lb) lb.textContent = LANG === 'zh' ? 'EN' : '中';
+  document.title = T('title') + ' · wasm-jit';
+}
 function status(m, c) { const s = $('status'); s.textContent = m; s.className = 'status' + (c ? ' ' + c : ''); }
 
 let compileUiCell = null;
@@ -199,7 +276,7 @@ function ingest(text, name, bytes) {
   $('loaded').style.display = '';
   $('drop').style.display = 'none';
   if (compileUiCell) $('go').disabled = false;
-  status(`已載入 ${NROWS.toLocaleString()} 列 × ${NCOLS} 欄 —— 全部留在本機。問一句試試。`, 'ok');
+  status(T('loaded', { r: NROWS.toLocaleString(), c: NCOLS }), 'ok');
 }
 
 function renderPreview(body) {
@@ -312,7 +389,7 @@ async function manifestUi(schema) {
   for (const m of morphs) {                       // 值由受圍籬 cell 逐組算出,再交給變形引擎
     const geo = m.ordered ? null : geoForCats(m.col, m.cats);   // 經緯度:本機算,AI 從沒看過
     let rows = m.cats.map((nm, i) => { run(m.bind, m.args[i]);
-      return { label: nm, value: outputs[m.bind] || 0, geo: geo ? geo[i] : null }; });
+      return { label: L10N(nm), value: outputs[m.bind] || 0, geo: geo ? geo[i] : null }; });
     if (m.sort === 'desc') rows.sort((a, b) => b.value - a.value);   // ← 只有 host 知道數值,排名得在這裡做
     if (m.sort === 'asc') rows.sort((a, b) => a.value - b.value);
     m.ph.appendChild(makeMorphChart(rows.map(r => r.label), rows.map(r => r.value),
@@ -578,8 +655,8 @@ function makeMorphChart(labels, values, geo, ordered) {
   const box = document.createElement('div');
   const bar = document.createElement('div'); bar.className = 'chips'; bar.style.margin = '0 0 .5rem';
   // 視角依資料型態而定:類別 → 長條/圓餅(+有經緯度才有地球);有序(年份)→ 長條/折線
-  const VIEWS = ordered ? [['長條', 0], ['折線', 2]]
-                        : (geo ? [['長條', 0], ['圓餅', 1], ['🌍 地球', 3]] : [['長條', 0], ['圓餅', 1]]);
+  const VIEWS = ordered ? [[T('vBar'), 0], [T('vLine'), 2]]
+                        : (geo ? [[T('vBar'), 0], [T('vPie'), 1], [T('vGlobe'), 3]] : [[T('vBar'), 0], [T('vPie'), 1]]);
   const btns = VIEWS.map(([n]) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
   box.appendChild(bar);
   let W = 900, H = 380;
@@ -602,7 +679,7 @@ function makeMorphChart(labels, values, geo, ordered) {
   window.addEventListener('resize', resize);
   const note = document.createElement('div');
   note.style.cssText = 'font-size:.66rem;color:#6e7681;margin-top:.35rem';
-  note.textContent = `同一份資料三種視角 · 值由受圍籬 cell 在本機算 · 版面由 ${MORPH_BYTES}-byte layout cell 算`;
+  note.textContent = T('foot', { n: MORPH_BYTES });
   box.appendChild(note);
 
   const max = Math.max(1e-9, ...values.map(v => Math.max(0, v)));
@@ -799,13 +876,13 @@ function makeMorphChart(labels, values, geo, ordered) {
       drawGlobe(W - R - 18, R + 22, R, alpha * 0.95, true);
       ctx.globalAlpha = alpha; ctx.fillStyle = '#6e7681'; ctx.font = '9px ui-monospace, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('顏色同左圖 · 粗細=|值| · 點左圖→球轉過去 · 拖球可轉 · 指到球上看名稱', W - R - 18, R * 2 + 34);
+      ctx.fillText(T('hintInset'), W - R - 18, R * 2 + 34);
     }
     if (L === 3) {                                   // 🌍 正射投影的地球:座標由 layout cell 算
       const gcx = 58 + (W - 84) / 2, gcy = 34 + (H - 108) / 2, GR = (H - 108) * 0.44 * zoom;
       drawGlobe(gcx, gcy, GR, alpha, false);
       ctx.fillStyle = '#8b949e'; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
-      ctx.fillText('顏色 = 對應的那根長條 · 大小/粗細 = |數值| · 拖曳可轉、滾輪縮放、點選連動', gcx, H - 14);
+      ctx.fillText(T('hintGlobe'), gcx, H - 14);
     }
     if (L === 2) {
       const pts = []; for (let i = 0; i < N; i++) pts.push([lay({ ...base(i), 5: 5, 19: 2 }), lay({ ...base(i), 5: 6, 19: 2 })]);
@@ -822,7 +899,7 @@ function makeMorphChart(labels, values, geo, ordered) {
     if (idling) {
       ctx.globalAlpha = alpha * 0.55; ctx.fillStyle = '#7ee787';
       ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-      ctx.fillText('◉ 自動展示中 — 碰一下就交還給你', W - 12, 10);
+      ctx.fillText(T('idle'), W - 12, 10);
       ctx.globalAlpha = alpha;
     }
     const hi = hoverI >= 0 ? hoverI : sel;
@@ -978,7 +1055,7 @@ function renderEvidence(schema, meta) {
   $('evidence').innerHTML =
     `<div style="font-size:.74rem;color:#8b949e;margin-bottom:.55rem"><b style="color:#c9d1d9">${schema.title || ''}</b>` +
     ` · ${cells.length} 支 cell${meta ? ` · 第 ${meta.attempt} 次過關` : ''} · 本頁已編譯 <b style="color:#c9d1d9" id="ccount">${compileCount}</b> 次</div>` +
-    `<div class="live">⚡ <b>你剛才那句話,改的不是參數 —— 是程式本身。</b><br>` +
+    `<div class="live">⚡ <b>${T('changed')}</b><br>` +
     `下面<span style="color:#7ee787">綠色的行</span>就是這一代 cell 因你而改寫的地方;改完立刻重編成 wasm、熱抽換進正在跑的 App。</div>` +
     cells.map((c, i) => {
       const old = prevCells[c.id];
@@ -989,7 +1066,7 @@ function renderEvidence(schema, meta) {
         `<span class="rc">${tag}${c.bytes ? ` · ${c.bytes} bytes wasm` : ''}</span></div>` +
         `<pre>${d.map(x => `<span class="dl${x.chg ? ' chg' : ''}">${(x.t || ' ').replace(/</g, '&lt;')}</span>`).join('')}</pre></div>`;
     }).join('') +
-    `<div class="gen">🧪 想確認圍籬是真的?<button class="fencebtn" id="fencetest">按這裡:把 fetch 塞進一支 cell 試編譯</button>` +
+    `<div class="gen">🧪 ${T('fenceQ')}<button class="fencebtn" id="fencetest">${T('fenceBtn')}</button>` +
     `<span id="fenceout" style="margin-left:.5rem"></span></div>` +
     `<div class="fence">圍籬:每支 cell 只能 import <code>${((meta && meta.fence) || ['env.sin','env.cos','env.get','env.set','env.ld','env.sd']).join(', ')}</code>` +
     ` —— <b>沒有網路</b>。它讀得到你的資料(<code>ld</code>),但沒有能力送出去;這裡 <code>sd</code> 也是 no-op,連改都改不了。</div>`;
@@ -1007,19 +1084,21 @@ async function analyze() {
   const intent = $('intent').value.trim(); if (!intent) { status('問一句吧', 'err'); return; }
   $('go').disabled = true;
   const sent = buildSchema();
-  status('🔒 只把欄位 schema 送出去,資料留在本機…(Claude 寫 cell → 編譯即圍籬 → 自我修復)');
+  status(T('working'));
   let data;
   try {
     const r = await fetch('/api/gen', { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ intent, data_schema: sent, prev_schema: lastSchema }) });
     data = await r.json();
-  } catch (e) { status('✗ 網路錯誤:' + e, 'err'); $('go').disabled = false; return; }
-  if (!data.ok) { status('✗ 失敗:' + (data.error || '?'), 'err'); $('go').disabled = false; return; }
+  } catch (e) { $('evidence').insertAdjacentHTML('afterbegin', `<div class="live">${T('noApi')}</div>`);
+    status('—', ''); $('go').disabled = false; return; }
+  if (!data || !data.ok) { $('evidence').insertAdjacentHTML('afterbegin', `<div class="live">${T('noApi')}</div>`);
+    status('—', ''); $('go').disabled = false; return; }
   lastSchema = data.schema;
   try {
     compileCount += (data.cells || []).length;
     await showSchema(data.schema, data);
-    status('✓ 算完了 —— 全程在你的機器上(右邊原始碼可直接改)', 'ok');
+    status(T('done'), 'ok');
   } catch (e) { status('✗ 執行錯誤:' + e, 'err'); console.error(e); }
   $('go').disabled = false;
 }
@@ -1120,6 +1199,14 @@ const TEMP_EX = [
   '1880-1950 與 1976-2025 兩段的全球平均距平各是多少',
   '各尺度的資料筆數佔比,圓餅圖',
 ];
+
+applyI18N();
+$('langbtn').onclick = async () => {
+  LANG = LANG === 'zh' ? 'en' : 'zh';
+  localStorage.setItem('analyst.lang', LANG);
+  applyI18N();
+  if (lastSchema && VALUES) { try { await showSchema(lastSchema, null); } catch (e) {} }   // 重畫,標籤跟著換
+};
 
 (async () => {
   try {
