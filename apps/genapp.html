@@ -91,7 +91,7 @@
       <div class="msgs" id="msgs"></div>
       <div class="bar">
         <textarea id="intent" placeholder="講一句「我願」…(⌘/Ctrl+Enter 送出)"></textarea>
-        <button id="go" disabled>長出來</button>
+        <button id="go" disabled>送出</button>
       </div>
       <div class="chips" id="chips"></div>
       <div class="status" id="status">載入編譯器…</div>
@@ -425,7 +425,11 @@ async function gen() {
   const t0 = performance.now();
   let data;
   try {
-    const r = await fetch('/api/gen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ intent }) });
+    const r = await fetch('/api/gen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      intent,
+      history: HIST.slice(-6).map(h => ({ intent: h.intent, title: (h.schema && h.schema.title) || '' })),
+      prev_schema: (activeIdx >= 0 && HIST[activeIdx]) ? HIST[activeIdx].schema : (HIST.length ? HIST[HIST.length - 1].schema : null),
+    }) });
     data = await r.json();
   } catch (e) { status('✗ 網路錯誤:' + e, 'err'); $('go').disabled = false; return; }
   const dt = ((performance.now() - t0) / 1000).toFixed(1);
@@ -453,7 +457,7 @@ $('intent').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e
     loadHist(); renderHist();
     $('clear').onclick = () => { if (confirm('清空本機所有對話紀錄?')) { HIST = []; activeIdx = -1; saveHist(); renderHist(); } };
     $('go').disabled = false;
-    status('編譯器就緒 · 講一句「我願」,或點下面的例子,然後按「長出來」（⌘/Ctrl+Enter 也行）');
+    status('編譯器就緒 · 講一句「我願」,或點下面的例子,然後按「送出」（⌘/Ctrl+Enter 也行）');
   } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
 })();
 </script>

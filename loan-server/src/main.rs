@@ -313,7 +313,7 @@ EXAMPLE (loan calculator):
 // 於是 App 有了真資料,而 cell 的觸及範圍一格都沒有變大。
 const DATA_SOURCES: [(&str, &str, &str); 1] = [(
     "reservoirs",
-    "台灣水庫即時水情(21 座):percentage=蓄水率%、volume=蓄水量(萬m³)、inflow=日進流量",
+    "台灣水庫即時水情(21 座):percentage=蓄水率%、volume=蓄水量(萬立方公尺,水 1m³≈1 公噸,故此即『萬噸』)、inflow=日進流量",
     "https://water.taiwanstat.com/data/data.json",
 )];
 
@@ -383,6 +383,12 @@ fn normalise_reservoirs(raw: &serde_json::Value, url: &str) -> serde_json::Value
 #[derive(Deserialize)]
 struct GenReq {
     intent: String,
+    /// prior turns of THIS chat, oldest first — so a follow-up like 「要全部的」has a referent
+    #[serde(default)]
+    history: Vec<serde_json::Value>,
+    /// the app currently on screen — a follow-up usually means "change THIS", not "start over"
+    #[serde(default)]
+    prev_schema: Option<serde_json::Value>,
 }
 
 /// The word library — composites the AI has defined, persisted so everyone gets them next time.
@@ -450,6 +456,33 @@ DEFINE a new word by adding a top-level "define_words": [{"name":"...","desc":".
 
 /// Tell the model which REAL data sources the host can fetch on its behalf.
 /// The cell still has no network — it only ever reads numbers the host already placed.
+/// Render the conversation so far + the app on screen, so follow-ups refine instead of restart.
+fn context_section(history: &[serde_json::Value], prev: &Option<serde_json::Value>) -> String {
+    if history.is_empty() && prev.is_none() { return String::new(); }
+    let mut out = String::from("\nCONVERSATION SO FAR (oldest first). The new message is very likely a FOLLOW-UP to these:\n");
+    for (i, h) in history.iter().enumerate() {
+        let intent = h["intent"].as_str().unwrap_or("");
+        let title = h["title"].as_str().unwrap_or("");
+        out.push_str(&format!("  {}. 使用者:「{intent}」 → 你做了:「{title}」\n", i + 1));
+    }
+    if let Some(p) = prev {
+        out.push_str(&format!(
+            "\nCURRENT APP ON SCREEN (its full schema):\n{}\n",
+            serde_json::to_string(p).unwrap_or_default()
+        ));
+        out.push_str(
+"RULE FOR FOLLOW-UPS: if the new message refines, corrects, or asks about the CURRENT app
+ (e.g.「要全部的」「改成圓餅」「你是用噸排名嗎?」「加上百分比」), you MUST return an updated FULL
+ schema of THAT app — keep its data source, title and structure, change only what was asked.
+ Only start a brand-new unrelated app if the user clearly asks for a different thing.
+ If the message is a QUESTION about the current app, answer it by returning the app corrected
+ to what the user evidently wants (e.g. asked「你是用噸排名嗎?」about a percentage chart →
+ return the same chart switched to the tonnage field), and say so in the title.
+");
+    }
+    out
+}
+
 fn data_section() -> String {
     let mut out = String::from("\nREAL DATA SOURCES (host-fetched, allow-listed — the cell itself still has NO network):\n");
     for (id, desc, _url) in DATA_SOURCES.iter() {
@@ -477,9 +510,9 @@ async fn call_claude(prompt: &str) -> Result<String, String> {
         .arg("claude-sonnet-5")
         .arg(prompt)
         .output();
-    let out = tokio::time::timeout(std::time::Duration::from_secs(180), fut)
+    let out = tokio::time::timeout(std::time::Duration::from_secs(75), fut)
         .await
-        .map_err(|_| "claude 逾時(>120s)".to_string())?
+        .map_err(|_| "claude 無回應(>75s,已自動重試)".to_string())?
         .map_err(|e| format!("claude 啟動失敗: {e}"))?;
     if !out.status.success() {
         return Err(format!("claude 退出 {}: {}", out.status, String::from_utf8_lossy(&out.stderr)));
@@ -504,15 +537,17 @@ async fn api_gen(Json(req): Json<GenReq>) -> Response {
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "說一句話吧"}))).into_response();
     }
     let wsec = words_section(&load_words());
+    let ctx = context_section(&req.history, &req.prev_schema);
     let mut repair = String::new();
     let mut last_err = String::from("unknown");
     for attempt in 1..=3u32 {
-        let prompt = format!("{GEN_SPEC}\n{}\n{wsec}\n{repair}\nUSER INTENT: {intent}\n\nOutput the JSON now.", data_section());
+        let prompt = format!("{GEN_SPEC}\n{}\n{wsec}\n{}\n{repair}\nUSER'S NEW MESSAGE: {intent}\n\nOutput the JSON now.", data_section(), ctx);
         let raw = match call_claude(&prompt).await {
             Ok(o) => o,
             Err(e) => {
+                // a hung/slow claude is usually transient — retry rather than give up
                 last_err = e;
-                break;
+                continue;
             }
         };
         let schema: serde_json::Value = match serde_json::from_str(&extract_json(&raw)) {
