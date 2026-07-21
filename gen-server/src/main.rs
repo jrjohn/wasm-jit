@@ -152,6 +152,25 @@ async fn container_running() -> bool {
         .unwrap_or(false)
 }
 
+/// Environment variables that must never be visible to the generator.
+///
+/// The generator image is shared with a CI agent, which bakes its own credentials
+/// into the image's ENV. A container started from it therefore inherits them even
+/// when nobody passes them — and the prompt going in is a stranger's text, so
+/// anything readable in there is one prompt injection away from appearing in the
+/// output. Blank them explicitly at create; an image is not a clean room just
+/// because this process did not hand it a secret.
+const BLANKED_ENV: [&str; 6] = [
+    "GH_TOKEN", "JENKINS_TOKEN", "SONARQUBE_TOKEN", "ARCHIVE_PG",
+    "JENKINS_USER", "SONAR_HOST_URL",
+];
+
+/// Where the generator's Claude credentials live on the host. A directory of its
+/// own rather than the CI agent's: the CLI rewrites this on refresh, and two
+/// services sharing one mutable credential store is a race nobody would choose
+/// deliberately.
+const CLAUDE_HOME: &str = "/opt/arcana/claude-home";
+
 async fn ensure_container() -> bool {
     if container_running().await {
         return true;
@@ -161,18 +180,42 @@ async fn ensure_container() -> bool {
         .output()
         .await;
     let image = std::env::var("GEN_IMAGE").unwrap_or_else(|_| "agent-task-node:local".into());
+    let claude_home = std::env::var("CLAUDE_HOME_DIR").unwrap_or_else(|_| CLAUDE_HOME.into());
+
+    let mut args: Vec<String> = vec![
+        "run".into(), "-d".into(), "--name".into(), GEN_CONTAINER.into(),
+        "--entrypoint".into(), "sleep".into(),
+        // Survive a daemon restart, so the carefully-shaped container is not
+        // silently replaced by whatever a later code path happens to create.
+        "--restart".into(), "unless-stopped".into(),
+        "-e".into(), "IS_SANDBOX=1".into(),
+    ];
+    for k in BLANKED_ENV {
+        args.push("-e".into());
+        args.push(format!("{k}="));
+    }
+    // Authenticate by mounting a credentials directory rather than passing a token:
+    // the CLI refreshes it in place, so a token in the environment goes stale and a
+    // mounted home does not.
+    if std::path::Path::new(&claude_home).exists() {
+        args.push("-v".into());
+        args.push(format!("{claude_home}:/root/.claude"));
+    } else {
+        // No credential store — fall back to the token the environment may hold.
+        args.push("-e".into());
+        args.push("CLAUDE_CODE_OAUTH_TOKEN".into());
+    }
+    args.push(image);
+    args.push("infinity".into());
+
     let ok = tokio::process::Command::new("docker")
-        .args([
-            "run", "-d", "--name", GEN_CONTAINER, "--entrypoint", "sleep",
-            "-e", "CLAUDE_CODE_OAUTH_TOKEN", "-e", "IS_SANDBOX=1",
-            &image, "infinity",
-        ])
+        .args(&args)
         .output()
         .await
         .map(|o| o.status.success())
         .unwrap_or(false);
     if ok {
-        eprintln!("[gen] persistent container '{GEN_CONTAINER}' started");
+        eprintln!("[gen] persistent container '{GEN_CONTAINER}' started (secrets blanked, creds mounted)");
     }
     ok
 }
@@ -207,14 +250,32 @@ async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
             String::from_utf8_lossy(&out.stderr).chars().take(200).collect::<String>()
         );
     }
+    // The cold fallback runs the SAME stranger's prompt, so it needs the same
+    // scrubbing. A hardening that only covers the warm path is a hardening that
+    // stops applying the moment the container dies.
     let image = std::env::var("GEN_IMAGE").unwrap_or_else(|_| "agent-task-node:local".into());
-    let out = run_docker(vec![
+    let claude_home = std::env::var("CLAUDE_HOME_DIR").unwrap_or_else(|_| CLAUDE_HOME.into());
+    let mut args: Vec<String> = vec![
         "run".into(), "--rm".into(), "--entrypoint".into(), "claude".into(),
-        "-e".into(), "CLAUDE_CODE_OAUTH_TOKEN".into(), "-e".into(), "IS_SANDBOX=1".into(),
-        image,
-        "-p".into(), prompt.into(), "--model".into(), model.into(),
-    ])
-    .await?;
+        "-e".into(), "IS_SANDBOX=1".into(),
+    ];
+    for k in BLANKED_ENV {
+        args.push("-e".into());
+        args.push(format!("{k}="));
+    }
+    if std::path::Path::new(&claude_home).exists() {
+        args.push("-v".into());
+        args.push(format!("{claude_home}:/root/.claude"));
+    } else {
+        args.push("-e".into());
+        args.push("CLAUDE_CODE_OAUTH_TOKEN".into());
+    }
+    args.push(image);
+    args.push("-p".into());
+    args.push(prompt.into());
+    args.push("--model".into());
+    args.push(model.into());
+    let out = run_docker(args).await?;
     if !out.status.success() {
         return Err(format!(
             "claude exited {}: {}",
