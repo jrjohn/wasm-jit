@@ -441,6 +441,7 @@ let barW = colStep * 0.70;
 let gcx = mL + plotW / 2.0;
 let gcy = mT + plotH / 2.0;
 let GR = plotH * 0.44 * zoom;
+if get(25.0) > 0.0 { gcx = get(23.0); gcy = get(24.0); GR = get(25.0); }
 let dl = glon - spin;
 let lat0 = tilt;
 let cosc = sin(lat0) * sin(glat) + cos(lat0) * cos(glat) * cos(dl);
@@ -535,16 +536,16 @@ function lay(args) {
 function findGeoCols() {
   const la = COLS.findIndex(c => /緯度|^lat/i.test(c.name));
   const lo = COLS.findIndex(c => /經度|^lon|^lng/i.test(c.name));
-  return (la >= 0 && lo >= 0) ? { la, lo } : null;
+  return la >= 0 ? { la, lo } : null;      // 沒有經度 → 環模式(緯度帶是一圈,不是一點)
 }
 function geoForCats(col, cats) {
   const g = findGeoCols(); if (!g || !cats.length) return null;
   const acc = cats.map(() => ({ a: 0, o: 0, n: 0 }));
   for (let r = 0; r < NROWS; r++) {
     const k = VALUES[r * NCOLS + col] | 0;
-    if (k >= 0 && k < acc.length) { acc[k].a += VALUES[r * NCOLS + g.la]; acc[k].o += VALUES[r * NCOLS + g.lo]; acc[k].n++; }
+    if (k >= 0 && k < acc.length) { acc[k].a += VALUES[r * NCOLS + g.la]; if (g.lo >= 0) acc[k].o += VALUES[r * NCOLS + g.lo]; acc[k].n++; }
   }
-  return acc.map(v => v.n ? { lat: v.a / v.n, lon: v.o / v.n } : { lat: 0, lon: 0 });
+  return acc.map(v => v.n ? { lat: v.a / v.n, lon: g.lo >= 0 ? v.o / v.n : 0, ring: g.lo < 0 } : null);
 }
 
 // labels 來自本機類別;values 由 AI 寫的受圍籬 cell 在本機算出
@@ -577,9 +578,12 @@ function makeMorphChart(labels, values, geo, ordered) {
   const jit = new Float32Array(P * 4);
   { let s = 987; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let p = 0; p < P; p++) { jit[p*4]=rnd(); jit[p*4+1]=rnd(); jit[p*4+2]=Math.sqrt(rnd()); jit[p*4+3]=rnd()*2-1; } }
-  let spin = 0, zoom = 1, tilt = 0.30, autoSpin = true, hoverI = -1;
+  let spin = 0, zoom = 1, tilt = 0.30, autoSpin = true, hoverI = -1, sel = -1, spinT = null;
   const base = i => ({ 2: norm[i], 3: i, 4: N, 6: cum[i], 7: sum, 8: W, 9: H,
-                       17: geo ? geo[i].lat : 0, 18: geo ? geo[i].lon : 0, 20: spin, 21: zoom, 22: tilt });
+                       17: geo ? geo[i].lat : 0, 18: geo ? geo[i].lon : 0, 20: spin, 21: zoom, 22: tilt,
+                       23: gOv.x, 24: gOv.y, 25: gOv.r });
+  const gOv = { x: 0, y: 0, r: 0 };                 // 地球位置覆寫(0=用預設的大地球)
+  const RING = geo && geo.some(g => g && g.ring);   // 只有緯度 → 畫成緯度環
   const dvg = v => { const m = Math.max(...values.map(Math.abs)) || 1, t = Math.max(-1, Math.min(1, v / m));
     return t >= 0 ? `hsl(${Math.round(20 - 20 * t)}, 85%, ${Math.round(58 - 8 * t)}%)`
                   : `hsl(${Math.round(205 + 25 * t)}, 80%, 62%)`; };
@@ -588,17 +592,73 @@ function makeMorphChart(labels, values, geo, ordered) {
 
   let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t*t*(3-2*t); };
-  const pos = [];
+  const pos = [], barBox = [];
+  function drawGlobe(cx0, cy0, R, alpha, small) {
+    gOv.x = cx0; gOv.y = cy0; gOv.r = R;
+    ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
+    ctx.globalAlpha = alpha; ctx.fillStyle = '#0a1220'; ctx.fill();
+    ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
+    const mx = Math.max(...values.map(Math.abs)) || 1;
+    for (let i = 0; i < N; i++) {
+      if (!geo || !geo[i]) continue;
+      if (RING) {                                    // 緯度帶 → 畫成一圈
+        if (geo[i].lat > 900) continue;
+        ctx.beginPath(); let started = false;
+        for (let k = 0; k <= 36; k++) {
+          const lonDeg = -180 + k * 10;
+          const a = { ...base(i), 18: lonDeg, 5: 7, 19: 3 };
+          if (lay(a) < 0) { started = false; continue; }
+          const gx = lay({ ...a, 5: 5 }), gy = lay({ ...a, 5: 6 });
+          if (!started) { ctx.moveTo(gx, gy); started = true; } else ctx.lineTo(gx, gy);
+          if (k === 18) pos[i] = { x: gx, y: gy, r: 6 };
+        }
+        ctx.strokeStyle = dvg(values[i]); ctx.lineWidth = i === sel ? 3.5 : (i === hoverI ? 2.5 : 1.5);
+        ctx.globalAlpha = alpha * (i === sel ? 1 : 0.75); ctx.stroke();
+      } else {                                       // 國家 → 畫成點
+        const vis = lay({ ...base(i), 5: 7, 19: 3 });
+        if (vis < 0) { pos[i] = null; continue; }
+        const gx = lay({ ...base(i), 5: 5, 19: 3 }), gy = lay({ ...base(i), 5: 6, 19: 3 });
+        const rad = (small ? 1.6 : 2.5) + (small ? 2.4 : 4) * Math.abs(values[i]) / mx;
+        ctx.globalAlpha = alpha * (0.35 + 0.65 * Math.min(1, vis));
+        ctx.beginPath(); ctx.arc(gx, gy, i === sel ? rad + 2 : rad, 0, 6.2831853);
+        ctx.fillStyle = dvg(values[i]); ctx.fill();
+        pos[i] = { x: gx, y: gy, r: rad };
+        if (i === sel || i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      }
+    }
+    gOv.r = 0;
+    ctx.globalAlpha = alpha;
+    if (!small) {
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const rank = values.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, 10).map(p => p[1]);
+      for (const i of new Set([...rank, hoverI, sel])) {
+        if (i < 0 || !pos[i]) continue;
+        ctx.fillStyle = (i === sel || i === hoverI) ? '#fff' : '#c9d1d9';
+        ctx.fillText(`${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`, pos[i].x + pos[i].r + 3, pos[i].y);
+      }
+    } else if (sel >= 0 && pos[sel]) {
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillStyle = '#fff'; ctx.fillText(labels[sel], cx0, cy0 - R - 4);
+    }
+  }
   function crisp(L, alpha) {
     ctx.save(); ctx.globalAlpha = alpha;
     if (L === 0) {
-      ctx.textAlign = 'center'; ctx.font = '10px ui-monospace, monospace';
+      ctx.font = '10px ui-monospace, monospace';
       for (let i = 0; i < N; i++) {
         const cx = lay({ ...base(i), 5: 5, 19: 0 }), top = lay({ ...base(i), 5: 6, 19: 0 }), hw = lay({ ...base(i), 5: 7, 19: 0 });
         ctx.fillStyle = COLOR[i]; ctx.fillRect(cx - hw, top, hw * 2, (H - 74) - top);
-        ctx.fillStyle = '#c9d1d9'; ctx.textBaseline = 'bottom'; ctx.fillText(fmt(values[i]), cx, top - 4);
-        ctx.save(); ctx.translate(cx, H - 68); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
-        ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.textBaseline = 'middle'; ctx.fillText(labels[i], 0, 0); ctx.restore();
+        if (i === sel) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(cx - hw, top, hw * 2, (H - 74) - top); }
+        barBox[i] = { x: cx - hw, y: top, w: hw * 2, h: (H - 74) - top };
+        const dense = N > 34;
+        const keep = !dense || i === sel || i === hoverI || i < 3 || i === N - 1;
+        if (keep) {
+          ctx.fillStyle = i === sel ? '#fff' : '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(fmt(values[i]), cx, top - 4);
+          ctx.save(); ctx.translate(cx, H - 68); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
+          ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = i === sel ? '#fff' : '#c9d1d9'; ctx.fillText(labels[i], 0, 0); ctx.restore();
+        }
       }
     }
     if (L === 1) {
@@ -614,31 +674,17 @@ function makeMorphChart(labels, values, geo, ordered) {
           ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
       }
     }
+    if (L === 0 && geo) {                            // 長條圖右上角的連動小地球
+      const R = Math.min(96, H * 0.26);
+      drawGlobe(W - R - 18, R + 22, R, alpha * 0.95, true);
+      ctx.globalAlpha = alpha; ctx.fillStyle = '#6e7681'; ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'center'; ctx.fillText('點長條→球轉過去 · 拖球可轉 · 點球選區', W - R - 18, R * 2 + 34);
+    }
     if (L === 3) {                                   // 🌍 正射投影的地球:座標由 layout cell 算
-      const gcx = 58 + (W - 84) / 2, gcy = 34 + (H - 108) / 2, GR = (H - 108) * 0.44;
-      ctx.beginPath(); ctx.arc(gcx, gcy, GR, 0, 6.2831853);
-      ctx.fillStyle = '#0a1220'; ctx.fill(); ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
-      for (let i = 0; i < N; i++) {
-        const vis = lay({ ...base(i), 5: 7, 19: 3 });
-        if (vis < 0) continue;                       // 背面剔除
-        const gx = lay({ ...base(i), 5: 5, 19: 3 }), gy = lay({ ...base(i), 5: 6, 19: 3 });
-        ctx.globalAlpha = alpha * (0.35 + 0.65 * Math.min(1, vis));
-        const rad = 2.5 + 4 * Math.abs(values[i]) / (Math.max(...values.map(Math.abs)) || 1);
-        ctx.beginPath(); ctx.arc(gx, gy, rad, 0, 6.2831853);
-        ctx.fillStyle = dvg(values[i]); ctx.fill();
-        pos[i] = { x: gx, y: gy, r: rad };
-        if (i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
-      }
-      ctx.globalAlpha = alpha;                        // 標籤:前 10 大 + 游標指到的
-      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      const rank = values.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, 10).map(p => p[1]);
-      for (const i of new Set([...rank, hoverI])) {
-        if (i < 0 || !pos[i]) continue;
-        ctx.fillStyle = i === hoverI ? '#fff' : '#c9d1d9';
-        ctx.fillText(`${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`, pos[i].x + pos[i].r + 3, pos[i].y);
-      }
-      ctx.fillStyle = '#8b949e'; ctx.textAlign = 'center';
-      ctx.fillText('紅=偏暖 · 藍=偏冷 · 點大小=|距平| · 拖曳可轉、滾輪縮放、游標指出國名', gcx, H - 14);
+      const gcx = 58 + (W - 84) / 2, gcy = 34 + (H - 108) / 2, GR = (H - 108) * 0.44 * zoom;
+      drawGlobe(gcx, gcy, GR, alpha, false);
+      ctx.fillStyle = '#8b949e'; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
+      ctx.fillText('紅=偏暖 · 藍=偏冷 · 拖曳可轉、滾輪縮放、點選連動長條', gcx, H - 14);
     }
     if (L === 2) {
       const pts = []; for (let i = 0; i < N; i++) pts.push([lay({ ...base(i), 5: 5, 19: 2 }), lay({ ...base(i), 5: 6, 19: 2 })]);
@@ -656,7 +702,10 @@ function makeMorphChart(labels, values, geo, ordered) {
   function frame(now) {
     if (!box.isConnected) return;
     ctx.clearRect(0, 0, W, H);
-    if (autoSpin) spin += 0.0035;                    // 地球自轉(拖曳後停,交給你轉)
+    if (spinT !== null) {                             // 點了長條 → 球轉過去
+      let d = spinT - spin; while (d > Math.PI) d -= 6.2831853; while (d < -Math.PI) d += 6.2831853;
+      spin += d * 0.14; if (Math.abs(d) < 0.01) spinT = null;
+    } else if (autoSpin) spin += 0.0035;              // 沒人碰就慢慢自轉
     if (animating) { prog = Math.min(1, (now - tStart) / 1100); if (prog >= 1) { animating = false; fromL = toL; } }
     if (!animating) { crisp(toL, 1); requestAnimationFrame(frame); return; }
     const g = prog, srcA = 1 - smooth(0, .32, g), tgtA = smooth(.68, 1, g),
@@ -684,24 +733,49 @@ function makeMorphChart(labels, values, geo, ordered) {
   });
   btns[0].style.borderColor = '#58a6ff';
   // ── 地球互動:拖曳轉、滾輪縮放、游標指出國名 ──
-  let drag = null;
-  cv.style.cursor = 'grab';
-  cv.addEventListener('pointerdown', e => { if (toL !== 3) return; drag = { x: e.clientX, y: e.clientY };
-    autoSpin = false; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; });
-  cv.addEventListener('pointerup', e => { drag = null; cv.style.cursor = 'grab'; });
-  cv.addEventListener('pointermove', e => {
-    const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) * W / r.width, my = (e.clientY - r.top) * H / r.height;
-    if (drag) { spin -= (e.clientX - drag.x) * 0.006; tilt = Math.max(-1.3, Math.min(1.3, tilt + (e.clientY - drag.y) * 0.005));
-      drag = { x: e.clientX, y: e.clientY }; return; }
-    if (toL !== 3) { hoverI = -1; return; }
-    let best = -1, bd = 14 * 14;
+  const globeArea = () => {                          // 目前這個視角裡,地球在哪
+    if (toL === 3) { const R = (H - 108) * 0.44 * zoom; return { x: 58 + (W - 84) / 2, y: 34 + (H - 108) / 2, r: R }; }
+    if (toL === 0 && geo) { const R = Math.min(96, H * 0.26); return { x: W - R - 18, y: R + 22, r: R }; }
+    return null;
+  };
+  const xy = e => { const r = cv.getBoundingClientRect();
+    return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
+  const pick = (mx, my, tol) => { let b = -1, bd = tol * tol;
     for (let i = 0; i < N; i++) { const p = pos[i]; if (!p) continue;
-      const d = (p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my); if (d < bd) { bd = d; best = i; } }
-    hoverI = best;
+      const d = (p.x - mx) ** 2 + (p.y - my) ** 2; if (d < bd) { bd = d; b = i; } } return b; };
+  function select(i) {
+    if (i < 0) return; sel = i; autoSpin = false;
+    if (geo && geo[i] && geo[i].lat < 900) spinT = geo[i].lon * 0.0174533;   // 球轉到它
+  }
+  let drag = null, moved = 0;
+  cv.style.cursor = 'crosshair';
+  cv.addEventListener('pointerdown', e => {
+    const [mx, my] = xy(e), g = globeArea(); moved = 0;
+    if (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) {      // 在球上 → 準備拖
+      drag = { x: e.clientX, y: e.clientY }; autoSpin = false; spinT = null;
+      cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
+    } else if (toL === 0) {                                              // 在長條上 → 選它,球轉過去
+      for (let i = 0; i < N; i++) { const b = barBox[i];
+        if (b && mx >= b.x - 3 && mx <= b.x + b.w + 3 && my >= b.y - 12 && my <= b.y + b.h) { select(i); break; } }
+    }
+  });
+  cv.addEventListener('pointerup', e => {
+    if (drag && moved < 4) { const [mx, my] = xy(e); select(pick(mx, my, 14)); }   // 球上點一下 = 選取
+    drag = null; cv.style.cursor = 'crosshair';
+  });
+  cv.addEventListener('pointermove', e => {
+    const [mx, my] = xy(e);
+    if (drag) { moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
+      spin -= (e.clientX - drag.x) * 0.006; tilt = Math.max(-1.3, Math.min(1.3, tilt + (e.clientY - drag.y) * 0.005));
+      drag = { x: e.clientX, y: e.clientY }; return; }
+    const g = globeArea();
+    hoverI = (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) ? pick(mx, my, 12) : -1;
+    cv.style.cursor = hoverI >= 0 ? 'pointer' : 'crosshair';
   });
   cv.addEventListener('pointerleave', () => { hoverI = -1; });
-  cv.addEventListener('wheel', e => { if (toL !== 3) return; e.preventDefault();
-    zoom = Math.max(0.6, Math.min(3.2, zoom * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
+  cv.addEventListener('wheel', e => { const g = globeArea(); if (!g) return;
+    const [mx, my] = xy(e); if ((mx - g.x) ** 2 + (my - g.y) ** 2 > (g.r + 20) ** 2) return;
+    e.preventDefault(); zoom = Math.max(0.6, Math.min(3.2, zoom * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
 
   requestAnimationFrame(frame);
   return box;
@@ -813,7 +887,7 @@ const SEED_ANALYSIS = {
   cells: [{ id: 'regionMean', script:
     'let n = get(30.0);\nlet c = get(31.0);\nlet target = x;\nlet sum = 0.0;\nlet cnt = 0.0;\nlet r = 0.0;\n' +
     'while r < n {\n let region = ld(r * c + 3.0);\n if region >= target { if region <= target {\n' +
-    '  let a = ld(r * c + 5.0);\n  sum = sum + a;\n  cnt = cnt + 1.0;\n } }\n r = r + 1.0;\n}\n' +
+    '  let a = ld(r * c + 6.0);\n  sum = sum + a;\n  cnt = cnt + 1.0;\n } }\n r = r + 1.0;\n}\n' +
     'let result = 0.0;\nif cnt > 0.0 { result = sum / cnt; }\nresult' }],
   tree: { type: 'stack', children: [
     { type: 'label', text: '全球升溫:各區域平均距平(°C,1880–2025,由高到低)' },
