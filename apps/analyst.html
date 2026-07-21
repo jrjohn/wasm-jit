@@ -217,7 +217,7 @@ let compileUiCell = null;
 let COAST = [];                       // 真實海岸線(Natural Earth 110m,簡化到 ~900 點)
 let EARTH = null;                     // 地球貼圖(等距長方投影)
 async function loadEarth() {
-  const img = new Image(); img.src = '/assets/earth.jpg';
+  const img = new Image(); img.src = 'assets/earth.jpg';
   try { await img.decode(); } catch (e) { return; }
   const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
   const g = c.getContext('2d'); g.drawImage(img, 0, 0);
@@ -1141,7 +1141,7 @@ const SEED_ANALYSIS = {
 };
 async function bootTemp() {
   try {
-    const t = await (await fetch('/assets/global-temp.csv')).text();
+    const t = await (await fetch('assets/global-temp.csv')).text();
     ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
     useTempExamples();
     lastSchema = JSON.parse(JSON.stringify(SEED_ANALYSIS));
@@ -1167,7 +1167,7 @@ $('sampleCountry').onclick = async e => {
   e.stopPropagation();
   status('載入 181 國真實資料…');
   try {
-    const t = await (await fetch('/assets/country-temp.csv')).text();
+    const t = await (await fetch('assets/country-temp.csv')).text();
     ingest(t, 'country-temp.csv(OWID/Berkeley Earth + 經緯度, 1950–2025)', t.length);
     $('chips').innerHTML = COUNTRY_EX.map(x => `<span class="chip">${x}</span>`).join('');
     document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = COUNTRY_EX[i]; $('intent').focus(); });
@@ -1185,7 +1185,7 @@ $('sampleTemp').onclick = async e => {
   e.stopPropagation();
   status('抓取範例…(這份是真的 NASA GISTEMP 資料,由本機伺服器提供)');
   try {
-    const t = await (await fetch('/assets/global-temp.csv')).text();
+    const t = await (await fetch('assets/global-temp.csv')).text();
     ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
     $('chips').innerHTML = TEMP_EX.map(x => `<span class="chip">${x}</span>`).join('');
     document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = TEMP_EX[i]; $('intent').focus(); });
@@ -1213,7 +1213,7 @@ $('langbtn').onclick = async () => {
     const mod = await import('/pkg/wasm_jit.js'); await mod.default();
     compileUiCell = mod.compile_ui_cell_wasm;
     await initMorph();
-    try { COAST = await (await fetch('/assets/coast.json')).json(); } catch (e) { console.warn('coast', e); }
+    try { COAST = await (await fetch('assets/coast.json')).json(); } catch (e) { console.warn('coast', e); }
     await loadEarth();
     const booted = await bootTemp();          // 一進來就有一張真資料的圖
     if (VALUES) $('go').disabled = false;
