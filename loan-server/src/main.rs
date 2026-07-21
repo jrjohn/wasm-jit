@@ -221,6 +221,13 @@ async fn reservoirs() -> impl IntoResponse {
     Html(include_str!("../../apps/reservoirs.html"))
 }
 
+/// The fully cell-native twin: the whole shatter→fly→solidify trajectory (incl. a
+/// coherence dimension) lives in ONE behavior cell; JS is a ~15-line dumb painter that
+/// knows nothing about bar/pie/line — the same engine shape as moon4's per-tick entities.
+async fn reservoirs_native() -> impl IntoResponse {
+    Html(include_str!("../../apps/reservoirs-native.html"))
+}
+
 /// GET /api/wasm/{id} — variant 2's source: hand the browser the precompiled cell bytes.
 /// This is the "ship the .wasm to the client" deployment. The bytes run in the browser and
 /// carry no DSL, but they are downloadable and (see examples/reveal.rs) disassemble.
@@ -293,6 +300,7 @@ async fn main() {
         .route("/", get(index))
         .route("/compare", get(compare))
         .route("/reservoirs", get(reservoirs))
+        .route("/reservoirs-native", get(reservoirs_native))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
