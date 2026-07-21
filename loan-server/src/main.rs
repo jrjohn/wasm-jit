@@ -242,6 +242,151 @@ async fn reservoirs_solid() -> impl IntoResponse {
     Html(include_str!("../../apps/reservoirs-solid.html"))
 }
 
+/// The end-to-end page: type an intent, an AI grows a fenced app on the spot.
+async fn genapp() -> impl IntoResponse {
+    Html(include_str!("../../apps/genapp.html"))
+}
+
+/// Compile a UI cell without panicking — the fence check as a Result, for self-repair.
+fn try_compile_ui(src: &str) -> Result<usize, String> {
+    let prog = parser::parse(src)?;
+    let bytes = codegen::compile_with_opts(
+        &prog,
+        &UI_PARAMS,
+        &UI_IMPORTS,
+        codegen::CompileOpts { fuel: Some(200_000), memory_pages: None },
+    )?;
+    Ok(bytes.len())
+}
+
+/// The spec handed to the model. It describes the fenced DSL + the schema shape so the
+/// model's whole job is to translate an intent into a declaration — it cannot express
+/// anything outside the fence (and if it tries, the compile below rejects it).
+const GEN_SPEC: &str = r#"You translate a user's intent into a tiny UI app expressed as a JSON schema for a capability-fenced runtime. The app's compute is done by "cells" in a tiny DSL.
+
+DSL (each cell is a function `run(x) -> f64`; the LAST line is the returned number):
+- statements end with ; ; `let NAME = EXPR;`
+- arithmetic + - * / ; comparisons >= > < <= (yield 1.0 / 0.0)
+- `if COND { ... }` — there is NO else; use several guard `if`s instead
+- `while COND { ... }`
+- functions: sin(a), cos(a)
+- STATE: get(n) reads shared slot n (0..31); set(n, v) writes it. ALL cells share these 32 slots — use them to hold values and pass data between cells.
+- x is the event value (e.g. the number typed into an input, or 0 for a button).
+- Comments: // only. NO other functions exist. NO fetch, network, DOM, files — impossible here.
+- Numbers MUST be floats: write 2.0 not 2, 0.0 not 0, 1200.0 not 1200.
+
+SCHEMA (output ONLY this JSON — no markdown fences, no prose):
+{
+ "title": "short title",
+ "cells": [ {"id":"...", "script":"...DSL..."} ],
+ "wires": [ {"from":"cellId","to":"cellId"} ],   // when 'from' runs, re-run 'to'
+ "init":  [ {"cell":"cellId","arg": number} ],   // run once at start with x=arg
+ "tree": { "type":"stack", "children":[ ...nodes... ] }
+}
+NODES:
+ {"type":"stack","children":[...]}    // vertical
+ {"type":"row","children":[...]}      // horizontal
+ {"type":"label","text":"..."}
+ {"type":"input","placeholder":"...","on_input":{"cell":"id"}}   // number input; typing runs cell with x=value
+ {"type":"value","label":"...","bind":"cellId"}                  // shows cellId's latest return (2 decimals)
+ {"type":"button","text":"...","on_click":{"cell":"id"}}         // runs cell with x=0
+ {"type":"slider","min":0,"max":100,"step":1,"label":"...","on_input":{"cell":"id"}}
+
+PATTERN: an input writes its value into a slot via `set(n, x)` then returns x; each compute cell reads slots via get(n); a value node binds to a compute cell; wire every input to every compute cell that depends on it.
+
+EXAMPLE (loan calculator):
+{"title":"房貸試算","cells":[{"id":"setP","script":"set(0.0, x);\nx"},{"id":"setR","script":"set(1.0, x);\nx"},{"id":"setY","script":"set(2.0, x);\nx"},{"id":"monthly","script":"let P = get(0.0);\nlet r = get(1.0) / 1200.0;\nlet n = get(2.0) * 12.0;\nlet M = 0.0;\nif n >= 1.0 {\n if r < 0.0000001 { M = P / n; }\n if r >= 0.0000001 {\n  let pw = 1.0;\n  let i = 0.0;\n  while i < n { pw = pw * (1.0 + r); i = i + 1.0; }\n  M = P * r * pw / (pw - 1.0);\n }\n}\nM"}],"wires":[{"from":"setP","to":"monthly"},{"from":"setR","to":"monthly"},{"from":"setY","to":"monthly"}],"init":[{"cell":"setP","arg":300000},{"cell":"setR","arg":5},{"cell":"setY","arg":30}],"tree":{"type":"stack","children":[{"type":"label","text":"房貸試算"},{"type":"row","children":[{"type":"label","text":"本金"},{"type":"input","placeholder":"300000","on_input":{"cell":"setP"}}]},{"type":"row","children":[{"type":"label","text":"利率%"},{"type":"input","placeholder":"5","on_input":{"cell":"setR"}}]},{"type":"row","children":[{"type":"label","text":"年數"},{"type":"input","placeholder":"30","on_input":{"cell":"setY"}}]},{"type":"row","children":[{"type":"label","text":"月付"},{"type":"value","bind":"monthly"}]}]}}
+"#;
+
+#[derive(Deserialize)]
+struct GenReq {
+    intent: String,
+}
+
+async fn call_claude(prompt: &str) -> Result<String, String> {
+    let bin = std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "/opt/homebrew/bin/claude".into());
+    let fut = tokio::process::Command::new(&bin).arg("-p").arg(prompt).output();
+    let out = tokio::time::timeout(std::time::Duration::from_secs(120), fut)
+        .await
+        .map_err(|_| "claude 逾時(>120s)".to_string())?
+        .map_err(|e| format!("claude 啟動失敗: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("claude 退出 {}: {}", out.status, String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn extract_json(s: &str) -> String {
+    let s = s.trim();
+    match (s.find('{'), s.rfind('}')) {
+        (Some(a), Some(b)) if b > a => s[a..=b].to_string(),
+        _ => s.to_string(),
+    }
+}
+
+/// POST /api/gen — the whole loop: intent → claude -p → parse → compile-check every cell
+/// under the UI fence → on failure, feed the error back and retry (self-repair) → return
+/// the validated schema. The browser then runs it; the cells are fenced by construction.
+async fn api_gen(Json(req): Json<GenReq>) -> Response {
+    let intent = req.intent.trim().to_string();
+    if intent.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "說一句話吧"}))).into_response();
+    }
+    let mut repair = String::new();
+    let mut last_err = String::from("unknown");
+    for attempt in 1..=3u32 {
+        let prompt = format!("{GEN_SPEC}\n{repair}\nUSER INTENT: {intent}\n\nOutput the JSON now.");
+        let raw = match call_claude(&prompt).await {
+            Ok(o) => o,
+            Err(e) => {
+                last_err = e;
+                break;
+            }
+        };
+        let schema: serde_json::Value = match serde_json::from_str(&extract_json(&raw)) {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = format!("JSON 無效: {e}");
+                repair = format!("你上次的輸出不是合法 JSON({e})。只輸出合法 JSON,不要 markdown 圍欄。");
+                continue;
+            }
+        };
+        let mut errs = Vec::new();
+        let mut cells_out = Vec::new();
+        match schema["cells"].as_array() {
+            Some(cells) => {
+                for c in cells {
+                    let id = c["id"].as_str().unwrap_or("?");
+                    let src = c["script"].as_str().unwrap_or("");
+                    match try_compile_ui(src) {
+                        Ok(n) => cells_out.push(json!({"id": id, "bytes": n, "script": src})),
+                        Err(e) => errs.push(format!("cell '{id}': {e}")),
+                    }
+                }
+            }
+            None => errs.push("缺 cells 陣列".to_string()),
+        }
+        if errs.is_empty() {
+            let fence: Vec<String> = UI_IMPORTS.iter().map(|h| format!("env.{}", h.name)).collect();
+            return Json(json!({
+                "ok": true, "attempt": attempt, "intent": intent,
+                "schema": schema, "cells": cells_out, "fence": fence,
+            }))
+            .into_response();
+        }
+        last_err = errs.join("; ");
+        repair = format!(
+            "你上次的 JSON 有 cell 在受圍籬 DSL 裡編不過:\n{}\n只修正這些 cell 的 DSL(記得:浮點要寫 2.0、只有 // 註解、沒有 else 改用多個 guard if、只能用 get/set/sin/cos/ld/sd)。輸出修正後的完整 JSON。",
+            errs.join("\n")
+        );
+    }
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({"ok": false, "error": last_err})),
+    )
+        .into_response()
+}
+
 /// GET /api/wasm/{id} — variant 2's source: hand the browser the precompiled cell bytes.
 /// This is the "ship the .wasm to the client" deployment. The bytes run in the browser and
 /// carry no DSL, but they are downloadable and (see examples/reveal.rs) disassemble.
@@ -317,6 +462,8 @@ async fn main() {
         .route("/reservoirs-native", get(reservoirs_native))
         .route("/reservoirs-net", get(reservoirs_net))
         .route("/reservoirs-solid", get(reservoirs_solid))
+        .route("/genapp", get(genapp))
+        .route("/api/gen", post(api_gen))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
