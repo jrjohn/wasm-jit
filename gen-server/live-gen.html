@@ -6,11 +6,15 @@
 <title>Live generation — chat → sandboxed UI</title>
 <style>
   :root { color-scheme: dark; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 1100px;
-         margin: 1.2rem auto; padding: 0 1rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: none;
+         margin: 1.2rem auto; padding: 0 1.4rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  /* The world is drawn as a square (renderField takes min(w,h) and centres it), so a
+     wide canvas is mostly black bars. Keep the canvas square and let it take the
+     column — then the field IS the picture, at whatever size the screen allows. */
+  #cv { width: 100%; height: auto; display: block; margin: 0 auto; }
   h1 { font-size: 1.02rem; }
   .sub { font-size: .8rem; opacity: .72; }
-  .cols { display: grid; grid-template-columns: 340px 1fr; gap: 1rem; align-items: start; }
+  .cols { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 1.1rem; align-items: start; }
   @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
   .chat { border: 1px solid #30363d; border-radius: 8px; display: flex; flex-direction: column; height: 560px; }
   .msgs { flex: 1; overflow-y: auto; padding: .6rem; display: flex; flex-direction: column; gap: .5rem; }
@@ -88,7 +92,7 @@
 </head>
 <body>
 <h1>Live generation — chat with Claude (in Docker) → UI manifests instantly
-  <span style="float:right;font-weight:400;font-size:.8rem"><a href="http://127.0.0.1:8645" style="color:#58a6ff">other demos →</a></span></h1>
+  <span style="float:right;font-weight:400;font-size:.8rem"><a href="/" style="color:#58a6ff">← arcana.boo</a></span></h1>
 <p class="sub">
 The generator runs sandboxed in a container (no volumes, API egress only); the generated seed is validated by
 <b>natively compiling it on the server</b> (with self-repair retries), then manifested here as <b>fuel-metered,
@@ -2002,6 +2006,19 @@ window.__injectBadFieldCell = () => {
 
 // ---------------- draw surface ----------------
 const cv = $('cv');
+// The backing store follows the column. Square, because the field is square —
+// anything wider is black bars, anything taller wastes the fold. Capped by the
+// viewport so a wide monitor does not push the whole world below the screen.
+function sizeStage() {
+  const box = cv.parentElement;
+  const side = Math.round(Math.max(320, Math.min(box.clientWidth || 900, window.innerHeight * 0.78)));
+  if (cv.width === side && cv.height === side) return;
+  cv.width = side; cv.height = side;
+  try { if (typeof renderField === 'function' && fieldWorld) renderField(); } catch (e) {}
+}
+sizeStage();
+new ResizeObserver(sizeStage).observe(cv.parentElement);
+addEventListener('resize', sizeStage);
 let ctx = cv.getContext('2d'); // let: §25 briefly points the shared pen at an offscreen skin card
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
