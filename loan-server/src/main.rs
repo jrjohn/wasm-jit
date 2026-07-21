@@ -228,6 +228,13 @@ async fn reservoirs_native() -> impl IntoResponse {
     Html(include_str!("../../apps/reservoirs-native.html"))
 }
 
+/// Cells that sense each other: each particle writes its position to the shared field
+/// (ld/sd) and reads its neighbours', yielding on contact so they cooperatively fill the
+/// gaps into a solid bar — Indra's Net gate 7 (jewel-reflecting-jewel), made whole.
+async fn reservoirs_net() -> impl IntoResponse {
+    Html(include_str!("../../apps/reservoirs-net.html"))
+}
+
 /// GET /api/wasm/{id} — variant 2's source: hand the browser the precompiled cell bytes.
 /// This is the "ship the .wasm to the client" deployment. The bytes run in the browser and
 /// carry no DSL, but they are downloadable and (see examples/reveal.rs) disassemble.
@@ -301,6 +308,7 @@ async fn main() {
         .route("/compare", get(compare))
         .route("/reservoirs", get(reservoirs))
         .route("/reservoirs-native", get(reservoirs_native))
+        .route("/reservoirs-net", get(reservoirs_net))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
