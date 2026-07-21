@@ -11,7 +11,12 @@
   /* The world is drawn as a square (renderField takes min(w,h) and centres it), so a
      wide canvas is mostly black bars. Keep the canvas square and let it take the
      column — then the field IS the picture, at whatever size the screen allows. */
-  #cv { width: 100%; height: auto; display: block; margin: 0 auto; }
+  /* No width/height here on purpose. `width:100%` stretched the canvas to the
+     column and `height:auto` then derived the height from the square backing
+     store — so a correctly-computed 697px square was displayed at 1470px tall,
+     the CSS quietly undoing the JS. Only one of the two may own the size, and
+     it has to be the one that can measure the room left. */
+  #cv { display: block; margin: 0 auto; }
   h1 { font-size: 1.02rem; }
   .sub { font-size: .8rem; opacity: .72; }
   .cols { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 1.1rem; align-items: start; }
@@ -2039,6 +2044,7 @@ function sizeStage() {
   const side = Math.round(Math.max(320, Math.min(box.clientWidth || 900, room)));
   if (cv.width === side && cv.height === side) return;
   cv.width = side; cv.height = side;
+  cv.style.width = side + 'px'; cv.style.height = side + 'px';
   try { if (typeof renderField === 'function' && fieldWorld) renderField(); } catch (e) {}
 }
 sizeStage();
