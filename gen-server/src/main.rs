@@ -11,6 +11,7 @@
 //! the demo. Runs on :8646, fully separate from the other demos.
 
 mod auth;
+mod metrics;
 
 use axum::http::StatusCode;
 use axum::response::sse::Sse;
@@ -234,15 +235,51 @@ async fn run_docker(args: Vec<String>) -> Result<std::process::Output, String> {
 
 /// Run Claude CLI: warm path = exec into the persistent container; cold
 /// fallback = the original one-shot `docker run --rm`.
-async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
+
+/// `claude --output-format json` wraps the answer in an envelope carrying token
+/// counts, cost and timings. Take the text out and record the spend on the way
+/// past — this is the only place that knows what a generation actually cost.
+///
+/// If the envelope is not what we expect, hand back the raw output unchanged.
+/// A broken metric must never become a broken generation.
+fn unwrap_cli_json(raw: &str, user: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(raw.trim()) else {
+        return raw.to_string();
+    };
+    let Some(text) = v.get("result").and_then(|r| r.as_str()) else {
+        return raw.to_string();
+    };
+    let u = &v["usage"];
+    metrics::record(
+        "generate",
+        user,
+        serde_json::json!({
+            "ok": !v["is_error"].as_bool().unwrap_or(false),
+            "ms": v["duration_ms"].as_u64().unwrap_or(0),
+            "ttft_ms": v["ttft_ms"].as_u64().unwrap_or(0),
+            "tok_in": u["input_tokens"].as_u64().unwrap_or(0),
+            "tok_out": u["output_tokens"].as_u64().unwrap_or(0),
+            "tok_cache": u["cache_creation_input_tokens"].as_u64().unwrap_or(0)
+                + u["cache_read_input_tokens"].as_u64().unwrap_or(0),
+            "cost_usd": v["total_cost_usd"].as_f64().unwrap_or(0.0),
+            "ledger_hit": false,
+        }),
+    );
+    text.to_string()
+}
+
+async fn claude_generate(prompt: &str, model: &str, user: &str) -> Result<String, String> {
     if ensure_container().await {
         let out = run_docker(vec![
             "exec".into(), GEN_CONTAINER.into(), "claude".into(),
             "-p".into(), prompt.into(), "--model".into(), model.into(),
+            // Ask for the envelope, not just the text: it carries the token
+            // counts and cost, which is the only way the bill gets a cause.
+            "--output-format".into(), "json".into(),
         ])
         .await?;
         if out.status.success() {
-            return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+            return Ok(unwrap_cli_json(&String::from_utf8_lossy(&out.stdout), user));
         }
         eprintln!(
             "[gen] warm exec failed ({}), falling back to cold run: {}",
@@ -275,6 +312,8 @@ async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
     args.push(prompt.into());
     args.push("--model".into());
     args.push(model.into());
+    args.push("--output-format".into());
+    args.push("json".into());
     let out = run_docker(args).await?;
     if !out.status.success() {
         return Err(format!(
@@ -975,9 +1014,13 @@ struct MindReq {
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
 /// validated BY COMPILING it against the entity ABI before the browser sees it.
 async fn mind(headers: axum::http::HeaderMap, Json(req): Json<MindReq>) -> impl IntoResponse {
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
-    }
+    let who = match auth::user_from(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("mind", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
+        }
+    };
     // Measured, not assumed: for this structured heartbeat sonnet-5 is ~2×
     // FASTER than haiku-4.5 (3.5–4s vs 6.5–8s) and better — so heartbeats use
     // sonnet. The container is the only thing warm-started; the inference floor
@@ -1010,7 +1053,7 @@ Your previous reply failed validation:
 {last_err}
 Return ONLY the corrected JSON object.")
         };
-        match claude_generate(&p, &model).await {
+        match claude_generate(&p, &model, &who).await {
             Ok(raw) => match extract_json(&raw) {
                 Ok(obj) => {
                     if let Some(b) = obj.get("behavior").and_then(|b| b.as_str()) {
@@ -1118,9 +1161,14 @@ async fn widget_list() -> impl IntoResponse {
 /// may enter, identity only decides who is answerable for it.
 async fn widget_save(headers: axum::http::HeaderMap, Json(req): Json<WidgetSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
-    }
+    let who = match auth::user_from(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("widget_save", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
+        }
+    };
+    metrics::record("contribute_widget", &who, serde_json::json!({"type": req.ty}));
     if !skin_type_ok(&req.ty) {
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad widget type".to_string());
     }
@@ -1311,7 +1359,10 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
 
     let user = match auth::user_from(&headers).await {
         Ok(u) => u,
-        Err(e) => return (StatusCode::UNAUTHORIZED, plain, e),
+        Err(e) => {
+            metrics::refused("world_save", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, plain, e);
+        }
     };
 
     let name = body.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -1321,6 +1372,9 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
 
     // The fence, before the filesystem.
     if let Err(e) = validate(&body) {
+        // The fence turning something away is the invariant doing its work —
+        // recorded as evidence, not swallowed as an error string.
+        metrics::refused("world_save", &metrics::user_key(&user.sub), &e);
         return (StatusCode::UNPROCESSABLE_ENTITY, plain,
             format!("這個世界沒過圍籬,沒有存檔:{e}"));
     }
@@ -1333,6 +1387,7 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
             .and_then(|v| v["by"]["sub"].as_str().map(String::from));
         if let Some(owner) = owner {
             if owner != user.sub {
+                metrics::refused("world_save", &metrics::user_key(&user.sub), "not the owner");
                 return (StatusCode::FORBIDDEN, plain,
                     format!("'{name}' 是別人的世界 — 換個名字,或複製一份改成你自己的"));
             }
@@ -1344,23 +1399,39 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     let _ = tokio::fs::create_dir_all("worlds").await;
     let pretty = serde_json::to_string_pretty(&rec).unwrap_or_else(|_| rec.to_string());
     match tokio::fs::write(&path, pretty).await {
-        Ok(()) => (StatusCode::OK, plain, format!("saved world '{name}' — by {}", user.name)),
+        Ok(()) => {
+            metrics::record("save_world", &metrics::user_key(&user.sub), json!({"name": name}));
+            (StatusCode::OK, plain, format!("saved world '{name}' — by {}", user.name))
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, plain, format!("save failed: {e}")),
     }
 }
 
 /// Who am I, as far as this server is concerned — the page asks before it offers
 /// a save button, so a visitor is never invited to do something that will fail.
+/// The numbers, readable by anyone. Nothing here identifies a person, and a
+/// public counter is a small honesty: whoever is asked to trust the fence can
+/// also see how often it has been tried.
+async fn api_stats() -> impl IntoResponse {
+    Json(metrics::stats(30))
+}
+
 async fn whoami(headers: axum::http::HeaderMap) -> impl IntoResponse {
     match auth::user_from(&headers).await {
-        Ok(u) => Json(serde_json::json!({
+        Ok(u) => {
+            metrics::record("visit", &metrics::user_key(&u.sub), serde_json::json!({"signed_in": true}));
+            Json(serde_json::json!({
             "signed_in": true, "sub": u.sub, "name": u.name, "email": u.email,
             "open": auth::is_open(),
-        })),
-        Err(e) => Json(serde_json::json!({
+        }))
+        },
+        Err(e) => {
+            metrics::record("visit", "anon", serde_json::json!({"signed_in": false}));
+            Json(serde_json::json!({
             "signed_in": false, "reason": e, "open": auth::is_open(),
             "client_id": auth::client_id(),
-        })),
+        }))
+        },
     }
 }
 
@@ -1370,7 +1441,10 @@ async fn world_get(axum::extract::Path(name): axum::extract::Path<String>) -> im
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], String::new());
     }
     match tokio::fs::read_to_string(format!("worlds/{name}.json")).await {
-        Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "application/json")], s),
+        Ok(s) => {
+            metrics::record("load_world", "anon", serde_json::json!({"name": name}));
+            (StatusCode::OK, [(CONTENT_TYPE, "application/json")], s)
+        }
         Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
     }
 }
@@ -1401,9 +1475,14 @@ fn skin_type_ok(ty: &str) -> bool {
 /// may enter, identity only decides who is answerable for it.
 async fn skin_save(headers: axum::http::HeaderMap, Json(req): Json<SkinSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
-    }
+    let who = match auth::user_from(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("skin_save", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
+        }
+    };
+    metrics::record("contribute_skin", &who, serde_json::json!({"type": req.ty}));
     if !skin_type_ok(&req.ty) {
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad skin type".to_string());
     }
@@ -1477,9 +1556,13 @@ async fn inhabitant_behavior(axum::extract::Path(ty): axum::extract::Path<String
 /// the spend attributable and revocable. Say so plainly rather than implying that
 /// requiring a login is the same thing as limiting cost.
 async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> impl IntoResponse {
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
-    }
+    let who = match auth::user_from(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("generate", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
+        }
+    };
     let model = req
         .model
         .as_deref()
@@ -1524,7 +1607,7 @@ async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> im
                 "{prompt}\n\nYour previous reply failed validation:\n{last_err}\nPrevious reply:\n{trimmed}\nReturn ONLY the corrected JSON object."
             )
         };
-        match claude_generate(&p, &model).await {
+        match claude_generate(&p, &model, &who).await {
             Ok(text) => {
                 raw = text;
                 match extract_json(&raw).and_then(|obj| validate(&obj).map(|_| obj)) {
@@ -1600,9 +1683,13 @@ async fn send_ev(
 /// schema materialize instead of waiting out the whole generation. A ledger hit
 /// still replays instantly (a single `done` event, no LLM).
 async fn generate_stream(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> axum::response::Response {
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, e).into_response();
-    }
+    let who = match auth::user_from(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("generate_stream", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, e).into_response();
+        }
+    };
     let (tx, rx) = tokio::sync::mpsc::channel(256);
     tokio::spawn(async move { run_generation_stream(req, tx).await });
     Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default()).into_response()
@@ -1718,6 +1805,7 @@ async fn main() {
         .route("/api/widgets/{ty}", get(widget_get))
         .route("/api/worlds", get(world_list).post(world_save))
         .route("/api/whoami", get(whoami))
+        .route("/api/stats", get(api_stats))
         .route("/api/worlds/{name}", get(world_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
