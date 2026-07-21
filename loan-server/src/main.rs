@@ -498,6 +498,17 @@ If no source covers it, invent small sample numbers AND make the title say 示�
     out
 }
 
+/// The app the demo page arrives with, already built — visitors extend it by talking.
+async fn api_seed() -> impl IntoResponse {
+    match std::fs::read_to_string("apps/assets/seed_app.json") {
+        Ok(t) => (
+            [(header::CONTENT_TYPE, "application/json")],
+            t,
+        ).into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response(),
+    }
+}
+
 async fn api_words() -> impl IntoResponse {
     Json(load_words())
 }
@@ -691,6 +702,7 @@ async fn main() {
         .route("/genapp", get(genapp))
         .route("/api/gen", post(api_gen))
         .route("/api/words", get(api_words))
+        .route("/api/seed", get(api_seed))
         .route("/api/data", get(api_data_list))
         .route("/api/data/{id}", get(api_data))
         .route("/api/loan", post(api_loan))

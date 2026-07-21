@@ -111,12 +111,12 @@
 <script>
 const $ = id => document.getElementById(id);
 const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const EXAMPLES = [
-  'BMI 計算機:輸入身高 cm、體重 kg,顯示 BMI',
-  '攝氏轉華氏,輸入攝氏溫度',
-  '圓面積:輸入半徑,顯示面積與周長',
-  '小費計算機:輸入帳單金額與人數,顯示每人應付(含 10% 服務費)',
-  '複利試算:本金、年利率%、年數 → 期末金額',
+const EXAMPLES = [   // ← 都是「延伸目前這個 App」的一句話,不是另開新 App
+  '加上 prompt caching:快取讀取只算 1/10 價',
+  '加上 Batch API 半價的那一欄',
+  '改成年成本,並加上每月預算上限 500 美元,超出多少也顯示',
+  '把各模型每月成本改成圓餅,看佔比',
+  '把「模型成本列」定義成一個可重用的詞',
 ];
 $('chips').innerHTML = EXAMPLES.map(e => `<span class="chip">${e}</span>`).join('');
 document.querySelectorAll('.chip').forEach((c, i) => c.onclick = () => { $('intent').value = EXAMPLES[i]; $('intent').focus(); });
@@ -417,6 +417,22 @@ function renderWords() {
     : '<span style="color:#6e7681;font-size:.74rem">(詞庫是空的)</span>';
 }
 
+// 預載的 App:頁面一進來就是活的,訪客只要「加功能」就好。
+async function bootSeed() {
+  try {
+    const schema = await (await fetch('/api/seed')).json();
+    $('stage').innerHTML = '';
+    $('stage').appendChild(await manifestUi(schema));
+    HIST.push({ t: Date.now(), intent: '(預載)Claude 成本試算台', secs: '0.0',
+                schema, cells: [], fence: [], attempt: 0, new_words: [] });
+    saveHist(); activeIdx = HIST.length - 1; renderHist();
+    $('evidence').innerHTML = '<div class="meta">這是<b>預載的 App</b>,已經在跑。' +
+      '左邊直接跟它說話就能加功能——例如點下面任一個例子。<br>你說的每一句都會<b>改這個 App</b>,不是另開一個。</div>';
+    status('👋 頁面已經是一個做好的 App — 直接說一句話幫它加功能', 'ok');
+    return true;
+  } catch (e) { console.warn('seed', e); return false; }
+}
+
 async function gen() {
   const intent = $('intent').value.trim();
   if (!intent) { status('說一句話吧', 'err'); return; }
@@ -455,9 +471,11 @@ $('intent').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e
     compileUiCell = mod.compile_ui_cell_wasm;
     await loadWords();
     loadHist(); renderHist();
+    const seeded = !HIST.length && await bootSeed();   // 第一次來:頁面已經是一個做好的 App
+
     $('clear').onclick = () => { if (confirm('清空本機所有對話紀錄?')) { HIST = []; activeIdx = -1; saveHist(); renderHist(); } };
     $('go').disabled = false;
-    status('編譯器就緒 · 講一句「我願」,或點下面的例子,然後按「送出」（⌘/Ctrl+Enter 也行）');
+    if (!seeded) status('編譯器就緒 · 講一句「我願」,或點下面的例子,然後按「送出」（⌘/Ctrl+Enter 也行）');
   } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
 })();
 </script>

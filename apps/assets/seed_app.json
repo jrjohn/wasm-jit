@@ -1,0 +1,48 @@
+{
+  "title": "Claude 成本試算台 · 每月花多少",
+  "cells": [
+    { "id": "opus",   "script": "// Opus 4.8  $5 / $25 per 1M tokens\nlet cin = get(0.0) / 1000000.0 * 5.0;\nlet cout = get(1.0) / 1000000.0 * 25.0;\n(cin + cout) * get(2.0) * 30.0" },
+    { "id": "sonnet", "script": "// Sonnet 5  $3 / $15 per 1M tokens\nlet cin = get(0.0) / 1000000.0 * 3.0;\nlet cout = get(1.0) / 1000000.0 * 15.0;\n(cin + cout) * get(2.0) * 30.0" },
+    { "id": "haiku",  "script": "// Haiku 4.5  $1 / $5 per 1M tokens\nlet cin = get(0.0) / 1000000.0 * 1.0;\nlet cout = get(1.0) / 1000000.0 * 5.0;\n(cin + cout) * get(2.0) * 30.0" },
+    { "id": "fable",  "script": "// Fable 5  $10 / $50 per 1M tokens\nlet cin = get(0.0) / 1000000.0 * 10.0;\nlet cout = get(1.0) / 1000000.0 * 50.0;\n(cin + cout) * get(2.0) * 30.0" },
+    { "id": "perCallSonnet", "script": "let cin = get(0.0) / 1000000.0 * 3.0;\nlet cout = get(1.0) / 1000000.0 * 15.0;\ncin + cout" }
+  ],
+  "wires": [
+    { "from": "tin.set",   "to": "opus" }, { "from": "tin.set",   "to": "sonnet" },
+    { "from": "tin.set",   "to": "haiku" }, { "from": "tin.set",  "to": "fable" },
+    { "from": "tin.set",   "to": "perCallSonnet" },
+    { "from": "tout.set",  "to": "opus" }, { "from": "tout.set",  "to": "sonnet" },
+    { "from": "tout.set",  "to": "haiku" }, { "from": "tout.set", "to": "fable" },
+    { "from": "tout.set",  "to": "perCallSonnet" },
+    { "from": "calls.set", "to": "opus" }, { "from": "calls.set", "to": "sonnet" },
+    { "from": "calls.set", "to": "haiku" }, { "from": "calls.set","to": "fable" }
+  ],
+  "init": [
+    { "cell": "tin.set", "arg": 2000 },
+    { "cell": "tout.set", "arg": 800 },
+    { "cell": "calls.set", "arg": 500 }
+  ],
+  "tree": {
+    "type": "stack",
+    "children": [
+      { "type": "label", "text": "Claude 成本試算台 · 每月花多少" },
+      { "type": "word", "name": "input_row", "id": "tin",
+        "args": { "label": "每次輸入 tokens", "slot": "0.0", "placeholder": "2000" } },
+      { "type": "word", "name": "input_row", "id": "tout",
+        "args": { "label": "每次輸出 tokens", "slot": "1.0", "placeholder": "800" } },
+      { "type": "word", "name": "input_row", "id": "calls",
+        "args": { "label": "每天呼叫次數", "slot": "2.0", "placeholder": "500" } },
+      { "type": "label", "text": "── 每月成本 (USD, 以 30 天計) ──" },
+      { "type": "bar", "slices": [
+        { "label": "Opus 4.8", "bind": "opus" },
+        { "label": "Sonnet 5", "bind": "sonnet" },
+        { "label": "Haiku 4.5", "bind": "haiku" },
+        { "label": "Fable 5", "bind": "fable" }
+      ] },
+      { "type": "word", "name": "stat_row", "id": "s1",
+        "args": { "label": "Sonnet 5 每次呼叫 $", "bind": "perCallSonnet" } },
+      { "type": "word", "name": "stat_row", "id": "s2",
+        "args": { "label": "Sonnet 5 每月 $", "bind": "sonnet" } }
+    ]
+  }
+}
