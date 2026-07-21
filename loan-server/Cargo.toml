@@ -10,6 +10,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "proces
 tower-http = { version = "0.6", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# host-side fetch of ALLOW-LISTED data sources. The cell never gets this — the host
+# fetches, feeds the numbers into slots, and the cell only reads them. Reach unchanged.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # the native pure compiler (parser + codegen + the UI capability fence) — no wasm-bindgen.
 # same crate, same UI_IMPORTS the browser uses, so client and server mint byte-identical cells.
 wasm-jit = { path = "..", default-features = false }

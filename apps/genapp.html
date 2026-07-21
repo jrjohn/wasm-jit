@@ -26,8 +26,21 @@
   .chip:hover { border-color: #58a6ff66; color: #e6edf3; }
   .status { font-size: .8rem; color: #8b949e; margin: .8rem 0; min-height: 1.2em; }
   .status.err { color: #f85149; } .status.ok { color: #7ee787; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }
-  @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+  .cols { display: grid; grid-template-columns: 370px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .rcol { display: flex; flex-direction: column; gap: 1rem; }
+  .chatcol { display: flex; flex-direction: column; height: 660px; padding: .9rem 1rem; }
+  .msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: .45rem;
+          margin-bottom: .6rem; padding-right: .2rem; }
+  .msg { border: 1px solid #21262d; border-left: 3px solid #30363d; border-radius: 8px;
+         padding: .4rem .6rem; cursor: pointer; background: #0b0f14; transition: border-color .12s; }
+  .msg:hover { border-color: #58a6ff55; }
+  .msg.on { border-left-color: #58a6ff; background: #0d1520; }
+  .msg .mt { font-size: .66rem; color: #6e7681; font-variant-numeric: tabular-nums; }
+  .msg .mi { font-size: .8rem; color: #c9d1d9; margin-top: .1rem; word-break: break-word; }
+  .msg .mn { font-size: .68rem; color: #7ee787; margin-top: .1rem; }
+  .clr { font-size: .66rem; color: #6e7681; cursor: pointer; border: none; background: none; padding: 0; }
+  .clr:hover { color: #f85149; }
   .panel { border: 1px solid #30363d; border-radius: 14px; background: #0f141a; padding: 1.1rem 1.2rem; min-height: 200px; }
   .phead { font-size: .72rem; color: #6e7681; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 .8rem; }
   /* grown-app widgets */
@@ -45,6 +58,7 @@
   .w-btn { font: inherit; font-size: .82rem; padding: .4rem .9rem; border-radius: 8px; border: 1px solid #58a6ff33;
            background: linear-gradient(180deg,#2a7bff,#1a63d8); color: #fff; cursor: pointer; }
   .w-slider { width: 200px; }
+  #stage canvas { max-width: 100%; height: auto; }
   /* evidence */
   .meta { font-size: .74rem; color: #8b949e; margin-bottom: .7rem; }
   .meta b { color: #c9d1d9; }
@@ -65,26 +79,34 @@
     瀏覽器<b>當場把它跑成 App</b>。每個 cell 只碰得到 <code>get set sin cos ld sd</code>——想 <code>fetch</code>/碰網路就編譯期死。
     <b>你敢當場跑 AI 剛吐的東西,正因為它出不了圍籬。</b></p>
 
-  <div class="bar">
-    <textarea id="intent" placeholder="例如:一個 BMI 計算機,輸入身高(cm)和體重(kg),顯示 BMI"></textarea>
-    <button id="go" disabled>長出來</button>
-  </div>
-  <div class="chips" id="chips"></div>
   <div style="font-size:.72rem;color:#6e7681;margin:.7rem 0 .25rem">▸ 詞庫(生成一次,之後大家都能用)</div>
   <div class="chips" id="words"></div>
-  <div class="status" id="status">載入編譯器…</div>
 
-  <div class="cols">
-    <div class="panel">
-      <p class="phead">▸ 長出來的 App(活的,可互動)</p>
-      <div id="stage"><span style="color:#6e7681;font-size:.8rem">還沒生成</span></div>
+  <div class="cols" style="margin-top:1rem">
+    <div class="panel chatcol">
+      <p class="phead" style="display:flex;justify-content:space-between;align-items:center">
+        <span>▸ 對話紀錄(存本機 · 往上捲看舊的)</span>
+        <button class="clr" id="clear">清空</button>
+      </p>
+      <div class="msgs" id="msgs"></div>
+      <div class="bar">
+        <textarea id="intent" placeholder="講一句「我願」…(⌘/Ctrl+Enter 送出)"></textarea>
+        <button id="go" disabled>長出來</button>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="status" id="status">載入編譯器…</div>
     </div>
-    <div class="panel">
-      <p class="phead">▸ 生成證據:AI 寫的 cell(受圍籬)</p>
-      <div id="evidence"><span style="color:#6e7681;font-size:.8rem">生成後這裡會顯示 AI 寫的每一支 cell 原始碼 + 圍籬收據</span></div>
+    <div class="rcol">
+      <div class="panel">
+        <p class="phead">▸ 長出來的 APP(活的,可互動)</p>
+        <div id="stage"><span style="color:#6e7681;font-size:.8rem">還沒生成</span></div>
+      </div>
+      <div class="panel">
+        <p class="phead">▸ 生成證據:AI 寫的 CELL(受圍籬)</p>
+        <div id="evidence"><span style="color:#6e7681;font-size:.8rem">生成後這裡會顯示 AI 寫的每一支 cell 原始碼 + 圍籬收據</span></div>
+      </div>
     </div>
   </div>
-</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -106,7 +128,21 @@ let compileUiCell = null;
 // ── 最小「受圍籬 UI runtime」:schema → 活的 App。cell 全編成 wasm,只跑在這 6 個函式的圍籬裡 ──
 async function manifestUi(schema) {
   schema = expandWords(schema, WORDS);   // 詞庫展開 → 一律變回基底節點
+  // host 代抓 App 宣告到的真實資料源(白名單)。cell 沒有 fetch,只會從 coll 讀到數字。
+  const need = new Set();
+  JSON.stringify(schema).replace(/"from"\s*:\s*"([\w-]+)"/g, (m, k) => { need.add(k); return m; });
+  for (const d of (schema.data || [])) if (d && d.source) need.add(d.source);
+  for (const id of need) { try { await loadData(id); } catch (e) { console.warn(e); } }
   const slots = new Float64Array(32), coll = new Float64Array(4096);
+  // 把第一個資料源的數值灌進 collection store(cell 用 ld(i) 取,搭配 repeat 就是表格)
+  for (const id of need) {
+    const d = DATA[id]; if (!d) continue;
+    const fld = ((schema.data || []).find(x => x.source === id) || {}).field || d.fields[0];
+    const vals = (d.values || {})[fld] || [];
+    for (let i = 0; i < vals.length && i < 4096; i++) coll[i] = +vals[i] || 0;
+    slots[31] = vals.length;   // 筆數放 slot 31,cell 可用 get(31.0) 取
+    break;
+  }
   const wrap = i => ((i | 0) % 4096 + 4096) % 4096;
   const imports = { env: {
     sin: Math.sin, cos: Math.cos,
@@ -130,7 +166,7 @@ async function manifestUi(schema) {
       if (b.arg !== undefined) run(b.id, b.arg);        // per-index cell call (repeat / table rows)
       const v = outputs[b.id]; b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v);
     }
-    for (const ch of charts) drawChart(ch, ch.slices.map(s => ({ label: s.label, value: outputs[s.bind] || 0, color: s.color })));
+    for (const ch of charts) drawChart(ch, ch.slices.map(s => ({ label: s.label, value: s.fixed ? s.value : (outputs[s.bind] || 0), color: s.color })));
   };
   const act = (cellId, x) => { budget = 128; fire(cellId, x); refresh(); };
 
@@ -145,6 +181,13 @@ async function manifestUi(schema) {
   return root;
 }
 
+const DATA = {};  // 真實資料集(host 從白名單抓來的),cell 永遠不碰網路
+async function loadData(id) {
+  if (DATA[id]) return DATA[id];
+  const r = await fetch('/api/data/' + encodeURIComponent(id));
+  if (!r.ok) throw new Error('資料來源 ' + id + ' 取得失敗');
+  DATA[id] = await r.json(); return DATA[id];
+}
 let WORDS = {};   // 詞庫:name → 詞的定義(從 /api/words 取,生成時也會回傳)
 
 function subIndex(node, i) { return JSON.parse(JSON.stringify(node).replace(/\$i\b/g, String(i))); }
@@ -238,15 +281,35 @@ function build(node, act, binds, charts) {
     s.min = node.min ?? 0; s.max = node.max ?? 100; s.step = node.step ?? 1; s.value = node.min ?? 0;
     const cell = (node.on_input || {}).cell; s.addEventListener('input', () => act(cell, +s.value)); w.appendChild(s); return w;
   }
-  if (t === 'pie' || t === 'bar') {                 // NEW primitive: a chart the host draws from cell-bound slices
-    const LW = 300, LH = 240, dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (t === 'pie' || t === 'bar') {                 // NEW primitive: a chart the host draws (slices from cells OR from a real data source)
+    let slices, cap = '';
+    if (node.from && DATA[node.from]) {                    // ← 綁真實資料源
+      const d = DATA[node.from], fld = node.field || d.fields[0];
+      const vals = (d.values || {})[fld] || [];
+      let rows = (d.labels || []).map((l, i) => ({ label: l, value: +vals[i] || 0 }));
+      if (node.sort !== 'none') rows.sort((a, b) => b.value - a.value);
+      const top = +node.top || 0; if (top > 0) rows = rows.slice(0, top);
+      slices = rows.map((r, i) => ({ label: r.label, value: r.value, fixed: true,
+        color: `hsl(${Math.round(i / Math.max(1, rows.length) * 360)}, 72%, 60%)` }));
+      cap = `資料:${(d.source || '').replace(/^https?:\/\//, '').split('/')[0]} · ${d.title || ''} · 更新 ${d.updated || '?'}`;
+    } else {
+      const sls = (node.slices || []);
+      slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind,
+        color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
+    }
+    const LW = t === 'bar' ? Math.min(680, Math.max(300, slices.length * 30)) : 300;
+    const LH = t === 'bar' ? 260 : 240;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
     const cv = document.createElement('canvas');
     cv.width = LW * dpr; cv.height = LH * dpr; cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
     cv.getContext('2d').scale(dpr, dpr);
-    const sls = (node.slices || []);
-    const slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind, color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
     charts.push({ cv, kind: t, slices, LW, LH });
-    return cv;
+    if (!cap) return cv;
+    const box = document.createElement('div');
+    box.appendChild(cv);
+    const c = document.createElement('div');
+    c.style.cssText = 'font-size:.66rem;color:#6e7681;margin-top:.3rem'; c.textContent = cap;
+    box.appendChild(c); return box;
   }
   const p = document.createElement('div'); p.className = 'w-label'; p.style.opacity = .5; p.textContent = '[' + t + ']'; return p;
 }
@@ -275,14 +338,24 @@ function drawChart(ch, slices) {
     let ly = H / 2 - slices.length * 8;
     for (const s of slices) { ctx.fillStyle = s.color; ctx.fillRect(W * 0.84, ly - 5, 10, 10); ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, W * 0.84 + 15, ly); ly += 18; }
   } else {
-    const n = slices.length, mL = 8, mB = 22, plotW = W - mL - 8, plotH = H - 16 - mB, base = H - mB;
-    const max = Math.max(1, ...slices.map(s => s.value)), bw = plotW / n * 0.66;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.font = '10px ui-monospace, monospace';
+    const n = slices.length, crowded = n > 8;
+    const mL = 8, mB = crowded ? 74 : 22, plotW = W - mL - 8, plotH = H - 18 - mB, base = H - mB;
+    const max = Math.max(1, ...slices.map(s => s.value)), bw = plotW / n * 0.72;
+    ctx.font = '10px ui-monospace, monospace';
     slices.forEach((s, i) => {
       const cx = mL + (i + 0.5) * plotW / n, h = Math.max(0, s.value) / max * plotH;
       ctx.fillStyle = s.color; ctx.fillRect(cx - bw / 2, base - h, bw, h);
-      ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, cx, base + 4);
-      ctx.fillText(fmt(s.value), cx, base - h - 13);
+      if (n <= 14) {                                   // 值:太擠就不畫
+        ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(fmt(s.value), cx, base - h - 13);
+      }
+      ctx.fillStyle = '#c9d1d9';
+      if (crowded) {                                   // 名稱:擠就轉 55°
+        ctx.save(); ctx.translate(cx, base + 5); ctx.rotate(-Math.PI * 55 / 180);
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(s.label, 0, 0); ctx.restore();
+      } else {
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(s.label, cx, base + 4);
+      }
     });
   }
 }
@@ -295,6 +368,38 @@ function renderEvidence(data, dt) {
     `<div class="meta"><b>${data.schema.title || '(untitled)'}</b> · 第 <b>${data.attempt}</b> 次過關 · ${dt}s · ${(data.cells || []).length} 支 cell</div>` +
     cells +
     `<div class="fence">圍籬:每支 cell 只能 import <code>${(data.fence || []).join(', ')}</code> —— 想 fetch/碰網路,編譯期就死。</div>`;
+}
+
+// ── 對話紀錄:存 localStorage(cookie 只有 ~4KB,放不下 schema)。存的是 schema,
+//    所以重開舊的是「重新 manifest」,0 秒、不用再叫 Claude、不花 API。 ──
+const HKEY = 'genapp.history.v1';
+let HIST = [], activeIdx = -1;
+function loadHist() { try { HIST = JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (e) { HIST = []; } }
+function saveHist() {
+  try { HIST = HIST.slice(-40); localStorage.setItem(HKEY, JSON.stringify(HIST)); }
+  catch (e) { HIST = HIST.slice(-12); try { localStorage.setItem(HKEY, JSON.stringify(HIST)); } catch (_) {} }
+}
+const tstr = t => new Date(t).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+function renderHist() {
+  const el = $('msgs');
+  if (!HIST.length) { el.innerHTML = '<div style="color:#6e7681;font-size:.78rem;padding:.4rem">還沒有紀錄 — 講一句試試 👇</div>'; return; }
+  el.innerHTML = HIST.map((h, i) => `<div class="msg${i === activeIdx ? ' on' : ''}" data-i="${i}">
+      <div class="mt">${tstr(h.t)} · ${h.secs}s · ${(h.cells || []).length} cells</div>
+      <div class="mi">${String(h.intent).replace(/</g, '&lt;')}</div>
+      ${h.new_words && h.new_words.length ? `<div class="mn">+ 新詞 ${h.new_words.join(', ')}</div>` : ''}
+    </div>`).join('');
+  el.querySelectorAll('.msg').forEach(m => m.onclick = () => openEntry(+m.dataset.i));
+  el.scrollTop = el.scrollHeight;
+}
+async function openEntry(i) {
+  const h = HIST[i]; if (!h) return;
+  activeIdx = i; renderHist();
+  try {
+    $('stage').innerHTML = '';
+    $('stage').appendChild(await manifestUi(h.schema));
+    renderEvidence({ schema: h.schema, cells: h.cells, fence: h.fence, attempt: h.attempt }, h.secs);
+    status(`↺ 重開 ${tstr(h.t)} 生成的那個(直接跑存下來的 schema,沒有重生)`, 'ok');
+  } catch (e) { status('✗ 重開失敗:' + e, 'err'); }
 }
 
 async function loadWords() {
@@ -330,6 +435,9 @@ async function gen() {
     $('stage').innerHTML = '';
     $('stage').appendChild(await manifestUi(data.schema));
     renderEvidence(data, dt);
+    HIST.push({ t: Date.now(), intent, secs: dt, schema: data.schema, cells: data.cells,
+                fence: data.fence, attempt: data.attempt, new_words: data.new_words || [] });
+    saveHist(); activeIdx = HIST.length - 1; renderHist();
     status(`✓ 長出來了(${dt}s,第 ${data.attempt} 次過關)——去左邊玩玩它`, 'ok');
   } catch (e) { status('✗ 渲染錯誤:' + e, 'err'); console.error(e); }
   $('go').disabled = false;
@@ -342,6 +450,8 @@ $('intent').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e
     const mod = await import('/pkg/wasm_jit.js'); await mod.default();
     compileUiCell = mod.compile_ui_cell_wasm;
     await loadWords();
+    loadHist(); renderHist();
+    $('clear').onclick = () => { if (confirm('清空本機所有對話紀錄?')) { HIST = []; activeIdx = -1; saveHist(); renderHist(); } };
     $('go').disabled = false;
     status('編譯器就緒 · 講一句「我願」,或點下面的例子,然後按「長出來」（⌘/Ctrl+Enter 也行）');
   } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }

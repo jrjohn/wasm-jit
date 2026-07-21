@@ -306,6 +306,80 @@ EXAMPLE (loan calculator):
 {"title":"房貸試算","cells":[{"id":"setP","script":"set(0.0, x);\nx"},{"id":"setR","script":"set(1.0, x);\nx"},{"id":"setY","script":"set(2.0, x);\nx"},{"id":"monthly","script":"let P = get(0.0);\nlet r = get(1.0) / 1200.0;\nlet n = get(2.0) * 12.0;\nlet M = 0.0;\nif n >= 1.0 {\n if r < 0.0000001 { M = P / n; }\n if r >= 0.0000001 {\n  let pw = 1.0;\n  let i = 0.0;\n  while i < n { pw = pw * (1.0 + r); i = i + 1.0; }\n  M = P * r * pw / (pw - 1.0);\n }\n}\nM"}],"wires":[{"from":"setP","to":"monthly"},{"from":"setR","to":"monthly"},{"from":"setY","to":"monthly"}],"init":[{"cell":"setP","arg":300000},{"cell":"setR","arg":5},{"cell":"setY","arg":30}],"tree":{"type":"stack","children":[{"type":"label","text":"房貸試算"},{"type":"row","children":[{"type":"label","text":"本金"},{"type":"input","placeholder":"300000","on_input":{"cell":"setP"}}]},{"type":"row","children":[{"type":"label","text":"利率%"},{"type":"input","placeholder":"5","on_input":{"cell":"setR"}}]},{"type":"row","children":[{"type":"label","text":"年數"},{"type":"input","placeholder":"30","on_input":{"cell":"setY"}}]},{"type":"row","children":[{"type":"label","text":"月付"},{"type":"value","bind":"monthly"}]}]}}
 "#;
 
+
+// ── 真實資料:白名單 + host 代抓 ────────────────────────────────────────────────
+// 這是第三層(擴 reach)唯一被允許的形狀:**cell 永遠沒有 fetch**。host 只從這張
+// 白名單抓,正規化成 {labels, values},再餵進 collection store,cell 只 ld() 讀。
+// 於是 App 有了真資料,而 cell 的觸及範圍一格都沒有變大。
+const DATA_SOURCES: [(&str, &str, &str); 1] = [(
+    "reservoirs",
+    "台灣水庫即時水情(21 座):percentage=蓄水率%、volume=蓄水量(萬m³)、inflow=日進流量",
+    "https://water.taiwanstat.com/data/data.json",
+)];
+
+static DATA_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, serde_json::Value)>>> =
+    std::sync::OnceLock::new();
+
+async fn api_data_list() -> impl IntoResponse {
+    Json(
+        DATA_SOURCES.iter()
+            .map(|(id, desc, url)| json!({"id": id, "desc": desc, "url": url}))
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// GET /api/data/{id} — host fetches an allow-listed source and returns it normalised.
+async fn api_data(Path(id): Path<String>) -> Response {
+    let Some((_, _desc, url)) = DATA_SOURCES.iter().find(|(i, _, _)| *i == id) else {
+        return (StatusCode::NOT_FOUND, Json(json!({"error": "此來源不在白名單"}))).into_response();
+    };
+    let cache = DATA_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    if let Ok(c) = cache.lock() {
+        if let Some((t, v)) = c.get(&id) {
+            if t.elapsed() < std::time::Duration::from_secs(300) {
+                return Json(v.clone()).into_response();
+            }
+        }
+    }
+    let raw: serde_json::Value = match reqwest::Client::new()
+        .get(*url)
+        .header("User-Agent", "wasm-jit-genapp/0.1")
+        .timeout(std::time::Duration::from_secs(20))
+        .send().await
+    {
+        Ok(r) => match r.json().await { Ok(j) => j, Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({"error": format!("來源回應不是 JSON: {e}")}))).into_response() },
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(json!({"error": format!("抓取失敗: {e}")}))).into_response(),
+    };
+    let out = normalise_reservoirs(&raw, url);
+    if let Ok(mut c) = cache.lock() { c.insert(id.clone(), (std::time::Instant::now(), out.clone())); }
+    Json(out).into_response()
+}
+
+/// upstream is {"石門水庫": {name, percentage, volumn, baseAvailable, daliyInflow, updateAt}, ...}
+fn normalise_reservoirs(raw: &serde_json::Value, url: &str) -> serde_json::Value {
+    let num = |v: &serde_json::Value| -> f64 {
+        v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok())).unwrap_or(0.0)
+    };
+    let (mut labels, mut pct, mut vol, mut inflow) = (vec![], vec![], vec![], vec![]);
+    let mut updated = String::new();
+    if let Some(map) = raw.as_object() {
+        for (k, v) in map {
+            labels.push(v["name"].as_str().unwrap_or(k).to_string());
+            pct.push(num(&v["percentage"]));
+            vol.push(num(&v["volumn"]));
+            inflow.push(num(&v["daliyInflow"]));
+            if updated.is_empty() { updated = v["updateAt"].as_str().unwrap_or("").to_string(); }
+        }
+    }
+    json!({
+        "id": "reservoirs", "title": "台灣水庫即時水情",
+        "source": url, "updated": updated, "count": labels.len(),
+        "fields": ["percentage", "volume", "inflow"],
+        "labels": labels,
+        "values": { "percentage": pct, "volume": vol, "inflow": inflow }
+    })
+}
+
 #[derive(Deserialize)]
 struct GenReq {
     intent: String,
@@ -374,6 +448,23 @@ DEFINE a new word by adding a top-level "define_words": [{"name":"...","desc":".
     out
 }
 
+/// Tell the model which REAL data sources the host can fetch on its behalf.
+/// The cell still has no network — it only ever reads numbers the host already placed.
+fn data_section() -> String {
+    let mut out = String::from("\nREAL DATA SOURCES (host-fetched, allow-listed — the cell itself still has NO network):\n");
+    for (id, desc, _url) in DATA_SOURCES.iter() {
+        out.push_str(&format!("- \"{id}\" — {desc}\n"));
+    }
+    out.push_str(r#"USE real data in a chart:  {"type":"bar","from":"reservoirs","field":"percentage","top":10}
+   ("from" = source id, "field" = which series, "top" = keep the N largest, sorted desc by default.)
+   The host also loads that source's numbers into the collection store, so cells can read them with ld(i),
+   and the row count is in slot 31 (get(31.0)) — e.g. a table via {"type":"repeat","count":N,...} + {"id":"at","script":"ld(x)"}.
+WHEN the user asks about real-world facts covered by a source above, USE the source — do NOT invent numbers.
+If no source covers it, invent small sample numbers AND make the title say 示意.
+"#);
+    out
+}
+
 async fn api_words() -> impl IntoResponse {
     Json(load_words())
 }
@@ -416,7 +507,7 @@ async fn api_gen(Json(req): Json<GenReq>) -> Response {
     let mut repair = String::new();
     let mut last_err = String::from("unknown");
     for attempt in 1..=3u32 {
-        let prompt = format!("{GEN_SPEC}\n{wsec}\n{repair}\nUSER INTENT: {intent}\n\nOutput the JSON now.");
+        let prompt = format!("{GEN_SPEC}\n{}\n{wsec}\n{repair}\nUSER INTENT: {intent}\n\nOutput the JSON now.", data_section());
         let raw = match call_claude(&prompt).await {
             Ok(o) => o,
             Err(e) => {
@@ -565,6 +656,8 @@ async fn main() {
         .route("/genapp", get(genapp))
         .route("/api/gen", post(api_gen))
         .route("/api/words", get(api_words))
+        .route("/api/data", get(api_data_list))
+        .route("/api/data/{id}", get(api_data))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
