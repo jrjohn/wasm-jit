@@ -16,3 +16,8 @@ wasm-jit = { path = "..", default-features = false }
 # offers EXACTLY the 6 UI host functions — a cell that reached for anything else could not
 # have compiled, and could not link here either.
 wasmi = "0.40"
+
+[dev-dependencies]
+# only for `examples/reveal.rs`: disassemble a compiled cell to show that shipping the
+# .wasm to the client obscures the logic but does not hide it.
+wasmparser = "0.252.0"

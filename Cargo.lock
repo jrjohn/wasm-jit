@@ -1189,6 +1189,7 @@ dependencies = [
  "tokio",
  "wasm-jit",
  "wasmi",
+ "wasmparser 0.252.0",
 ]
 
 [[package]]
