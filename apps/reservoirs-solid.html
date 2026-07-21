@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣水庫 · 中間填色·四邊成線 · cell 宣告圖元 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.06rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 78ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
+  .stage { border: 1px solid #30363d; border-radius: 14px; background: #0b0f14; padding: .5rem; box-shadow: 0 10px 40px #0006; }
+  canvas { display: block; width: 100%; max-width: 960px; margin: 0 auto; border-radius: 10px; }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .9rem 0 .3rem; }
+  button { font: inherit; font-size: .82rem; padding: .42rem .9rem; border-radius: 999px; border: 1px solid #30363d;
+           background: #161b22; color: #c9d1d9; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+  button:hover { border-color: #58a6ff66; color: #e6edf3; }
+  button.on { background: #1f6feb33; border-color: #58a6ff; color: #cae2ff; }
+  .spacer { flex: 1; }
+  .toggle { font-size: .76rem; color: #8b949e; display: inline-flex; gap: .4rem; align-items: center; cursor: pointer; user-select: none; }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-top: .9rem; font-size: .74rem; }
+  .lg { display: inline-flex; align-items: center; gap: .35rem; color: #b9c2cc; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .lg b { color: #e6edf3; font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 1.2rem; font-size: .74rem; color: #8b949e; border-top: 1px solid #21262d; padding-top: .9rem; }
+  .foot b { color: #c9d1d9; }
+  .tag { font-size: .66rem; color: #d29922; border: 1px solid #d2992244; background: #d299221a; border-radius: 999px; padding: .1rem .5rem; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>台灣水庫 · 中間填色·四邊成線 <span class="tag">示意資料</span></h1>
+  <p class="lede">空隙不是「合作」的問題,是<b>圖元</b>的問題——點永遠鋪不滿高瘦的長條。改用更好的圖元:一支 cell 宣告
+    「<b>我是一片填色</b>」(中間填色)+「<b>我是四條邊</b>」(四邊成線),就是一根<b>真的實心長條</b>,不必幾千顆點。
+    這就是本專案「<b>host 給圖元、cell 組合</b>」的老路(moon4 的皮有 disc/hsl;點只是最窮的圖元)。
+    <b>靜止=cell 宣告的實心圖;一切換,實心才碎成粒子飛</b>——碎化→飛→凝實依舊。
+    <a href="/reservoirs-net">← 珠珠互映(點·相讓)版</a> 對照。</p>
+
+  <div class="stage"><canvas id="cv"></canvas></div>
+
+  <div class="controls">
+    <button id="b-bar" class="on">長條 Bar</button>
+    <button id="b-pie">圓餅 Pie</button>
+    <button id="b-line">折線 Line</button>
+    <div class="spacer"></div>
+    <label class="toggle"><input type="checkbox" id="auto"> 自動輪播</label>
+  </div>
+  <div class="legend" id="legend"></div>
+  <p class="foot" id="foot">載入中…</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const RES = [
+  { name: '石門', v: 0.62 }, { name: '新山', v: 0.55 }, { name: '寶山', v: 0.70 },
+  { name: '寶二', v: 0.48 }, { name: '永和山', v: 0.58 }, { name: '鯉魚潭', v: 0.44 },
+  { name: '德基', v: 0.81 }, { name: '霧社', v: 0.66 }, { name: '日月潭', v: 0.88 },
+  { name: '曾文', v: 0.40 }, { name: '烏山頭', v: 0.52 }, { name: '南化', v: 0.63 },
+];
+const N = RES.length, K = 42, P = N * K, CW = 960, CH = 560;
+const COLORS = RES.map((_, i) => `hsl(${Math.round(i / N * 360)}, 72%, 62%)`);
+
+// ── 一支 cell:axis 0/1/2 = 粒子 x/y/凝聚度(morph 用);axis 5..9 = 宣告靜止圖元的參數 ──
+// 中間填色 / 四邊成線,都是同一支 cell 對不同 axis 的宣告。
+const CELL = `
+let fromL = get(0.0);
+let toL = get(1.0);
+let val = get(2.0);
+let i = get(3.0);
+let N = get(4.0);
+let axis = get(5.0);
+let cum = get(6.0);
+let sum = get(7.0);
+let W = get(8.0);
+let H = get(9.0);
+let pu = get(10.0);
+let pRect = get(11.0);
+let pWedge = get(12.0);
+let prog = get(13.0);
+let curveAmp = get(14.0);
+let nextX = get(15.0);
+let nextY = get(16.0);
+let shapeL = get(19.0);
+
+let mL = 64.0;
+let mR = 34.0;
+let mT = 46.0;
+let mB = 70.0;
+let plotW = W - mL - mR;
+let plotH = H - mT - mB;
+let baseline = H - mB;
+let colStep = plotW / N;
+let cx = mL + (i + 0.5) * colStep;
+let ccx = mL + plotW / 2.0;
+let ccy = mT + plotH / 2.0;
+let RR = plotH * 0.46;
+let barW = colStep * 0.74;
+let a0 = cum / sum * 6.2831853 - 1.5707963;
+let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
+let topY = baseline - val * plotH;
+
+let out = 0.0;
+
+// ── 靜止圖元宣告(axis >= 4.5):cell 說「這根/這瓣/這點該畫在哪」──
+if axis >= 4.5 {
+  if shapeL < 0.5 {                       // 長條:中心 x、頂 y、半寬
+    if axis < 5.5 { out = cx; }
+    if axis >= 5.5 { if axis < 6.5 { out = topY; } }
+    if axis >= 6.5 { out = barW / 2.0; }
+  }
+  if shapeL >= 0.5 { if shapeL < 1.5 {    // 圓餅:心 x,y、半徑、起訖角
+    if axis < 5.5 { out = ccx; }
+    if axis >= 5.5 { if axis < 6.5 { out = ccy; } }
+    if axis >= 6.5 { if axis < 7.5 { out = RR; } }
+    if axis >= 7.5 { if axis < 8.5 { out = a0; } }
+    if axis >= 8.5 { out = a1; }
+  } }
+  if shapeL >= 1.5 {                       // 折線:頂點 x, y
+    if axis < 5.5 { out = cx; }
+    if axis >= 5.5 { out = topY; }
+  }
+}
+
+// ── 粒子 morph(axis < 4.5):碎化→飛→凝實,同 native ──
+if axis < 4.5 {
+  let bx = cx - barW / 2.0 + pu * barW;
+  let by = baseline - pRect * (val * plotH);
+  let ang = a0 + pu * (a1 - a0);
+  let rr = pWedge * RR;
+  let pex = ccx + rr * cos(ang);
+  let pey = ccy + rr * sin(ang);
+  let lnx = cx + pu * (nextX - cx) + (pRect - 0.5) * 5.0;
+  let lny = topY + pu * (nextY - topY) + (pRect - 0.5) * 5.0;
+  let fromX = bx;
+  let fromY = by;
+  if fromL >= 0.5 { if fromL < 1.5 { fromX = pex; fromY = pey; } }
+  if fromL >= 1.5 { fromX = lnx; fromY = lny; }
+  let toX = bx;
+  let toY = by;
+  if toL >= 0.5 { if toL < 1.5 { toX = pex; toY = pey; } }
+  if toL >= 1.5 { toX = lnx; toY = lny; }
+  let e = prog * prog * (3.0 - 2.0 * prog);
+  let dx = toX - fromX;
+  let dy = toY - fromY;
+  let bx2 = fromX + dx * e;
+  let by2 = fromY + dy * e;
+  let bulge = curveAmp * 0.26 * sin(3.1415927 * prog);
+  let coh = 1.0 - 0.92 * sin(3.1415927 * prog);
+  let scat = (1.0 - coh) * 46.0;
+  let sdir = pu * 6.2831853 + curveAmp * 3.0;
+  let fx = bx2 - dy * bulge + cos(sdir) * scat;
+  let fy = by2 + dx * bulge + sin(sdir) * scat;
+  if axis < 0.5 { out = fx; }
+  if axis >= 0.5 { if axis < 1.5 { out = fy; } }
+  if axis >= 1.5 { out = coh; }
+}
+out
+`;
+
+const slots = new Float64Array(32);
+const imports = { env: { sin: Math.sin, cos: Math.cos,
+  get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; }, ld: () => 0, sd: () => {} } };
+
+const jit = new Float32Array(P * 4);
+(() => { let s = 424242;
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  for (let p = 0; p < P; p++) { jit[p * 4] = rnd(); jit[p * 4 + 1] = rnd(); jit[p * 4 + 2] = Math.sqrt(rnd()); jit[p * 4 + 3] = rnd() * 2 - 1; }
+})();
+const sumV = RES.reduce((a, r) => a + r.v, 0);
+const cum = []; { let c = 0; for (const r of RES) { cum.push(c); c += r.v; } }
+const baseline = CH - 70;
+
+let runFn = null, fuelG = null;
+function setBase(i) {
+  slots[2] = RES[i].v; slots[3] = i; slots[4] = N; slots[6] = cum[i]; slots[7] = sumV; slots[8] = CW; slots[9] = CH;
+}
+function shape(i, L, param) {           // 問 cell:靜止圖元的第 param 個參數
+  setBase(i); slots[19] = L; slots[5] = param; if (fuelG) fuelG.value = 200000; return runFn(0);
+}
+function particle(p, axis) {
+  const i = (p / K) | 0; setBase(i);
+  slots[0] = fromL; slots[1] = toL; slots[5] = axis;
+  slots[10] = jit[p * 4]; slots[11] = jit[p * 4 + 1]; slots[12] = jit[p * 4 + 2];
+  slots[13] = prog; slots[14] = jit[p * 4 + 3];
+  slots[15] = cxOf(Math.min(i + 1, N - 1)); slots[16] = baseline - RES[Math.min(i + 1, N - 1)].v * (CH - 46 - 70);
+  if (fuelG) fuelG.value = 200000; return runFn(0);
+}
+function cxOf(i) { return 64 + (i + 0.5) * (CW - 64 - 34) / N; }
+
+const cv = $('cv'), ctx = cv.getContext('2d');
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+cv.width = CW * DPR; cv.height = CH * DPR; ctx.scale(DPR, DPR);
+const DUR = 1200;
+let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+// ── 啞畫筆:照 cell 宣告的圖元畫。填面 / 描邊(四邊)/ 折線,都由 cell 給的參數驅動 ──
+function drawCrisp(L, alpha) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.lineJoin = 'round';
+  if (L === 0) {                          // 長條:中間填色 + 四邊成線
+    ctx.textAlign = 'center'; ctx.font = '11px ui-monospace, monospace';
+    for (let i = 0; i < N; i++) {
+      const cx = shape(i, 0, 5), top = shape(i, 0, 6), hw = shape(i, 0, 7);
+      const x = cx - hw, w = hw * 2, h = baseline - top;
+      ctx.fillStyle = COLORS[i]; ctx.beginPath(); ctx.rect(x, top, w, h); ctx.fill();
+      ctx.strokeStyle = '#e6edf3'; ctx.globalAlpha = alpha * 0.55; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.globalAlpha = alpha * 0.9; ctx.fillStyle = '#e6edf3'; ctx.fillText(Math.round(RES[i].v * 100) + '%', cx, top - 6);
+      ctx.globalAlpha = alpha;
+    }
+  }
+  if (L === 1) {                          // 圓餅:填瓣 + 描邊
+    for (let i = 0; i < N; i++) {
+      const cx = shape(i, 1, 5), cy = shape(i, 1, 6), R = shape(i, 1, 7), a0 = shape(i, 1, 8), a1 = shape(i, 1, 9);
+      ctx.fillStyle = COLORS[i]; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+    }
+  }
+  if (L === 2) {                          // 折線:成線 + 頂點
+    const pts = RES.map((_, i) => [shape(i, 2, 5), shape(i, 2, 6)]);
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.beginPath();
+    pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke();
+    pts.forEach((q, i) => { ctx.beginPath(); ctx.arc(q[0], q[1], 4.5, 0, 6.2831853); ctx.fillStyle = COLORS[i]; ctx.fill(); ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 2; ctx.stroke(); });
+  }
+  ctx.restore();
+}
+
+function drawParticles(a) {
+  slots[13] = prog; slots[5] = 2; setBase(0); if (fuelG) fuelG.value = 200000; const coh = runFn(0);
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (let p = 0; p < P; p++) {
+    const x = particle(p, 0), y = particle(p, 1);
+    ctx.globalAlpha = a * 0.9; ctx.fillStyle = COLORS[(p / K) | 0];
+    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2831853); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function frame(now) {
+  ctx.clearRect(0, 0, CW, CH);
+  if (animating) { prog = Math.min(1, (now - tStart) / DUR); if (prog >= 1) { animating = false; fromL = toL; } }
+  if (!animating) { drawCrisp(toL, 1); requestAnimationFrame(frame); return; }
+  const g = prog;
+  const srcA = 1 - smooth(0.0, 0.32, g);
+  const tgtA = smooth(0.68, 1.0, g);
+  const partA = smooth(0.0, 0.22, g) * (1 - smooth(0.80, 1.0, g));
+  if (srcA > 0.01) drawCrisp(fromL, srcA);
+  if (tgtA > 0.01) drawCrisp(toL, tgtA);
+  if (partA > 0.01) drawParticles(partA);
+  requestAnimationFrame(frame);
+}
+
+function goTo(L) { if (L === toL && !animating) return; fromL = toL; toL = L; prog = 0; tStart = performance.now(); animating = true;
+  ['bar', 'pie', 'line'].forEach((n, k) => $('b-' + n).classList.toggle('on', k === L)); }
+$('b-bar').onclick = () => goTo(0); $('b-pie').onclick = () => goTo(1); $('b-line').onclick = () => goTo(2);
+let autoTimer = null; $('auto').onchange = e => { clearInterval(autoTimer); if (e.target.checked) autoTimer = setInterval(() => goTo((toL + 1) % 3), 2800); };
+$('legend').innerHTML = RES.map((r, i) => `<span class="lg"><span class="sw" style="background:${COLORS[i]}"></span>${r.name} <b>${Math.round(r.v * 100)}%</b></span>`).join('');
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js'); await mod.default();
+    const bytes = mod.compile_ui_cell_wasm(CELL);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFn = instance.exports.run; fuelG = instance.exports.fuel || null;
+    $('foot').innerHTML = `一支 <b>${bytes.length}-byte cell</b> 兩種宣告:靜止時吐<b>圖元參數</b>(中心/頂/半寬 → 一片填色+描邊=真長條;` +
+      `圓心/半徑/角 → 填瓣;頂點 → 成線),切換時吐<b>粒子座標</b>(碎化→飛→凝實)。啞畫筆只會「填面/描邊/畫點」,` +
+      `對長條/圓餅一無所知——<b>「這是什麼形」全在 cell 的宣告裡</b>。點只是最窮的圖元;換上填面圖元,空隙自然不存在。`;
+    requestAnimationFrame(frame);
+  } catch (err) { $('foot').innerHTML = `<span style="color:#f85149">需要 /pkg 編譯器:${err}</span>`; console.error(err); }
+})();
+</script>
+</body>
+</html>

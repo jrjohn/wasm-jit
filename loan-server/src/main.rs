@@ -235,6 +235,13 @@ async fn reservoirs_net() -> impl IntoResponse {
     Html(include_str!("../../apps/reservoirs-net.html"))
 }
 
+/// Cells declare richer primitives than points: a fill (中間填色) and edges (四邊成線),
+/// so a handful of cells manifest a crisp solid bar/pie/line at rest, decomposing into
+/// flying particles only during the morph. Gaps were a primitive problem, not a fill count.
+async fn reservoirs_solid() -> impl IntoResponse {
+    Html(include_str!("../../apps/reservoirs-solid.html"))
+}
+
 /// GET /api/wasm/{id} — variant 2's source: hand the browser the precompiled cell bytes.
 /// This is the "ship the .wasm to the client" deployment. The bytes run in the browser and
 /// carry no DSL, but they are downloadable and (see examples/reveal.rs) disassemble.
@@ -309,6 +316,7 @@ async fn main() {
         .route("/reservoirs", get(reservoirs))
         .route("/reservoirs-native", get(reservoirs_native))
         .route("/reservoirs-net", get(reservoirs_net))
+        .route("/reservoirs-solid", get(reservoirs_solid))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
