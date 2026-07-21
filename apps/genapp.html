@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>講一句,長出一個受圍籬 App · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 80ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
+  .bar { display: flex; gap: .5rem; align-items: stretch; }
+  #intent { flex: 1; font: inherit; font-size: .9rem; padding: .6rem .8rem; border-radius: 10px;
+            border: 1px solid #30363d; background: #0b0f14; color: inherit; resize: vertical; min-height: 46px; }
+  #intent:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  #go { font: inherit; font-size: .9rem; font-weight: 600; padding: 0 1.3rem; border-radius: 10px; border: 1px solid #58a6ff33;
+        background: linear-gradient(180deg, #2a7bff, #1a63d8); color: #fff; cursor: pointer; white-space: nowrap; }
+  #go:disabled { opacity: .5; cursor: wait; }
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 0; }
+  .chip { font-size: .74rem; padding: .28rem .7rem; border-radius: 999px; border: 1px solid #30363d;
+          background: #161b22; color: #b9c2cc; cursor: pointer; }
+  .chip:hover { border-color: #58a6ff66; color: #e6edf3; }
+  .status { font-size: .8rem; color: #8b949e; margin: .8rem 0; min-height: 1.2em; }
+  .status.err { color: #f85149; } .status.ok { color: #7ee787; }
+  .cols { display: grid; grid-template-columns: 370px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .rcol { display: flex; flex-direction: column; gap: 1rem; }
+  .chatcol { display: flex; flex-direction: column; height: 660px; padding: .9rem 1rem; }
+  .msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: .45rem;
+          margin-bottom: .6rem; padding-right: .2rem; }
+  .msg { border: 1px solid #21262d; border-left: 3px solid #30363d; border-radius: 8px;
+         padding: .4rem .6rem; cursor: pointer; background: #0b0f14; transition: border-color .12s; }
+  .msg:hover { border-color: #58a6ff55; }
+  .msg.on { border-left-color: #58a6ff; background: #0d1520; }
+  .msg .mt { font-size: .66rem; color: #6e7681; font-variant-numeric: tabular-nums; }
+  .msg .mi { font-size: .8rem; color: #c9d1d9; margin-top: .1rem; word-break: break-word; }
+  .msg .mn { font-size: .68rem; color: #7ee787; margin-top: .1rem; }
+  .clr { font-size: .66rem; color: #6e7681; cursor: pointer; border: none; background: none; padding: 0; }
+  .clr:hover { color: #f85149; }
+  .panel { border: 1px solid #30363d; border-radius: 14px; background: #0f141a; padding: 1.1rem 1.2rem; min-height: 200px; }
+  .phead { font-size: .72rem; color: #6e7681; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 .8rem; }
+  /* grown-app widgets */
+  .w-stack { display: flex; flex-direction: column; gap: .7rem; }
+  .w-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .w-grid { display: grid; gap: .35rem .9rem; align-items: center; }
+  .w-label { font-size: .9rem; color: #c9d1d9; margin: 0; }
+  .w-stack > .w-label:first-child { font-size: 1.05rem; font-weight: 600; color: #e6edf3; }
+  .w-value { font-size: .85rem; color: #8b949e; display: inline-flex; align-items: baseline; gap: .35rem;
+             background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px; padding: .2rem .7rem; }
+  .w-value b { color: #79b8ff; font-variant-numeric: tabular-nums; font-size: .95rem; }
+  .w-input { font: inherit; font-size: .85rem; padding: .35rem .6rem; border-radius: 8px; border: 1px solid #30363d;
+             background: #0d1117; color: inherit; width: 120px; font-variant-numeric: tabular-nums; text-align: right; }
+  .w-input:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  .w-btn { font: inherit; font-size: .82rem; padding: .4rem .9rem; border-radius: 8px; border: 1px solid #58a6ff33;
+           background: linear-gradient(180deg,#2a7bff,#1a63d8); color: #fff; cursor: pointer; }
+  .w-slider { width: 200px; }
+  #stage canvas { max-width: 100%; height: auto; }
+  /* evidence */
+  .meta { font-size: .74rem; color: #8b949e; margin-bottom: .7rem; }
+  .meta b { color: #c9d1d9; }
+  .cell { border: 1px solid #21262d; border-radius: 8px; margin-bottom: .5rem; overflow: hidden; }
+  .cell .ch { display: flex; justify-content: space-between; font-size: .72rem; padding: .35rem .6rem;
+              background: #0b0f14; color: #d2a8ff; }
+  .cell .ch .b { color: #6e7681; }
+  .cell pre { margin: 0; padding: .5rem .6rem; font-size: .68rem; color: #a5d6ff; white-space: pre; overflow-x: auto; line-height: 1.4; }
+  .fence { font-size: .72rem; color: #7ee787; margin-top: .6rem; }
+  .fence code { color: #7ee787; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>講一句,長出一個受圍籬 App 🌱</h1>
+  <p class="lede">你講「我願」→ <b>Claude 現生一份 cell 宣告</b> → server 端<b>編譯即圍籬</b>(編不過就把錯誤丟回去<b>自我修復</b>)→
+    瀏覽器<b>當場把它跑成 App</b>。每個 cell 只碰得到 <code>get set sin cos ld sd</code>——想 <code>fetch</code>/碰網路就編譯期死。
+    <b>你敢當場跑 AI 剛吐的東西,正因為它出不了圍籬。</b></p>
+
+  <div style="font-size:.72rem;color:#6e7681;margin:.7rem 0 .25rem;display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap">
+    <span>▸ 詞庫(誰都能加,<b style="color:#8b949e">而且沒有人需要審核</b> — 一個詞只由受圍籬的零件組成,依構造就出不了圍籬)</span>
+    <span style="display:flex;gap:.4rem">
+      <button class="clr" id="addword" title="把畫面上這個 App 收成一個可重複使用的詞,存進共用詞庫">＋ 把這個存成一個詞</button>
+      <button class="clr" id="gallerybtn" title="看大家留下來的作品">🖼 作品集</button>
+    </span>
+  </div>
+  <div class="chips" id="words"></div>
+
+  <div class="cols" style="margin-top:1rem">
+    <div class="panel chatcol">
+      <p class="phead" style="display:flex;justify-content:space-between;align-items:center">
+        <span>▸ 對話紀錄(存本機 · 往上捲看舊的)</span>
+        <button class="clr" id="clear">清空</button>
+      </p>
+      <div class="msgs" id="msgs"></div>
+      <div class="bar">
+        <textarea id="intent" placeholder="講一句「我願」…(⌘/Ctrl+Enter 送出)"></textarea>
+        <button id="go" disabled>送出</button>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="status" id="status">載入編譯器…</div>
+    </div>
+    <div class="rcol">
+      <div class="panel">
+        <p class="phead" style="display:flex;justify-content:space-between;align-items:center;gap:.6rem">
+          <span>▸ 長出來的 APP(活的,可互動)</span>
+          <button class="clr" id="share" title="存下來,拿到一個自己的網址">🔗 存起來 · 拿網址</button>
+        </p>
+        <div id="stage"><span style="color:#6e7681;font-size:.8rem">還沒生成</span></div>
+        <div id="sharebox" style="display:none;margin-top:.6rem;font-size:.74rem;color:#8b949e"></div>
+      </div>
+      <div class="panel">
+        <p class="phead">▸ 生成證據:AI 寫的 CELL(受圍籬)</p>
+        <div id="evidence"><span style="color:#6e7681;font-size:.8rem">生成後這裡會顯示 AI 寫的每一支 cell 原始碼 + 圍籬收據</span></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const EXAMPLES = [   // ← 都是「延伸目前這個 App」的一句話,不是另開新 App
+  '加上 prompt caching:快取讀取只算 1/10 價',
+  '加上 Batch API 半價的那一欄',
+  '改成年成本,並加上每月預算上限 500 美元,超出多少也顯示',
+  '把各模型每月成本改成圓餅,看佔比',
+  '把「模型成本列」定義成一個可重用的詞',
+];
+$('chips').innerHTML = '<span class="chip seedchip" style="border-color:#3fb95066;color:#7ee787">🌱 載入範例 App(Claude 成本試算台)</span>'
+  + EXAMPLES.map(e => `<span class="chip">${e}</span>`).join('');
+document.querySelectorAll('#chips .chip').forEach((c, i) => {
+  if (c.classList.contains('seedchip')) { c.onclick = () => bootSeed(); return; }
+  c.onclick = () => { $('intent').value = EXAMPLES[i - 1]; $('intent').focus(); };
+});
+
+function status(msg, cls) { const s = $('status'); s.textContent = msg; s.className = 'status' + (cls ? ' ' + cls : ''); }
+
+let compileUiCell = null;
+
+// ── 最小「受圍籬 UI runtime」:schema → 活的 App。cell 全編成 wasm,只跑在這 6 個函式的圍籬裡 ──
+async function manifestUi(schema) {
+  schema = expandWords(schema, WORDS);   // 詞庫展開 → 一律變回基底節點
+  // host 代抓 App 宣告到的真實資料源(白名單)。cell 沒有 fetch,只會從 coll 讀到數字。
+  const need = new Set();
+  JSON.stringify(schema).replace(/"from"\s*:\s*"([\w-]+)"/g, (m, k) => { need.add(k); return m; });
+  for (const d of (schema.data || [])) if (d && d.source) need.add(d.source);
+  for (const id of need) { try { await loadData(id); } catch (e) { console.warn(e); } }
+  const slots = new Float64Array(32), coll = new Float64Array(4096);
+  // 把第一個資料源的數值灌進 collection store(cell 用 ld(i) 取,搭配 repeat 就是表格)
+  for (const id of need) {
+    const d = DATA[id]; if (!d) continue;
+    const fld = ((schema.data || []).find(x => x.source === id) || {}).field || d.fields[0];
+    const vals = (d.values || {})[fld] || [];
+    for (let i = 0; i < vals.length && i < 4096; i++) coll[i] = +vals[i] || 0;
+    slots[31] = vals.length;   // 筆數放 slot 31,cell 可用 get(31.0) 取
+    break;
+  }
+  const wrap = i => ((i | 0) % 4096 + 4096) % 4096;
+  const imports = { env: {
+    sin: Math.sin, cos: Math.cos,
+    get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+    ld: i => coll[wrap(i)], sd: (i, v) => { coll[wrap(i)] = v; },
+  } };
+  const runFns = {}, fuels = {}, outputs = {};
+  for (const c of (schema.cells || [])) {
+    const bytes = compileUiCell(c.script);                 // 瀏覽器內編譯,失敗即拋(圍籬)
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFns[c.id] = instance.exports.run; fuels[c.id] = instance.exports.fuel || null;
+  }
+  const wiresFrom = {};
+  for (const w of (schema.wires || [])) (wiresFrom[w.from] = wiresFrom[w.from] || []).push(w.to);
+  const binds = [], charts = [];
+  let budget = 0;
+  const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 200000; outputs[id] = f(x); };
+  const fire = (id, x) => { if (budget-- <= 0) return; run(id, x); for (const to of (wiresFrom[id] || [])) fire(to, outputs[id] || 0); };
+  const refresh = () => {
+    for (const b of binds) {
+      if (b.arg !== undefined) run(b.id, b.arg);        // per-index cell call (repeat / table rows)
+      const v = outputs[b.id]; b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v);
+    }
+    for (const ch of charts) drawChart(ch, ch.slices.map(s => ({ label: s.label, value: s.fixed ? s.value : (outputs[s.bind] || 0), color: s.color })));
+  };
+  const act = (cellId, x) => { budget = 128; fire(cellId, x); refresh(); };
+
+  const root = build(schema.tree, act, binds, charts);
+  budget = 512;
+  for (const it of (schema.init || [])) fire(it.cell, +it.arg || 0);
+  // run every DISPLAYED cell once so bound values AND chart slices populate
+  // (constant data cells like {"id":"usa","script":"320.0"} have no wires firing them)
+  const shown = new Set([...binds.map(b => b.id), ...charts.flatMap(c => c.slices.map(s => s.bind)), ...(schema.wires || []).map(w => w.to)]);
+  for (const id of shown) run(id, 0);
+  refresh();
+  return root;
+}
+
+const DATA = {};  // 真實資料集(host 從白名單抓來的),cell 永遠不碰網路
+async function loadData(id) {
+  if (DATA[id]) return DATA[id];
+  const r = await fetch('/api/data/' + encodeURIComponent(id));
+  if (!r.ok) throw new Error('資料來源 ' + id + ' 取得失敗');
+  DATA[id] = await r.json(); return DATA[id];
+}
+let WORDS = {};   // 詞庫:name → 詞的定義(從 /api/words 取,生成時也會回傳)
+
+function subIndex(node, i) { return JSON.parse(JSON.stringify(node).replace(/\$i\b/g, String(i))); }
+
+// 詞庫展開:{"type":"word","name":"input_row","id":"p","args":{...}}
+//   → 把該詞的 cells(id 加上 "p." 前綴,可重複使用同一個詞)與 tree 併進 App。
+// 關鍵:詞由受圍籬的零件組成 → 展開後必然仍在圍籬內(§21 衰減律,child ⊆ parent)。
+function expandWords(schema, lib) {
+  const cells = [...(schema.cells || [])], wires = [...(schema.wires || [])], init = [...(schema.init || [])];
+  let auto = 0;
+  const walk = (n) => {
+    if (Array.isArray(n)) return n.map(walk);
+    if (!n || typeof n !== 'object') return n;
+    if (n.type === 'word') {
+      const w = lib[n.name];
+      if (!w) return { type: 'label', text: '[未知的詞:' + n.name + ']' };
+      const inst = n.id || ('w' + (++auto));
+      const args = {};
+      for (const p of (w.params || [])) args[p.name] = p.default;
+      Object.assign(args, n.args || {});
+      const sub = s => typeof s === 'string' ? s.replace(/\$([A-Za-z_]\w*)/g, (m, k) => (k in args ? String(args[k]) : m)) : s;
+      const idmap = {};
+      for (const c of (w.cells || [])) { const nid = inst + '.' + c.id; idmap[c.id] = nid; cells.push({ id: nid, script: sub(c.script) }); }
+      const bake = (x) => {
+        if (Array.isArray(x)) return x.map(bake);
+        if (x && typeof x === 'object') {
+          const o = {};
+          for (const k in x) {
+            const v = x[k];
+            o[k] = (typeof v === 'string')
+              ? ((k === 'bind' || k === 'cell') && idmap[sub(v)] ? idmap[sub(v)] : sub(v))
+              : bake(v);
+          }
+          return o;
+        }
+        return x;
+      };
+      for (const wr of (w.wires || [])) wires.push({ from: idmap[wr.from] || wr.from, to: idmap[wr.to] || wr.to });
+      for (const it of (w.init || [])) init.push({ cell: idmap[it.cell] || it.cell, arg: it.arg });
+      return walk(bake(JSON.parse(JSON.stringify(w.tree))));
+    }
+    const o = {};
+    for (const k in n) o[k] = walk(n[k]);
+    return o;
+  };
+  const tree = walk(JSON.parse(JSON.stringify(schema.tree || {})));
+  return { ...schema, cells, wires, init, tree };
+}
+
+function build(node, act, binds, charts) {
+  if (!node || !node.type) return document.createTextNode('');
+  const t = node.type;
+  if (t === 'stack' || t === 'row') {
+    const d = document.createElement('div'); d.className = t === 'row' ? 'w-row' : 'w-stack';
+    (node.children || []).forEach(ch => d.appendChild(build(ch, act, binds, charts))); return d;
+  }
+  if (t === 'label') { const p = document.createElement('div'); p.className = 'w-label'; p.textContent = node.text || ''; return p; }
+  if (t === 'value') {
+    const w = document.createElement('span'); w.className = 'w-value';
+    if (node.label) { const l = document.createElement('span'); l.textContent = node.label; w.appendChild(l); }
+    const b = document.createElement('b'); b.textContent = '—'; w.appendChild(b);
+    // arg (optional): run the bound cell with x=arg — this is what makes repeat/tables work
+    binds.push({ id: node.bind, el: b, arg: node.arg === undefined ? undefined : +node.arg }); return w;
+  }
+  if (t === 'grid') {                                  // BASIS: 2-D alignment (rows can't compose this)
+    const d = document.createElement('div'); d.className = 'w-grid';
+    d.style.gridTemplateColumns = `repeat(${Math.max(1, Math.min(12, +node.cols || 2))}, auto)`;
+    (node.children || []).forEach(ch => d.appendChild(build(ch, act, binds, charts))); return d;
+  }
+  if (t === 'repeat') {                                // BASIS: N-of-these (a static tree can't express it)
+    const n = Math.max(0, Math.min(300, +node.count || 0));
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < n; i++) {
+      const tpl = subIndex(node.template, i);
+      for (const one of (Array.isArray(tpl) ? tpl : [tpl])) frag.appendChild(build(one, act, binds, charts));
+    }
+    return frag;                                       // splats into the parent (so it fills a grid)
+  }
+  if (t === 'input') {
+    const inp = document.createElement('input'); inp.type = 'number'; inp.className = 'w-input'; inp.placeholder = node.placeholder || '';
+    const cell = (node.on_input || {}).cell; inp.addEventListener('input', () => act(cell, +inp.value || 0)); return inp;
+  }
+  if (t === 'button') {
+    const b = document.createElement('button'); b.className = 'w-btn'; b.textContent = node.text || 'OK';
+    const cell = (node.on_click || {}).cell; b.addEventListener('click', () => act(cell, 0)); return b;
+  }
+  if (t === 'slider') {
+    const w = document.createElement('div'); w.className = 'w-row';
+    if (node.label) { const l = document.createElement('span'); l.className = 'w-label'; l.textContent = node.label; w.appendChild(l); }
+    const s = document.createElement('input'); s.type = 'range'; s.className = 'w-slider';
+    s.min = node.min ?? 0; s.max = node.max ?? 100; s.step = node.step ?? 1; s.value = node.min ?? 0;
+    const cell = (node.on_input || {}).cell; s.addEventListener('input', () => act(cell, +s.value)); w.appendChild(s); return w;
+  }
+  if (t === 'pie' || t === 'bar') {                 // NEW primitive: a chart the host draws (slices from cells OR from a real data source)
+    let slices, cap = '';
+    if (node.from && DATA[node.from]) {                    // ← 綁真實資料源
+      const d = DATA[node.from], fld = node.field || d.fields[0];
+      const vals = (d.values || {})[fld] || [];
+      let rows = (d.labels || []).map((l, i) => ({ label: l, value: +vals[i] || 0 }));
+      if (node.sort !== 'none') rows.sort((a, b) => b.value - a.value);
+      const top = +node.top || 0; if (top > 0) rows = rows.slice(0, top);
+      slices = rows.map((r, i) => ({ label: r.label, value: r.value, fixed: true,
+        color: `hsl(${Math.round(i / Math.max(1, rows.length) * 360)}, 72%, 60%)` }));
+      cap = `資料:${(d.source || '').replace(/^https?:\/\//, '').split('/')[0]} · ${d.title || ''} · 更新 ${d.updated || '?'}`;
+    } else {
+      const sls = (node.slices || []);
+      slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind,
+        color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
+    }
+    const LW = t === 'bar' ? Math.min(680, Math.max(300, slices.length * 30)) : 300;
+    const LH = t === 'bar' ? 260 : 240;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cv = document.createElement('canvas');
+    cv.width = LW * dpr; cv.height = LH * dpr; cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
+    cv.getContext('2d').scale(dpr, dpr);
+    charts.push({ cv, kind: t, slices, LW, LH });
+    if (!cap) return cv;
+    const box = document.createElement('div');
+    box.appendChild(cv);
+    const c = document.createElement('div');
+    c.style.cssText = 'font-size:.66rem;color:#6e7681;margin-top:.3rem'; c.textContent = cap;
+    box.appendChild(c); return box;
+  }
+  const p = document.createElement('div'); p.className = 'w-label'; p.style.opacity = .5; p.textContent = '[' + t + ']'; return p;
+}
+
+// the host's chart primitive — a pie (文字內崁:label+% 落在每一瓣裡)or a bar, from slice values
+function drawChart(ch, slices) {
+  const ctx = ch.cv.getContext('2d'), W = ch.LW, H = ch.LH;
+  ctx.clearRect(0, 0, W, H);
+  const total = slices.reduce((a, s) => a + Math.max(0, s.value), 0) || 1;
+  if (ch.kind === 'pie') {
+    const cx = W * 0.42, cy = H / 2, R = Math.min(W * 0.38, H * 0.44);
+    let a = -Math.PI / 2;
+    for (const s of slices) {
+      const frac = Math.max(0, s.value) / total, a2 = a + frac * 2 * Math.PI;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a2); ctx.closePath();
+      ctx.fillStyle = s.color; ctx.fill(); ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+      if (frac > 0.04) {
+        const m = (a + a2) / 2, lr = R * 0.6, lx = cx + lr * Math.cos(m), ly = cy + lr * Math.sin(m);
+        ctx.fillStyle = '#fff'; ctx.font = '600 11px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.label, lx, ly - 6); ctx.fillText(Math.round(frac * 100) + '%', lx, ly + 7);
+      }
+      a = a2;
+    }
+    // legend on the right
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '11px ui-monospace, monospace';
+    let ly = H / 2 - slices.length * 8;
+    for (const s of slices) { ctx.fillStyle = s.color; ctx.fillRect(W * 0.84, ly - 5, 10, 10); ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, W * 0.84 + 15, ly); ly += 18; }
+  } else {
+    const n = slices.length, crowded = n > 8;
+    const mL = 8, mB = crowded ? 74 : 22, plotW = W - mL - 8, plotH = H - 18 - mB, base = H - mB;
+    const max = Math.max(1, ...slices.map(s => s.value)), bw = plotW / n * 0.72;
+    ctx.font = '10px ui-monospace, monospace';
+    slices.forEach((s, i) => {
+      const cx = mL + (i + 0.5) * plotW / n, h = Math.max(0, s.value) / max * plotH;
+      ctx.fillStyle = s.color; ctx.fillRect(cx - bw / 2, base - h, bw, h);
+      if (n <= 14) {                                   // 值:太擠就不畫
+        ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        ctx.fillText(fmt(s.value), cx, base - h - 13);
+      }
+      ctx.fillStyle = '#c9d1d9';
+      if (crowded) {                                   // 名稱:擠就轉 55°
+        ctx.save(); ctx.translate(cx, base + 5); ctx.rotate(-Math.PI * 55 / 180);
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(s.label, 0, 0); ctx.restore();
+      } else {
+        ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(s.label, cx, base + 4);
+      }
+    });
+  }
+}
+
+function renderEvidence(data, dt) {
+  const cells = (data.cells || []).map(c =>
+    `<div class="cell"><div class="ch"><span>${c.id}</span><span class="b">${c.bytes} bytes wasm</span></div><pre>${c.script.replace(/</g, '&lt;')}</pre></div>`
+  ).join('');
+  $('evidence').innerHTML =
+    `<div class="meta"><b>${data.schema.title || '(untitled)'}</b> · 第 <b>${data.attempt}</b> 次過關 · ${dt}s · ${(data.cells || []).length} 支 cell</div>` +
+    cells +
+    `<div class="fence">圍籬:每支 cell 只能 import <code>${(data.fence || []).join(', ')}</code> —— 想 fetch/碰網路,編譯期就死。</div>`;
+}
+
+// ── 對話紀錄:存 localStorage(cookie 只有 ~4KB,放不下 schema)。存的是 schema,
+//    所以重開舊的是「重新 manifest」,0 秒、不用再叫 Claude、不花 API。 ──
+const HKEY = 'genapp.history.v1';
+let HIST = [], activeIdx = -1;
+function loadHist() { try { HIST = JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (e) { HIST = []; } }
+function saveHist() {
+  try { HIST = HIST.slice(-40); localStorage.setItem(HKEY, JSON.stringify(HIST)); }
+  catch (e) { HIST = HIST.slice(-12); try { localStorage.setItem(HKEY, JSON.stringify(HIST)); } catch (_) {} }
+}
+const tstr = t => new Date(t).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+function renderHist() {
+  const el = $('msgs');
+  if (!HIST.length) { el.innerHTML = '<div style="color:#6e7681;font-size:.78rem;padding:.4rem">還沒有紀錄 — 講一句試試 👇</div>'; return; }
+  el.innerHTML = HIST.map((h, i) => `<div class="msg${i === activeIdx ? ' on' : ''}" data-i="${i}">
+      <div class="mt">${tstr(h.t)} · ${h.secs}s · ${(h.cells || []).length} cells</div>
+      <div class="mi">${String(h.intent).replace(/</g, '&lt;')}</div>
+      ${h.new_words && h.new_words.length ? `<div class="mn">+ 新詞 ${h.new_words.join(', ')}</div>` : ''}
+    </div>`).join('');
+  el.querySelectorAll('.msg').forEach(m => m.onclick = () => openEntry(+m.dataset.i));
+  el.scrollTop = el.scrollHeight;
+}
+async function openEntry(i) {
+  const h = HIST[i]; if (!h) return;
+  activeIdx = i; renderHist();
+  try {
+    $('stage').innerHTML = '';
+    $('stage').appendChild(await manifestUi(h.schema));
+    renderEvidence({ schema: h.schema, cells: h.cells, fence: h.fence, attempt: h.attempt }, h.secs);
+    status(`↺ 重開 ${tstr(h.t)} 生成的那個(直接跑存下來的 schema,沒有重生)`, 'ok');
+  } catch (e) { status('✗ 重開失敗:' + e, 'err'); }
+}
+
+async function loadWords() {
+  try {
+    const list = await (await fetch('/api/words')).json();
+    WORDS = {}; for (const w of (list || [])) WORDS[w.name] = w;
+    renderWords();
+  } catch (e) { console.warn('words', e); }
+}
+function renderWords() {
+  const el = $('words'); if (!el) return;
+  const names = Object.keys(WORDS);
+  el.innerHTML = names.length
+    ? names.map(n => `<span class="chip" title="${(WORDS[n].desc || '').replace(/"/g, '')}">${n}</span>`).join('')
+    : '<span style="color:#6e7681;font-size:.74rem">(詞庫是空的)</span>';
+}
+
+// ── ① 出口:作品要能活過這個分頁 ────────────────────────────────────────────
+// 在這之前,長出來的 App 只存在 localStorage —— 換一台電腦就沒了,也給不了別人。
+// 引擎再好,沒有出口就只有作者一個人會啟動它。
+function currentSchema() {
+  return (activeIdx >= 0 && HIST[activeIdx]) ? HIST[activeIdx].schema
+       : (HIST.length ? HIST[HIST.length - 1].schema : null);
+}
+async function shareApp() {
+  const schema = currentSchema();
+  if (!schema) { status('還沒有東西可以存', 'err'); return; }
+  $('share').disabled = true;
+  try {
+    const r = await fetch('/api/save', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ schema, title: schema.title || '' }) });
+    const d = await r.json();
+    if (!d.ok) { status('✗ 存檔失敗:' + (d.error || '?'), 'err'); $('share').disabled = false; return; }
+    const url = location.origin + d.url;
+    const box = $('sharebox');
+    box.style.display = 'block';
+    box.innerHTML = `已存下 · <a href="${d.url}" style="color:#58a6ff">${url}</a>
+      <button class="clr" id="copylink" style="margin-left:.4rem">複製</button>
+      <div style="margin-top:.35rem;color:#6e7681">存檔前每一支 cell <b>都重新過了一次圍籬</b>——存下來的一定是編得過的 App。</div>`;
+    $('copylink').onclick = () => { navigator.clipboard?.writeText(url); status('連結已複製', 'ok'); };
+    status('🔗 有網址了 — 這個 App 現在活得比這個分頁久', 'ok');
+  } catch (e) { status('✗ 存檔錯誤:' + e, 'err'); }
+  $('share').disabled = false;
+}
+async function loadShared(id) {
+  try {
+    const r = await fetch('/api/app/' + encodeURIComponent(id));
+    if (!r.ok) return false;
+    const rec = await r.json();
+    $('stage').innerHTML = '';
+    $('stage').appendChild(await manifestUi(rec.schema));
+    HIST.push({ t: (rec.created || 0) * 1000 || Date.now(), intent: '🔗 別人留下的:' + (rec.title || id),
+                secs: '0.0', schema: rec.schema, cells: [], fence: [], attempt: 0, new_words: [] });
+    saveHist(); activeIdx = HIST.length - 1; renderHist();
+    $('evidence').innerHTML = `<div class="meta">這是<b>存下來的作品</b>(<code>${id}</code>),直接跑存檔的 schema。
+      你可以繼續跟它說話改它——改完再存一次,會拿到<b>新的網址</b>,原作不動。</div>`;
+    status('🔗 載入了一個別人留下的 App — 直接說一句話就能接著改', 'ok');
+    return true;
+  } catch (e) { console.warn('shared', e); return false; }
+}
+async function showGallery() {
+  try {
+    const items = await (await fetch('/api/gallery')).json();
+    const box = $('sharebox');
+    box.style.display = 'block';
+    box.innerHTML = items.length
+      ? '<b>大家留下來的:</b><br>' + items.map(it =>
+          `<a href="/a/${it.id}" style="color:#58a6ff;display:inline-block;margin:.2rem .6rem .2rem 0">${(it.title || it.id)}</a>`).join('')
+      : '還沒有人存過作品 — 你會是第一個。';
+  } catch (e) { status('✗ 讀作品集失敗:' + e, 'err'); }
+}
+
+// ── ② 詞庫:誰都能投稿,而且沒有人需要審核 ──────────────────────────────────
+// 這是這個架構做得到、而生成任意程式碼的對手做不到的一件事:
+// 一個詞只由受圍籬的零件組成,所以依 §21 衰減,這個詞本身也受圍籬 ——
+// 投稿者無法夾帶零件本來沒有的觸及。編譯這一關,就是唯一的審核。
+async function contributeWord() {
+  const schema = currentSchema();
+  if (!schema) { status('還沒有東西可以收成詞', 'err'); return; }
+  const name = (prompt('這個詞叫什麼?(小寫英數與底線,例如 cost_panel)') || '').trim().toLowerCase();
+  if (!name) return;
+  const desc = (prompt('一句話說明它做什麼?') || '').trim();
+  const by = (localStorage.getItem('genapp.by') || prompt('署名(可留空)') || '').trim();
+  if (by) localStorage.setItem('genapp.by', by);
+  $('addword').disabled = true;
+  try {
+    const r = await fetch('/api/words', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ by, word: { name, desc, params: [], cells: schema.cells || [], tree: schema.tree } }) });
+    const d = await r.json();
+    if (!d.ok) {
+      status('✗ ' + (d.error || '沒收進詞庫'), 'err');
+      if (d.fence) $('sharebox').style.display = 'block',
+        $('sharebox').innerHTML = `這個詞沒過圍籬,所以<b>沒有進詞庫</b>。cell 只能碰:<code>${d.fence.join(' ')}</code>
+          <div style="margin-top:.35rem;color:#6e7681">這正是「不需要人審」的意思——不是有人讀過它說可以,是它<b>編不過就進不來</b>。</div>`;
+    } else {
+      WORDS = {}; for (const w of d.words) WORDS[w.name] = w; renderWords();
+      status(`✓ 「${d.name}」進詞庫了(共 ${d.count} 個詞)——之後每一次生成都用得到它`, 'ok');
+    }
+  } catch (e) { status('✗ 投稿錯誤:' + e, 'err'); }
+  $('addword').disabled = false;
+}
+
+// 預載的 App:頁面一進來就是活的,訪客只要「加功能」就好。
+async function bootSeed() {
+  try {
+    const schema = await (await fetch('/api/seed')).json();
+    $('stage').innerHTML = '';
+    $('stage').appendChild(await manifestUi(schema));
+    HIST.push({ t: Date.now(), intent: '🌱 範例:Claude 成本試算台', secs: '0.0',
+                schema, cells: [], fence: [], attempt: 0, new_words: [] });
+    saveHist(); activeIdx = HIST.length - 1; renderHist();
+    $('evidence').innerHTML = '<div class="meta">這是<b>預載的 App</b>,已經在跑。' +
+      '左邊直接跟它說話就能加功能——例如點下面任一個例子。<br>你說的每一句都會<b>改這個 App</b>,不是另開一個。</div>';
+    status('👋 頁面已經是一個做好的 App — 直接說一句話幫它加功能', 'ok');
+    return true;
+  } catch (e) { console.warn('seed', e); return false; }
+}
+
+async function gen() {
+  const intent = $('intent').value.trim();
+  if (!intent) { status('說一句話吧', 'err'); return; }
+  $('go').disabled = true;
+  status('🌱 生成中…(Claude 生 cell → 編譯即圍籬 → 自我修復,約 15–40s)');
+  const t0 = performance.now();
+  let data;
+  try {
+    const r = await fetch('/api/gen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+      intent,
+      history: HIST.slice(-6).map(h => ({ intent: h.intent, title: (h.schema && h.schema.title) || '' })),
+      prev_schema: (activeIdx >= 0 && HIST[activeIdx]) ? HIST[activeIdx].schema : (HIST.length ? HIST[HIST.length - 1].schema : null),
+    }) });
+    data = await r.json();
+  } catch (e) { status('✗ 網路錯誤:' + e, 'err'); $('go').disabled = false; return; }
+  const dt = ((performance.now() - t0) / 1000).toFixed(1);
+  if (!data.ok) { status('✗ 生成失敗:' + (data.error || '?'), 'err'); $('go').disabled = false; return; }
+  if (data.words) { WORDS = {}; for (const w of data.words) WORDS[w.name] = w; renderWords(); }
+  try {
+    $('stage').innerHTML = '';
+    $('stage').appendChild(await manifestUi(data.schema));
+    renderEvidence(data, dt);
+    HIST.push({ t: Date.now(), intent, secs: dt, schema: data.schema, cells: data.cells,
+                fence: data.fence, attempt: data.attempt, new_words: data.new_words || [] });
+    saveHist(); activeIdx = HIST.length - 1; renderHist();
+    status(`✓ 長出來了(${dt}s,第 ${data.attempt} 次過關)——去左邊玩玩它`, 'ok');
+  } catch (e) { status('✗ 渲染錯誤:' + e, 'err'); console.error(e); }
+  $('go').disabled = false;
+}
+$('go').onclick = gen;
+$('intent').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') gen(); });
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js'); await mod.default();
+    compileUiCell = mod.compile_ui_cell_wasm;
+    await loadWords();
+    loadHist(); renderHist();
+    let seeded = false;
+    // /a/{id} 進來的:載那個人留下的作品,優先於一切
+    const shared = location.pathname.match(/^\/a\/([a-z0-9]{4,16})$/);
+    if (shared) seeded = await loadShared(shared[1]);
+    if (!seeded && location.pathname === '/gallery') { await showGallery(); }
+    if (!seeded) {
+      if (!HIST.length) seeded = await bootSeed();     // 第一次來:頁面已經是一個做好的 App
+      else { await openEntry(HIST.length - 1); seeded = true; }  // 回訪:接續上次那個 App
+    }
+
+    $('share').onclick = shareApp;
+    $('addword').onclick = contributeWord;
+    $('gallerybtn').onclick = showGallery;
+    $('clear').onclick = () => { if (confirm('清空本機所有對話紀錄?')) { HIST = []; activeIdx = -1; saveHist(); renderHist(); } };
+    $('go').disabled = false;
+    if (!seeded) status('編譯器就緒 · 講一句「我願」,或點下面的例子,然後按「送出」（⌘/Ctrl+Enter 也行）');
+  } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
+})();
+</script>
+</body>
+</html>

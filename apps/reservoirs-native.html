@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣水庫 · 全 cell-native · 啞畫筆 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.06rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 76ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
+  .stage { border: 1px solid #30363d; border-radius: 14px; background: #0b0f14;
+           padding: .5rem; box-shadow: 0 10px 40px #0006; }
+  canvas { display: block; width: 100%; max-width: 960px; margin: 0 auto; border-radius: 10px; }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .9rem 0 .3rem; }
+  button { font: inherit; font-size: .82rem; padding: .42rem .9rem; border-radius: 999px;
+           border: 1px solid #30363d; background: #161b22; color: #c9d1d9; cursor: pointer;
+           transition: border-color .15s, background .15s, color .15s; }
+  button:hover { border-color: #58a6ff66; color: #e6edf3; }
+  button.on { background: #1f6feb33; border-color: #58a6ff; color: #cae2ff; }
+  .spacer { flex: 1; }
+  .toggle { font-size: .76rem; color: #8b949e; display: inline-flex; gap: .4rem; align-items: center;
+            cursor: pointer; user-select: none; }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-top: .9rem; font-size: .74rem; }
+  .lg { display: inline-flex; align-items: center; gap: .35rem; color: #b9c2cc; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .lg b { color: #e6edf3; font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 1.2rem; font-size: .74rem; color: #8b949e; border-top: 1px solid #21262d; padding-top: .9rem; }
+  .foot b { color: #c9d1d9; }
+  .tag { font-size: .66rem; color: #d29922; border: 1px solid #d2992244; background: #d299221a;
+         border-radius: 999px; padding: .1rem .5rem; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>台灣水庫 · 全 cell-native · 啞畫筆 <span class="tag">示意資料</span></h1>
+  <p class="lede">整條 <b>碎化 → 飛 → 凝實</b> 由<b>一支 cell</b> 算:給它相位 <code>prog</code> 和粒子身分,它吐出
+    <code>(x, y, 凝聚度)</code>——凝聚度是「多出來的那一維」,兩端=1(貼齊成形)、中段→0(散開)。
+    JS 是<b>啞畫筆</b>:不知道什麼是長條/圓餅/折線,每幀只「跟 cell 要點、畫點」。這跟 moon4 每幀跑飛鳥的 behavior cell、畫身體,
+    是<b>同一支引擎</b>。<a href="/reservoirs">← 脆版(host 畫向量實心圖)</a> 在此對照。</p>
+
+  <div class="stage"><canvas id="cv"></canvas></div>
+
+  <div class="controls">
+    <button id="b-bar" class="on">長條 Bar</button>
+    <button id="b-pie">圓餅 Pie</button>
+    <button id="b-line">折線 Line</button>
+    <div class="spacer"></div>
+    <label class="toggle"><input type="checkbox" id="auto"> 自動輪播</label>
+  </div>
+  <div class="legend" id="legend"></div>
+  <p class="foot" id="foot">載入中…</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const RES = [
+  { name: '石門', v: 0.62 }, { name: '新山', v: 0.55 }, { name: '寶山', v: 0.70 },
+  { name: '寶二', v: 0.48 }, { name: '永和山', v: 0.58 }, { name: '鯉魚潭', v: 0.44 },
+  { name: '德基', v: 0.81 }, { name: '霧社', v: 0.66 }, { name: '日月潭', v: 0.88 },
+  { name: '曾文', v: 0.40 }, { name: '烏山頭', v: 0.52 }, { name: '南化', v: 0.63 },
+];
+const N = RES.length, K = 110, P = N * K, CW = 960, CH = 560;
+const COLORS = RES.map((_, i) => `hsl(${Math.round(i / N * 360)}, 72%, 62%)`);
+const RGB = RES.map((_, i) => { const h = i / N * 360, c = hsl2rgb(h, 0.72, 0.62); return `${c[0]},${c[1]},${c[2]}`; });
+function hsl2rgb(h, s, l) {
+  h /= 360; const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h * 12) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); };
+  return [f(0), f(8), f(4)];
+}
+
+// ── 行為 cell:整條 碎化→飛→凝實。run(_) 讀 slots(相位+粒子身分)→ 依 axis 吐 x / y / 凝聚度 ──
+const CELL = `
+let fromL = get(0.0);
+let toL = get(1.0);
+let val = get(2.0);
+let i = get(3.0);
+let N = get(4.0);
+let axis = get(5.0);
+let cum = get(6.0);
+let sum = get(7.0);
+let W = get(8.0);
+let H = get(9.0);
+let pu = get(10.0);
+let pRect = get(11.0);
+let pWedge = get(12.0);
+let prog = get(13.0);
+let curveAmp = get(14.0);
+let nextX = get(15.0);
+let nextY = get(16.0);
+
+let mL = 64.0;
+let mR = 34.0;
+let mT = 46.0;
+let mB = 70.0;
+let plotW = W - mL - mR;
+let plotH = H - mT - mB;
+let baseline = H - mB;
+let colStep = plotW / N;
+let cx = mL + (i + 0.5) * colStep;
+let ccx = mL + plotW / 2.0;
+let ccy = mT + plotH / 2.0;
+let RR = plotH * 0.46;
+
+// 三種版面的 (x,y) 候選
+let barW = colStep * 0.60;
+let bx = cx - barW / 2.0 + pu * barW;
+let by = baseline - pRect * (val * plotH);
+let a0 = cum / sum * 6.2831853 - 1.5707963;
+let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
+let ang = a0 + pu * (a1 - a0);
+let rr = pWedge * RR;
+let pex = ccx + rr * cos(ang);
+let pey = ccy + rr * sin(ang);
+let vy = baseline - val * plotH;
+let lnx = cx + pu * (nextX - cx) + (pRect - 0.5) * 4.0;
+let lny = vy + pu * (nextY - vy) + (pRect - 0.5) * 4.0;
+
+// 依 fromL / toL 選端點(預設長條,pie/line 覆寫)
+let fromX = bx;
+let fromY = by;
+if fromL >= 0.5 { if fromL < 1.5 { fromX = pex; fromY = pey; } }
+if fromL >= 1.5 { fromX = lnx; fromY = lny; }
+let toX = bx;
+let toY = by;
+if toL >= 0.5 { if toL < 1.5 { toX = pex; toY = pey; } }
+if toL >= 1.5 { toX = lnx; toY = lny; }
+
+// 沿弧線內插 + 中段散開 + 凝聚度
+let e = prog * prog * (3.0 - 2.0 * prog);
+let dx = toX - fromX;
+let dy = toY - fromY;
+let baseX = fromX + dx * e;
+let baseY = fromY + dy * e;
+let bulge = curveAmp * 0.26 * sin(3.1415927 * prog);
+let ax = baseX - dy * bulge;
+let ay = baseY + dx * bulge;
+let coh = 1.0 - 0.92 * sin(3.1415927 * prog);
+let scat = (1.0 - coh) * 46.0;
+let sdir = pu * 6.2831853 + curveAmp * 3.0;
+let fx = ax + cos(sdir) * scat;
+let fy = ay + sin(sdir) * scat;
+
+let out = 0.0;
+if axis < 0.5 { out = fx; }
+if axis >= 0.5 { if axis < 1.5 { out = fy; } }
+if axis >= 1.5 { out = coh; }
+out
+`;
+
+// ── 受圍籬 JS 宿主(cell 只能碰這 6 個)──
+const slots = new Float64Array(32);
+const imports = { env: {
+  sin: Math.sin, cos: Math.cos,
+  get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+  ld: () => 0, sd: () => {},
+}};
+
+// 每顆粒子固定身分:pu / pRect 均勻、pWedge=√ (扇形等面積)、curveAmp 弧線幅度
+const jit = new Float32Array(P * 4);
+(() => { let s = 987654321;
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  for (let p = 0; p < P; p++) {
+    jit[p * 4] = rnd(); jit[p * 4 + 1] = rnd();
+    jit[p * 4 + 2] = Math.sqrt(rnd()); jit[p * 4 + 3] = rnd() * 2 - 1;
+  }
+})();
+const sumV = RES.reduce((a, r) => a + r.v, 0);
+const cum = []; { let c = 0; for (const r of RES) { cum.push(c); c += r.v; } }
+const M = { L: 64, R: 34, T: 46, B: 70 };
+const plotW = CW - M.L - M.R, plotH = CH - M.T - M.B, baseline = CH - M.B, colStep = plotW / N;
+const cxOf = i => M.L + (i + 0.5) * colStep;
+const nextX = RES.map((_, i) => cxOf(Math.min(i + 1, N - 1)));
+const nextY = RES.map((_, i) => baseline - RES[Math.min(i + 1, N - 1)].v * plotH);
+
+let runFn = null, fuelG = null;
+function cellCoord(p, axis) {
+  const i = (p / K) | 0;
+  slots[0] = fromL; slots[1] = toL; slots[2] = RES[i].v; slots[3] = i; slots[4] = N;
+  slots[5] = axis; slots[6] = cum[i]; slots[7] = sumV; slots[8] = CW; slots[9] = CH;
+  slots[10] = jit[p * 4]; slots[11] = jit[p * 4 + 1]; slots[12] = jit[p * 4 + 2];
+  slots[13] = prog; slots[14] = jit[p * 4 + 3]; slots[15] = nextX[i]; slots[16] = nextY[i];
+  if (fuelG) fuelG.value = 200000;
+  return runFn(0);
+}
+
+// ── 啞畫筆:對圖表一無所知,每幀「跟 cell 要點、畫點」──
+const cv = $('cv'), ctx = cv.getContext('2d');
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+cv.width = CW * DPR; cv.height = CH * DPR; ctx.scale(DPR, DPR);
+const DUR = 1200;
+let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
+
+function goTo(L) {
+  if (L === toL && !animating) { return; }
+  fromL = animating ? toL : fromL; fromL = toL; toL = L; prog = 0; tStart = performance.now(); animating = true;
+  ['bar', 'pie', 'line'].forEach((n, k) => $('b-' + n).classList.toggle('on', k === L));
+}
+
+function frame(now) {
+  ctx.clearRect(0, 0, CW, CH);
+  if (animating) { prog = Math.min(1, (now - tStart) / DUR); if (prog >= 1) { animating = false; fromL = toL; } }
+
+  // 凝聚度(只跟 prog 有關 → 一次呼叫)
+  slots[13] = prog; slots[5] = 2; if (fuelG) fuelG.value = 200000; const coh = runFn(0);
+  const size = 2.0 + coh * 3.2;
+  const alpha = 0.5 + coh * 0.5;
+
+  ctx.globalCompositeOperation = coh > 0.6 ? 'source-over' : 'lighter';
+  for (let p = 0; p < P; p++) {
+    const x = cellCoord(p, 0), y = cellCoord(p, 1);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = `rgba(${RGB[(p / K) | 0]},1)`;
+    ctx.beginPath(); ctx.arc(x, y, size, 0, 6.2831853); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+
+$('b-bar').onclick = () => goTo(0);
+$('b-pie').onclick = () => goTo(1);
+$('b-line').onclick = () => goTo(2);
+let autoTimer = null;
+$('auto').onchange = e => { clearInterval(autoTimer); if (e.target.checked) autoTimer = setInterval(() => goTo((toL + 1) % 3), 2800); };
+$('legend').innerHTML = RES.map((r, i) => `<span class="lg"><span class="sw" style="background:${COLORS[i]}"></span>${r.name} <b>${Math.round(r.v * 100)}%</b></span>`).join('');
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js');
+    await mod.default();
+    const bytes = mod.compile_ui_cell_wasm(CELL);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFn = instance.exports.run; fuelG = instance.exports.fuel || null;
+    $('foot').innerHTML = `一支 <b>${bytes.length}-byte 受圍籬 cell</b> 吐出每幀每顆粒子的 <code>(x, y, 凝聚度)</code>` +
+      `(${P} 顆粒子,每幀現算——正是 moon4 每 tick 跑一次 behavior cell 的做法)。JS 這支<b>啞畫筆</b>約 15 行、` +
+      `對長條/圓餅/折線<b>一無所知</b>。實心由<b>密粒子凝聚</b>而成(非向量)——那是把畫筆變啞、行為全進 cell 的代價;` +
+      `而畫筆碰不到螢幕之外任何東西,正是圍籬本身。`;
+    requestAnimationFrame(frame);
+  } catch (err) {
+    $('foot').innerHTML = `<span style="color:#f85149">需要 /pkg 內的 wasm-jit 編譯器:${err}</span>`;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

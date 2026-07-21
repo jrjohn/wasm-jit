@@ -1,0 +1,1225 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本機資料分析台 · AI 幫你分析它看不到的資料 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1560px; margin: 0 auto; }
+  @media (max-width: 640px) {
+    body { padding: .9rem .55rem 2rem; }
+    h1 { font-size: 1rem; } .lede { font-size: .74rem; }
+    .panel { padding: .7rem .7rem; border-radius: 11px; }
+    .bar { flex-direction: column; } #go { padding: .55rem 0; }
+    .chip { font-size: .7rem; padding: .24rem .55rem; }
+    .prev th, .prev td { font-size: .62rem; }
+  }
+  h1 { font-size: 1.12rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 84ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
+  .panel { border: 1px solid #30363d; border-radius: 14px; background: #0f141a; padding: 1rem 1.15rem; }
+  .phead { font-size: .72rem; color: #6e7681; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 .7rem; }
+  .drop { border: 2px dashed #30363d; border-radius: 14px; padding: 1.6rem; text-align: center;
+          color: #8b949e; font-size: .85rem; cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color: #58a6ff; background: #58a6ff0d; color: #c9d1d9; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; margin-top: 1rem; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .bar { display: flex; gap: .5rem; margin-top: 1rem; }
+  #intent { flex: 1; font: inherit; font-size: .9rem; padding: .6rem .8rem; border-radius: 10px;
+            border: 1px solid #30363d; background: #0b0f14; color: inherit; resize: vertical; min-height: 46px; }
+  #intent:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  #go { font: inherit; font-size: .9rem; font-weight: 600; padding: 0 1.3rem; border-radius: 10px;
+        border: 1px solid #58a6ff33; background: linear-gradient(180deg,#2a7bff,#1a63d8); color: #fff; cursor: pointer; }
+  #go:disabled { opacity: .5; cursor: wait; }
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+  .chip { font-size: .74rem; padding: .28rem .7rem; border-radius: 999px; border: 1px solid #30363d;
+          background: #161b22; color: #b9c2cc; cursor: pointer; }
+  .chip:hover { border-color: #58a6ff66; color: #e6edf3; }
+  .status { font-size: .8rem; color: #8b949e; margin: .8rem 0 0; min-height: 1.2em; }
+  .status.err { color: #f85149; } .status.ok { color: #7ee787; }
+  table.prev { border-collapse: collapse; font-size: .68rem; width: 100%; }
+  table.prev th { text-align: left; color: #d2a8ff; border-bottom: 1px solid #21262d; padding: .2rem .4rem; white-space: nowrap; }
+  table.prev td { color: #8b949e; padding: .15rem .4rem; white-space: nowrap; }
+  .ty { font-size: .6rem; color: #6e7681; }
+  .leak { border: 1px solid #3fb95055; border-radius: 10px; background: #0b1710; padding: .7rem .8rem; }
+  .leak h4 { margin: 0 0 .35rem; font-size: .74rem; color: #7ee787; font-weight: 600; }
+  .leak pre { margin: 0; font-size: .64rem; color: #a5d6ff; white-space: pre-wrap; word-break: break-all;
+              max-height: 190px; overflow: auto; }
+  .stay { border: 1px solid #f8514944; border-radius: 10px; background: #17100f; padding: .7rem .8rem; margin-top: .55rem; }
+  .stay h4 { margin: 0 0 .3rem; font-size: .74rem; color: #f0883e; font-weight: 600; }
+  .stay div { font-size: .72rem; color: #8b949e; }
+  .toggle { font-size: .72rem; color: #8b949e; display: inline-flex; gap: .35rem; align-items: center; cursor: pointer; margin-top: .5rem; }
+  /* widgets */
+  .w-stack { display: flex; flex-direction: column; gap: .7rem; }
+  .w-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .w-grid { display: grid; gap: .35rem .9rem; align-items: center; }
+  .w-label { font-size: .9rem; color: #c9d1d9; margin: 0; }
+  .w-stack > .w-label:first-child { font-size: 1.05rem; font-weight: 600; color: #e6edf3; }
+  .w-value { font-size: .85rem; color: #8b949e; display: inline-flex; align-items: baseline; gap: .35rem;
+             background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px; padding: .2rem .7rem; }
+  .w-value b { color: #79b8ff; font-variant-numeric: tabular-nums; font-size: .95rem; }
+  #stage canvas { max-width: 100%; display: block; }
+  .cell { border: 1px solid #21262d; border-radius: 8px; margin-bottom: .5rem; overflow: hidden; }
+  .cell .ch { display: flex; justify-content: space-between; font-size: .72rem; padding: .35rem .6rem; background: #0b0f14; color: #d2a8ff; }
+  .cell pre { margin: 0; padding: .5rem .6rem; font-size: .68rem; color: #a5d6ff; white-space: pre; overflow-x: auto; line-height: 1.4; }
+  .rc { font-variant-numeric: tabular-nums; font-size: .68rem; }
+  .live { font-size: .72rem; color: #d29922; margin-bottom: .6rem; }
+  .live b { color: #f0883e; }
+  .dl { display: block; padding: 0 .2rem; border-radius: 3px; }
+  .dl.chg { background: #2ea04326; color: #7ee787; }
+  .gen { font-size: .68rem; color: #6e7681; margin: .15rem 0 .5rem; }
+  .fencebtn { font-size: .72rem; padding: .3rem .7rem; border-radius: 999px; border: 1px solid #f8514966;
+    background: #17100f; color: #f0883e; cursor: pointer; }
+  .fencebtn:hover { border-color: #f85149; }
+  .fence { font-size: .72rem; color: #7ee787; margin-top: .5rem; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;align-items:baseline;gap:.7rem;flex-wrap:wrap">
+    <h1 style="margin:0"><span id="t-title">本機資料分析台</span> 🔒
+      <span style="font-size:.8rem;color:#8b949e;font-weight:400" id="t-sub">AI 幫你分析它看不到的資料</span></h1>
+    <span class="chip" id="langbtn" style="font-size:.7rem;padding:.15rem .6rem">EN</span>
+  </div>
+  <p class="lede" id="t-lede">把 CSV 拖進來——<b>檔案不上傳</b>,只留在這個瀏覽器分頁裡。送給 Claude 的<b>只有欄位名與型別</b>,
+    <b>一列資料都不送</b>。它寫出<b>受圍籬的 cell</b>,cell <b>在你的機器上</b>跑你的真資料。
+    cell 的 import table 裡<b>沒有網路</b>——想把資料傳出去,<b>編譯期就死</b>。
+    所以你<b>不需要信任</b>它寫的程式。</p>
+
+  <div class="panel" style="margin-bottom:1rem">
+    <p class="phead">▸ <span id="t-result">分析結果</span></p>
+    <div id="stage"><span style="color:#6e7681;font-size:.8rem">載入中…</span></div>
+  </div>
+
+  <div class="panel">
+    <div class="drop" id="drop">
+      <span id="t-drop">拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u></span>
+      <div style="margin-top:.5rem">
+        <span class="chip" id="sampleTemp" style="border-color:#3fb95066;color:#7ee787" id="t-stemp">🌡 緯度帶 1880–2025(NASA)</span>
+        <span class="chip" id="sampleCountry" style="border-color:#3fb95066;color:#7ee787" id="t-scountry">🌍 181 國 1950–2025(含經緯度)</span>
+        <span class="chip" id="sample"><span id="t-ssalary">📄 擬真薪資範例(合成)</span></span>
+      </div>
+      <input type="file" id="file" accept=".csv,text/csv" style="display:none">
+    </div>
+    <div id="loaded" style="display:none">
+      <div class="bar">
+        <textarea id="intent"></textarea>
+        <button id="go" disabled><span id="t-send">送出</span></button>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="status" id="status">載入編譯器…</div>
+      <details style="margin-top:.9rem">
+        <summary style="cursor:pointer;font-size:.74rem;color:#6e7681"><span id="t-proof">▸ 你的資料 &amp; 送出去的到底是什麼</span></summary>
+        <div class="cols" style="margin-top:.6rem">
+          <div>
+            <p class="phead">▸ <span id="t-yours">你的資料</span></p>
+            <div style="overflow:auto;max-height:210px"><table class="prev" id="prev"></table></div>
+            <label class="toggle"><input type="checkbox" id="anon"> <span id="t-anon">連欄位名都隱藏</span></label>
+          </div>
+          <div>
+            <div class="leak"><h4 id="t-leak">↗ 離開你電腦的全部內容</h4><pre id="leak"></pre></div>
+            <div class="stay"><h4 id="t-stay">⛔ 留在本機、一個 byte 都沒送</h4><div id="stay"></div></div>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="panel" style="margin-top:1rem">
+    <p class="phead">▸ <span id="t-evid">證據</span></p>
+    <div id="evidence"><span style="color:#6e7681;font-size:.8rem">分析後這裡會顯示每支 cell 的原始碼 + import table</span></div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ── i18n ───────────────────────────────────────────────────────────
+const I18N = {
+  zh: {
+    title: '本機資料分析台', sub: 'AI 幫你分析它看不到的資料',
+    lede: '把 CSV 拖進來——<b>檔案不上傳</b>,只留在這個瀏覽器分頁裡。送給 Claude 的<b>只有欄位名與型別</b>,<b>一列資料都不送</b>。它寫出<b>受圍籬的 cell</b>,cell <b>在你的機器上</b>跑你的真資料。cell 的 import table 裡<b>沒有網路</b>——想把資料傳出去,<b>編譯期就死</b>。所以你<b>不需要信任</b>它寫的程式。',
+    result: '分析結果(活的,在你機器上算 · 可切換視角)', evidence: '證據:AI 寫的 CELL(受圍籬)',
+    drop: '拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦',
+    sTemp: '🌡 緯度帶 1880–2025(NASA)', sCountry: '🌍 181 國 1950–2025(含經緯度)', sSalary: '📄 擬真薪資範例(合成)',
+    ask: '想怎麼改?例如:改成由高到低排名 / 只看北極區歷年變化 / 改成圓餅', send: '送出',
+    proof: '你的資料 & 送出去的到底是什麼(點開看證據)',
+    yours: '你的資料(只在本機,前 5 列)', anon: '連欄位名都隱藏(送出 c0/c1/c2…)',
+    leak: '↗ 離開你電腦的全部內容', stay: '⛔ 留在本機、一個 byte 都沒送',
+    vBar: '長條', vPie: '圓餅', vLine: '折線', vGlobe: '🌍 地球',
+    hintGlobe: '顏色 = 對應的那根長條 · 大小/粗細 = |數值| · 拖曳可轉、滾輪縮放、點選連動',
+    hintInset: '顏色同左圖 · 粗細=|值| · 點左圖→球轉過去 · 拖球可轉 · 指到球上看名稱',
+    idle: '◉ 自動展示中 — 碰一下就交還給你',
+    foot: '同一份資料多種視角 · 值由受圍籬 cell 在本機算 · 版面由 {n}-byte layout cell 算',
+    noApi: '這是離線展示版:<b>AI 生成需要本機的 server</b>。其餘全部可用——換視角、轉地球、拖自己的 CSV 進來,一切都在你的瀏覽器裡算。',
+    ready: '編譯器就緒 —— 拖一份 CSV 進來,或點上面的範例',
+    loaded: '已載入 {r} 列 × {c} 欄 —— 全部留在本機',
+    working: '🔒 只把欄位 schema 送出去,資料留在本機…', done: '✓ 算完了 —— 全程在你的機器上',
+    fence: '圍籬:每支 cell 只能 import {f} —— <b>沒有網路</b>。它讀得到你的資料(<code>ld</code>),但沒有能力送出去;這裡 <code>sd</code> 也是 no-op,連改都改不了。',
+    fenceBtn: '按這裡:把 fetch 塞進一支 cell 試編譯', fenceQ: '想確認圍籬是真的?',
+    changed: '你剛才那句話,改的不是參數 —— 是程式本身。',
+  },
+  en: {
+    title: 'Local Data Workbench', sub: 'AI analyses data it never sees',
+    lede: 'Drop a CSV — <b>the file is not uploaded</b>; it stays in this browser tab. Claude receives <b>only column names and types</b>, <b>never a single row</b>. It writes <b>capability-fenced cells</b> that run <b>on your machine</b> over your real data. A cell\'s import table has <b>no network</b> — a reach to send data out <b>dies at compile time</b>. So you <b>don\'t have to trust</b> the code it wrote.',
+    result: 'Result (live, computed on your machine · switch views)', evidence: 'Evidence: the fenced CELL the AI wrote',
+    drop: 'Drop a <b>CSV</b> here, or <u>click to choose</u> — it never leaves this computer',
+    sTemp: '🌡 Latitude bands 1880–2025 (NASA)', sCountry: '🌍 181 countries 1950–2025 (with coords)', sSalary: '📄 Sample payroll (synthetic)',
+    ask: 'How should it change? e.g. rank high to low / only the Arctic over time / make it a pie', send: 'Send',
+    proof: 'Your data & exactly what was sent (open to inspect)',
+    yours: 'Your data (local only, first 5 rows)', anon: 'Hide column names too (send c0/c1/c2…)',
+    leak: '↗ Everything that left your computer', stay: '⛔ Stayed local — not one byte sent',
+    vBar: 'Bar', vPie: 'Pie', vLine: 'Line', vGlobe: '🌍 Globe',
+    hintGlobe: 'colour = its bar · size/thickness = |value| · drag to turn, wheel to zoom, click to link',
+    hintInset: 'same colours as the chart · click a bar → globe turns · drag to spin · hover for names',
+    idle: '◉ auto-demo — touch anything to take over',
+    foot: 'one dataset, several views · values computed locally by fenced cells · layout by a {n}-byte cell',
+    noApi: 'Offline demo: <b>live AI generation needs the local server</b>. Everything else works — switch views, spin the globe, drop your own CSV; it all runs in your browser.',
+    ready: 'Compiler ready — drop a CSV, or try a sample above',
+    loaded: 'Loaded {r} rows × {c} columns — all of it stayed local',
+    working: '🔒 Sending only the column schema; your rows stay here…', done: '✓ Done — computed entirely on your machine',
+    fence: 'Fence: every cell may import only {f} — <b>no network</b>. It can read your data (<code>ld</code>) but has no way to send it out; <code>sd</code> is a no-op here, so it cannot even modify it.',
+    fenceBtn: 'Click: put fetch() in a cell and try to compile', fenceQ: 'Want to check the fence is real?',
+    changed: 'That sentence changed the program itself — not a parameter.',
+  },
+};
+let LANG = (localStorage.getItem('analyst.lang') || (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+if (!I18N[LANG]) LANG = 'zh';
+const T = (k, vars) => { let t = (I18N[LANG] && I18N[LANG][k]) || (I18N.zh[k] || k);
+  if (vars) for (const p in vars) t = t.split('{' + p + '}').join(vars[p]);
+  return t; };
+const REGION_EN = { '全球':'Global','北半球':'N. Hemisphere','南半球':'S. Hemisphere',
+  '北緯24-90':'24–90°N','南北緯24以內':'24°S–24°N','南緯24-90':'24–90°S',
+  '北極區64-90N':'Arctic 64–90N','北高緯44-64N':'44–64°N','北中緯24-44N':'24–44°N','赤道-24N':'EQ–24N',
+  '24S-赤道':'24S–EQ','南中緯24-44S':'24–44°S','南高緯44-64S':'44–64°S','南極區64-90S':'Antarctic 64–90S',
+  '熱帶':'Tropical','副熱帶':'Subtropical','溫帶':'Temperate','寒帶':'Polar','北':'North','南':'South','赤道':'Equator' };
+const L10N = name => LANG === 'en' ? (REGION_EN[name] || name) : name;
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function applyI18N() {
+  const set = (id, k, html) => { const e = $(id); if (!e) return; if (html) e.innerHTML = T(k); else e.textContent = T(k); };
+  document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-Hant';
+  set('t-title', 'title'); set('t-sub', 'sub'); set('t-lede', 'lede', true);
+  set('t-result', 'result'); set('t-evid', 'evidence'); set('t-drop', 'drop', true);
+  set('t-stemp', 'sTemp'); set('t-scountry', 'sCountry'); set('t-ssalary', 'sSalary');
+  set('t-send', 'send'); set('t-proof', 'proof'); set('t-yours', 'yours'); set('t-anon', 'anon');
+  set('t-leak', 'leak'); set('t-stay', 'stay');
+  const it = $('intent'); if (it) it.placeholder = T('ask');
+  const lb = $('langbtn'); if (lb) lb.textContent = LANG === 'zh' ? 'EN' : '中';
+  document.title = T('title') + ' · wasm-jit';
+}
+function status(m, c) { const s = $('status'); s.textContent = m; s.className = 'status' + (c ? ' ' + c : ''); }
+
+let compileUiCell = null;
+let COAST = [];                       // 真實海岸線(Natural Earth 110m,簡化到 ~900 點)
+let EARTH = null;                     // 地球貼圖(等距長方投影)
+async function loadEarth() {
+  const img = new Image(); img.src = 'assets/earth.jpg';
+  try { await img.decode(); } catch (e) { return; }
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+  EARTH = { d: g.getImageData(0, 0, img.width, img.height).data, w: img.width, h: img.height };
+}
+let COLS = [], NROWS = 0, NCOLS = 0, VALUES = null, FILEINFO = { name: '', bytes: 0 };
+
+// ── CSV(全在本機)──────────────────────────────────────────────
+function parseCSV(text) {
+  const rows = []; let i = 0, field = '', row = [], inQ = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQ = true; i++; continue; }
+    if (ch === ',') { row.push(field); field = ''; i++; continue; }
+    if (ch === '\r') { i++; continue; }
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+    field += ch; i++;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length && !(r.length === 1 && r[0].trim() === ''));
+}
+
+function ingest(text, name, bytes) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) { status('這份 CSV 看起來沒有資料列', 'err'); return; }
+  const header = rows[0].map(h => h.trim());
+  const body = rows.slice(1);
+  NCOLS = header.length; NROWS = body.length;
+  const sample = body.slice(0, 300);
+  COLS = header.map((name, c) => {
+    const vals = sample.map(r => (r[c] ?? '').trim()).filter(v => v !== '');
+    const numeric = vals.length > 0 && vals.every(v => Number.isFinite(+v));
+    return { name, type: numeric ? 'number' : 'text', cats: [], catMap: new Map(), min: Infinity, max: -Infinity };
+  });
+  VALUES = new Float64Array(NROWS * NCOLS);
+  for (let r = 0; r < NROWS; r++) {
+    for (let c = 0; c < NCOLS; c++) {
+      const raw = (body[r][c] ?? '').trim();
+      const col = COLS[c];
+      let v;
+      if (col.type === 'number') { v = raw === '' ? 0 : +raw; if (v < col.min) col.min = v; if (v > col.max) col.max = v; }
+      else {
+        if (!col.catMap.has(raw)) { col.catMap.set(raw, col.cats.length); col.cats.push(raw); }
+        v = col.catMap.get(raw);
+      }
+      VALUES[r * NCOLS + c] = v;
+    }
+  }
+  FILEINFO = { name, bytes };
+  renderPreview(body);
+  renderLeak();
+  $('loaded').style.display = '';
+  $('drop').style.display = 'none';
+  if (compileUiCell) $('go').disabled = false;
+  status(T('loaded', { r: NROWS.toLocaleString(), c: NCOLS }), 'ok');
+}
+
+function renderPreview(body) {
+  const head = '<tr>' + COLS.map(c => `<th>${c.name}<div class="ty">${c.type === 'number' ? '數值' : `文字 · ${c.cats.length} 類`}</div></th>`).join('') + '</tr>';
+  const rows = body.slice(0, 5).map(r => '<tr>' + r.map(v => `<td>${String(v).slice(0, 18)}</td>`).join('') + '</tr>').join('');
+  $('prev').innerHTML = head + rows;
+}
+
+// 送出去的 schema:欄位名/型別/筆數。沒有任何一列;文字欄只送「有幾類」,不送類別名稱。
+function buildSchema() {
+  const anon = $('anon').checked;
+  return {
+    rows: NROWS, cols: NCOLS,
+    columns: COLS.map((c, i) => ({
+      index: i, name: anon ? 'c' + i : c.name, type: c.type,
+      ...(c.type === 'number' ? { min: +c.min.toFixed(4), max: +c.max.toFixed(4) } : { distinct: c.cats.length }),
+    })),
+  };
+}
+function renderLeak() {
+  $('leak').textContent = JSON.stringify(buildSchema(), null, 1);
+  const kb = (FILEINFO.bytes / 1024).toFixed(1);
+  $('stay').innerHTML = `<b style="color:#c9d1d9">${FILEINFO.name}</b> · ${kb} KB · ` +
+    `<b style="color:#c9d1d9">${NROWS.toLocaleString()} 列</b>的實際內容,以及文字欄的<b style="color:#c9d1d9">所有類別名稱</b>。` +
+    `<br>對照:ChatGPT code interpreter / Cowork 這類做法,第一步就是把整份檔案送到伺服器。`;
+}
+$('anon').addEventListener?.('change', renderLeak);
+
+// ── AI 介接:常見統計改成「宣告」,DSL 由 host 依模板生成(一樣受圍籬編譯)──
+//    模型只要寫 {"agg":"mean","of":5,"by":3},不必寫 row 迴圈、不必記 ld(r*cols+c)、
+//    不必用兩個 guard 模擬 ==。它出錯的機會因此少一大截。
+function aggCell(kind, ofCol, byCol, where) {
+  const OF = `${ofCol}.0`, BY = (byCol === null || byCol === undefined) ? null : `${byCol}.0`;
+  let t = 'let n = get(30.0);\nlet c = get(31.0);\nlet target = x;\n' +
+          'let s = 0.0;\nlet k = 0.0;\nlet best = 0.0;\nlet first = 1.0;\nlet r = 0.0;\n' +
+          'while r < n {\n';
+  let close = '';
+  if (where && where.col !== undefined) {              // 期間/範圍過濾,例如 {col:0,min:1990}
+    t += ' let w = ld(r * c + ' + (+where.col) + '.0);\n';
+    if (where.min !== undefined) { t += ' if w >= ' + (+where.min) + '.0 {\n'; close += ' }\n'; }
+    if (where.max !== undefined) { t += ' if w <= ' + (+where.max) + '.0 {\n'; close += ' }\n'; }
+  }
+  if (BY) { t += ' let g = ld(r * c + ' + BY + ');\n if g >= target { if g <= target {\n'; close += ' } }\n'; }
+  t += '  let v = ld(r * c + ' + OF + ');\n  s = s + v;\n  k = k + 1.0;\n' +
+       '  if first >= 0.5 { best = v; first = 0.0; }\n';
+  if (kind === 'max') t += '  if v > best { best = v; }\n';
+  if (kind === 'min') t += '  if v < best { best = v; }\n';
+  t += close;
+  t += ' r = r + 1.0;\n}\nlet out = 0.0;\n';
+  if (kind === 'mean') t += 'if k > 0.0 { out = s / k; }\n';
+  else if (kind === 'sum') t += 'out = s;\n';
+  else if (kind === 'count') t += 'out = k;\n';
+  else t += 'if k > 0.0 { out = best; }\n';
+  return t + 'out';
+}
+// 走一遍 tree:凡是宣告了 agg 的,就地合成一支 cell 並改綁它
+function expandAggregates(schema) {
+  const cells = [...(schema.cells || [])]; let auto = 0;
+  const walk = n => {
+    if (Array.isArray(n)) return n.map(walk);
+    if (!n || typeof n !== 'object') return n;
+    const o = {}; for (const k in n) o[k] = walk(n[k]);
+    const g = o.groups;
+    if (g && g.agg && !g.bind) {
+      const id = `_agg${++auto}`;
+      cells.push({ id, script: aggCell(g.agg, +g.of || 0, +g.col || 0, g.where) });
+      g.bind = id;
+    }
+    if (o.type === 'value' && o.agg && !o.bind) {
+      const id = `_agg${++auto}`;
+      cells.push({ id, script: aggCell(o.agg, +o.of || 0, null, o.where) });
+      o.bind = id;
+    }
+    return o;
+  };
+  const tree = walk(JSON.parse(JSON.stringify(schema.tree || {})));
+  return { ...schema, cells, tree };
+}
+
+// ── 受圍籬 runtime(cell 只有這 6 個函式;資料在 ld() 後面)────────────
+async function manifestUi(schema) {
+  schema = expandAggregates(schema);   // 宣告式統計 → 合成 cell(仍走同一道圍籬)
+  const slots = new Float64Array(32);
+  const imports = { env: {
+    sin: Math.sin, cos: Math.cos,
+    get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+    ld: i => { const k = i | 0; return (k >= 0 && k < VALUES.length) ? VALUES[k] : 0; },  // ← 你的資料
+    sd: () => {},                                                                          // 唯讀:不讓它改你的資料
+  } };
+  slots[30] = NROWS; slots[31] = NCOLS;
+  const runFns = {}, fuels = {}, outputs = {};
+  for (const c of (schema.cells || [])) {
+    const bytes = compileUiCell(c.script);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFns[c.id] = instance.exports.run; fuels[c.id] = instance.exports.fuel || null;
+  }
+  const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 60000000; outputs[id] = f(x); };
+  const binds = [], charts = [], morphs = [];
+  const refresh = () => {
+    for (const b of binds) { if (b.arg !== undefined) run(b.id, b.arg); const v = outputs[b.id];
+      b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v); }
+    for (const ch of charts) drawChart(ch, ch.slices.map(s => {
+      if (s.arg !== undefined) { run(s.bind, s.arg); return { label: s.label, value: outputs[s.bind] || 0, color: s.color }; }
+      return { label: s.label, value: outputs[s.bind] || 0, color: s.color };
+    }));
+  };
+  const root = build(schema.tree, binds, charts, morphs);
+  for (const c of (schema.cells || [])) run(c.id, 0);
+  refresh();
+  for (const m of morphs) {                       // 值由受圍籬 cell 逐組算出,再交給變形引擎
+    const geo = m.ordered ? null : geoForCats(m.col, m.cats);   // 經緯度:本機算,AI 從沒看過
+    let rows = m.cats.map((nm, i) => { run(m.bind, m.args[i]);
+      return { label: L10N(nm), value: outputs[m.bind] || 0, geo: geo ? geo[i] : null }; });
+    if (m.sort === 'desc') rows.sort((a, b) => b.value - a.value);   // ← 只有 host 知道數值,排名得在這裡做
+    if (m.sort === 'asc') rows.sort((a, b) => a.value - b.value);
+    m.ph.appendChild(makeMorphChart(rows.map(r => r.label), rows.map(r => r.value),
+      geo ? rows.map(r => r.geo) : null, m.ordered));
+  }
+  return root;
+}
+
+function build(node, binds, charts, morphs) {
+  if (!node || !node.type) return document.createTextNode('');
+  const t = node.type;
+  if (t === 'stack' || t === 'row') {
+    const d = document.createElement('div'); d.className = t === 'row' ? 'w-row' : 'w-stack';
+    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts, morphs))); return d;
+  }
+  if (t === 'grid') {
+    const d = document.createElement('div'); d.className = 'w-grid';
+    d.style.gridTemplateColumns = `repeat(${Math.max(1, Math.min(12, +node.cols || 2))}, auto)`;
+    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts, morphs))); return d;
+  }
+  if (t === 'repeat') {
+    const n = Math.max(0, Math.min(300, +node.count || 0)); const frag = document.createDocumentFragment();
+    for (let i = 0; i < n; i++) {
+      const tpl = JSON.parse(JSON.stringify(node.template).replace(/\$i\b/g, String(i)));
+      for (const one of (Array.isArray(tpl) ? tpl : [tpl])) frag.appendChild(build(one, binds, charts, morphs));
+    }
+    return frag;
+  }
+  if (t === 'label') { const p = document.createElement('div'); p.className = 'w-label'; p.textContent = node.text || ''; return p; }
+  if (t === 'value') {
+    const w = document.createElement('span'); w.className = 'w-value';
+    if (node.label) { const l = document.createElement('span'); l.textContent = node.label; w.appendChild(l); }
+    const b = document.createElement('b'); b.textContent = '—'; w.appendChild(b);
+    binds.push({ id: node.bind, el: b, arg: node.arg === undefined ? undefined : +node.arg }); return w;
+  }
+  if (t === 'pie' || t === 'bar') {
+    let slices = [];
+    if (node.groups) {                       // ← 分組圖:交給變形引擎(bar⇄pie⇄line 即時變形)
+      const col = +node.groups.col || 0, bind = node.groups.bind;
+      const C = COLS[col]; let cats, args, ordered = false;
+      if (C && C.type === 'number') {                 // 數值欄分組(例如年份)→ 有序
+        const set = new Set(); for (let r = 0; r < NROWS; r++) set.add(VALUES[r * NCOLS + col]);
+        args = [...set].sort((a, b) => a - b); cats = args.map(v => String(v)); ordered = true;
+      } else { cats = (C && C.cats) || []; args = cats.map((_, i) => i); }
+      const ph = document.createElement('div');
+      morphs.push({ ph, cats, args, bind, col, ordered, sort: node.groups.sort || node.sort || 'none' });
+      return ph;
+    }
+    {
+      const sls = node.slices || [];
+      slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind,
+        color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
+    }
+    const LW = t === 'bar' ? Math.min(660, Math.max(300, slices.length * 30)) : 300;
+    const LH = t === 'bar' ? 260 : 240, dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cv = document.createElement('canvas');
+    cv.width = LW * dpr; cv.height = LH * dpr; cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
+    cv.getContext('2d').scale(dpr, dpr);
+    charts.push({ cv, kind: t, slices, LW, LH }); return cv;
+  }
+  const p = document.createElement('div'); p.className = 'w-label'; p.style.opacity = .5; p.textContent = '[' + t + ']'; return p;
+}
+
+function drawChart(ch, slices) {
+  const ctx = ch.cv.getContext('2d'), W = ch.LW, H = ch.LH;
+  ctx.clearRect(0, 0, W, H);
+  const total = slices.reduce((a, s) => a + Math.max(0, s.value), 0) || 1;
+  if (ch.kind === 'pie') {
+    const cx = W * 0.42, cy = H / 2, R = Math.min(W * 0.38, H * 0.44); let a = -Math.PI / 2;
+    for (const s of slices) {
+      const frac = Math.max(0, s.value) / total, a2 = a + frac * 2 * Math.PI;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a2); ctx.closePath();
+      ctx.fillStyle = s.color; ctx.fill(); ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+      if (frac > 0.04) { const m = (a + a2) / 2, lr = R * 0.6;
+        ctx.fillStyle = '#fff'; ctx.font = '600 11px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.label, cx + lr * Math.cos(m), cy + lr * Math.sin(m) - 6);
+        ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
+      a = a2;
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '11px ui-monospace, monospace';
+    let ly = H / 2 - slices.length * 8;
+    for (const s of slices) { ctx.fillStyle = s.color; ctx.fillRect(W * 0.84, ly - 5, 10, 10);
+      ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, W * 0.84 + 15, ly); ly += 18; }
+  } else {
+    const n = slices.length, crowded = n > 8;
+    const mL = 8, mB = crowded ? 74 : 22, plotW = W - mL - 8, plotH = H - 18 - mB, base = H - mB;
+    const max = Math.max(1, ...slices.map(s => s.value)), bw = plotW / n * 0.72;
+    ctx.font = '10px ui-monospace, monospace';
+    slices.forEach((s, i) => {
+      const cx = mL + (i + 0.5) * plotW / n, h = Math.max(0, s.value) / max * plotH;
+      ctx.fillStyle = s.color; ctx.fillRect(cx - bw / 2, base - h, bw, h);
+      if (n <= 14) { ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(fmt(s.value), cx, base - h - 13); }
+      ctx.fillStyle = '#c9d1d9';
+      if (crowded) { ctx.save(); ctx.translate(cx, base + 5); ctx.rotate(-Math.PI * 55 / 180);
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(s.label, 0, 0); ctx.restore(); }
+      else { ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(s.label, cx, base + 4); }
+    });
+  }
+}
+
+
+// ── 變形引擎:同一份資料在 bar ⇄ pie ⇄ line 之間即時變形 ─────────────────
+// 這支 layout cell 是固定的(不是 AI 生的),同樣受圍籬:只有 sin/cos/get/set。
+// axis 0/1/2 = 粒子 x/y/凝聚度;axis 5..9 = 靜止時的實心圖元參數。
+const MORPH_CELL = `
+let fromL = get(0.0);
+let toL = get(1.0);
+let val = get(2.0);
+let i = get(3.0);
+let N = get(4.0);
+let axis = get(5.0);
+let cum = get(6.0);
+let sum = get(7.0);
+let W = get(8.0);
+let H = get(9.0);
+let pu = get(10.0);
+let pRect = get(11.0);
+let pWedge = get(12.0);
+let prog = get(13.0);
+let curveAmp = get(14.0);
+let nextX = get(15.0);
+let nextY = get(16.0);
+let glat = get(17.0) * 0.0174533;
+let glon = get(18.0) * 0.0174533;
+let shapeL = get(19.0);
+let spin = get(20.0);
+let zoom = get(21.0);
+let tilt = get(22.0);
+
+let mL = 58.0;
+let mR = 26.0;
+let mT = 34.0;
+let mB = 74.0;
+let plotW = W - mL - mR;
+let plotH = H - mT - mB;
+let baseline = H - mB;
+let colStep = plotW / N;
+let cx = mL + (i + 0.5) * colStep;
+let ccx = mL + plotW / 2.0;
+let ccy = mT + plotH / 2.0;
+let RR = plotH * 0.46;
+let barW = colStep * 0.70;
+let gcx = mL + plotW / 2.0;
+let gcy = mT + plotH / 2.0;
+let GR = plotH * 0.44 * zoom;
+if get(25.0) > 0.0 { gcx = get(23.0); gcy = get(24.0); GR = get(25.0); }
+let dl = glon - spin;
+let lat0 = tilt;
+let cosc = sin(lat0) * sin(glat) + cos(lat0) * cos(glat) * cos(dl);
+let ggx = gcx + GR * cos(glat) * sin(dl);
+let ggy = gcy - GR * (cos(lat0) * sin(glat) - sin(lat0) * cos(glat) * cos(dl));
+let a0 = cum / sum * 6.2831853 - 1.5707963;
+let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
+let topY = baseline - val * plotH;
+
+let out = 0.0;
+
+if axis >= 4.5 {
+  if shapeL < 0.5 {
+    if axis < 5.5 { out = cx; }
+    if axis >= 5.5 { if axis < 6.5 { out = topY; } }
+    if axis >= 6.5 { out = barW / 2.0; }
+  }
+  if shapeL >= 0.5 { if shapeL < 1.5 {
+    if axis < 5.5 { out = ccx; }
+    if axis >= 5.5 { if axis < 6.5 { out = ccy; } }
+    if axis >= 6.5 { if axis < 7.5 { out = RR; } }
+    if axis >= 7.5 { if axis < 8.5 { out = a0; } }
+    if axis >= 8.5 { out = a1; }
+  } }
+  if shapeL >= 1.5 { if shapeL < 2.5 {
+    if axis < 5.5 { out = cx; }
+    if axis >= 5.5 { out = topY; }
+  } }
+  if shapeL >= 2.5 {
+    if axis < 5.5 { out = ggx; }
+    if axis >= 5.5 { if axis < 6.5 { out = ggy; } }
+    if axis >= 6.5 { out = cosc; }
+  }
+}
+
+if axis < 4.5 {
+  let bx = cx - barW / 2.0 + pu * barW;
+  let by = baseline - pRect * (val * plotH);
+  let ang = a0 + pu * (a1 - a0);
+  let rr = pWedge * RR;
+  let pex = ccx + rr * cos(ang);
+  let pey = ccy + rr * sin(ang);
+  let lnx = cx + pu * (nextX - cx) + (pRect - 0.5) * 5.0;
+  let lny = topY + pu * (nextY - topY) + (pRect - 0.5) * 5.0;
+  let gpx = ggx + (pu - 0.5) * 7.0;
+  let gpy = ggy + (pRect - 0.5) * 7.0;
+  let fromX = bx;
+  let fromY = by;
+  if fromL >= 0.5 { if fromL < 1.5 { fromX = pex; fromY = pey; } }
+  if fromL >= 1.5 { if fromL < 2.5 { fromX = lnx; fromY = lny; } }
+  if fromL >= 2.5 { fromX = gpx; fromY = gpy; }
+  let toX = bx;
+  let toY = by;
+  if toL >= 0.5 { if toL < 1.5 { toX = pex; toY = pey; } }
+  if toL >= 1.5 { if toL < 2.5 { toX = lnx; toY = lny; } }
+  if toL >= 2.5 { toX = gpx; toY = gpy; }
+  let e = prog * prog * (3.0 - 2.0 * prog);
+  let dx = toX - fromX;
+  let dy = toY - fromY;
+  let bx2 = fromX + dx * e;
+  let by2 = fromY + dy * e;
+  let bulge = curveAmp * 0.26 * sin(3.1415927 * prog);
+  let coh = 1.0 - 0.92 * sin(3.1415927 * prog);
+  let scat = (1.0 - coh) * 42.0;
+  let sdir = pu * 6.2831853 + curveAmp * 3.0;
+  let fx = bx2 - dy * bulge + cos(sdir) * scat;
+  let fy = by2 + dx * bulge + sin(sdir) * scat;
+  if axis < 0.5 { out = fx; }
+  if axis >= 0.5 { if axis < 1.5 { out = fy; } }
+  if axis >= 1.5 { out = coh; }
+}
+out
+`;
+
+let layoutRun = null, layoutFuel = null, layoutSlots = null, MORPH_BYTES = 0;
+async function initMorph() {
+  layoutSlots = new Float64Array(32);
+  const imp = { env: { sin: Math.sin, cos: Math.cos,
+    get: i => layoutSlots[(i | 0) & 31], set: (i, v) => { layoutSlots[(i | 0) & 31] = v; },
+    ld: () => 0, sd: () => {} } };
+  const bytes = compileUiCell(MORPH_CELL);
+  const { instance } = await WebAssembly.instantiate(bytes, imp);
+  layoutRun = instance.exports.run; layoutFuel = instance.exports.fuel || null;
+  MORPH_BYTES = bytes.length;
+}
+function lay(args) {
+  for (const k in args) layoutSlots[k] = args[k];
+  if (layoutFuel) layoutFuel.value = 200000;
+  return layoutRun(0);
+}
+
+function findGeoCols() {
+  const lb = COLS.findIndex(c => /緯度低/.test(c.name)), lt = COLS.findIndex(c => /緯度高/.test(c.name));
+  if (lb >= 0 && lt >= 0) return { band: true, lb, lt };     // 一段緯度範圍 → 畫成帶
+  const la = COLS.findIndex(c => /緯度|^lat/i.test(c.name));
+  const lo = COLS.findIndex(c => /經度|^lon|^lng/i.test(c.name));
+  return la >= 0 ? { la, lo } : null;
+}
+function geoForCats(col, cats) {
+  const g = findGeoCols(); if (!g || !cats.length) return null;
+  const acc = cats.map(() => ({ a: 0, b: 0, o: 0, n: 0 }));
+  for (let r = 0; r < NROWS; r++) {
+    const k = VALUES[r * NCOLS + col] | 0;
+    if (k < 0 || k >= acc.length) continue;
+    if (g.band) { acc[k].a += VALUES[r * NCOLS + g.lb]; acc[k].b += VALUES[r * NCOLS + g.lt]; }
+    else { acc[k].a += VALUES[r * NCOLS + g.la]; if (g.lo >= 0) acc[k].o += VALUES[r * NCOLS + g.lo]; }
+    acc[k].n++;
+  }
+  return acc.map(v => !v.n ? null : (g.band
+    ? { latLo: v.a / v.n, latHi: v.b / v.n, lat: (v.a + v.b) / (2 * v.n), lon: 0, ring: true }
+    : { lat: v.a / v.n, lon: g.lo >= 0 ? v.o / v.n : 0, ring: g.lo < 0 }));
+}
+
+// labels 來自本機類別;values 由 AI 寫的受圍籬 cell 在本機算出
+function makeMorphChart(labels, values, geo, ordered) {
+  const N = labels.length || 1;
+  const box = document.createElement('div');
+  const bar = document.createElement('div'); bar.className = 'chips'; bar.style.margin = '0 0 .5rem';
+  // 視角依資料型態而定:類別 → 長條/圓餅(+有經緯度才有地球);有序(年份)→ 長條/折線
+  const VIEWS = ordered ? [[T('vBar'), 0], [T('vLine'), 2]]
+                        : (geo ? [[T('vBar'), 0], [T('vPie'), 1], [T('vGlobe'), 3]] : [[T('vBar'), 0], [T('vPie'), 1]]);
+  const btns = VIEWS.map(([n]) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
+  box.appendChild(bar);
+  let W = 900, H = 380;
+  const cv = document.createElement('canvas');
+  const ctx = cv.getContext('2d');
+  box.appendChild(cv);
+  function resize() {
+    const host = document.getElementById('stage');
+    const avail = Math.max(300, (host ? host.clientWidth : 900) - 2);
+    W = Math.min(1500, avail);
+    H = W < 560 ? Math.max(260, Math.round(W * 0.72)) : Math.min(460, Math.max(300, Math.round(W * 0.40)));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = W * dpr; cv.height = H * dpr;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr);
+  }
+  resize();
+  const ro = new ResizeObserver(() => resize());
+  const stageEl = document.getElementById('stage'); if (stageEl) ro.observe(stageEl);
+  window.addEventListener('resize', resize);
+  const note = document.createElement('div');
+  note.style.cssText = 'font-size:.66rem;color:#6e7681;margin-top:.35rem';
+  note.textContent = T('foot', { n: MORPH_BYTES });
+  box.appendChild(note);
+
+  const max = Math.max(1e-9, ...values.map(v => Math.max(0, v)));
+  const norm = values.map(v => Math.max(0, v) / max);
+  const sum = norm.reduce((a, b) => a + b, 0) || 1;
+  const cum = []; { let c = 0; for (const v of norm) { cum.push(c); c += v; } }
+  const COLOR = labels.map((_, i) => `hsl(${Math.round(i / N * 360)}, 72%, 60%)`);
+  const K = Math.max(14, Math.min(70, Math.round(760 / N)));
+  const P = N * K;
+  const jit = new Float32Array(P * 4);
+  { let s = 987; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    for (let p = 0; p < P; p++) { jit[p*4]=rnd(); jit[p*4+1]=rnd(); jit[p*4+2]=Math.sqrt(rnd()); jit[p*4+3]=rnd()*2-1; } }
+  let spin = 0, zoom = 1, tilt = 0.30, autoSpin = true, hoverI = -1, sel = -1, spinT = null;
+  let lastAct = 0, lastCycle = 0, idling = false;      // 閒置 → 自轉 + 自動輪播視角
+  const IDLE_MS = 6000, CYCLE_MS = 5200;
+  const touch = () => { lastAct = performance.now(); idling = false; autoSpin = false; };
+  const base = i => ({ 2: norm[i], 3: i, 4: N, 6: cum[i], 7: sum, 8: W, 9: H,
+                       17: geo ? geo[i].lat : 0, 18: geo ? geo[i].lon : 0, 20: spin, 21: zoom, 22: tilt,
+                       23: gOv.x, 24: gOv.y, 25: gOv.r });
+  const gOv = { x: 0, y: 0, r: 0 };                 // 地球位置覆寫(0=用預設的大地球)
+  const RING = geo && geo.some(g => g && g.ring);   // 只有緯度 → 畫成緯度環
+  const dvg = v => { const m = Math.max(...values.map(Math.abs)) || 1, t = Math.max(-1, Math.min(1, v / m));
+    return t >= 0 ? `hsl(${Math.round(20 - 20 * t)}, 85%, ${Math.round(58 - 8 * t)}%)`
+                  : `hsl(${Math.round(205 + 25 * t)}, 80%, 62%)`; };
+  const nextXY = i => { const j = Math.min(i + 1, N - 1);
+    return { 15: lay({ ...base(j), 5: 5, 19: 2 }), 16: lay({ ...base(j), 5: 6, 19: 2 }) }; };
+
+  let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t*t*(3-2*t); };
+  const pos = [], barBox = [];
+  let tex = null, texCv = null;
+  function drawEarth(cx0, cy0, R, alpha) {          // 真實地球貼圖(反投影取樣)
+    if (!EARTH) return false;
+    const S = Math.max(64, Math.min(420, Math.round(R * 2)));
+    if (!tex || tex.S !== S || tex.tilt !== tilt) {  // 只有尺寸/傾角變了才重算反投影表
+      const latA = new Float32Array(S * S), lonA = new Float32Array(S * S);
+      const s0 = Math.sin(tilt), c0 = Math.cos(tilt);
+      for (let j = 0; j < S; j++) for (let i2 = 0; i2 < S; i2++) {
+        const x = (i2 - S / 2 + 0.5) / (S / 2), y = -(j - S / 2 + 0.5) / (S / 2);
+        const rho = Math.hypot(x, y), k = j * S + i2;
+        if (rho > 1) { latA[k] = 999; continue; }
+        const c = Math.asin(Math.min(1, rho)), sc = Math.sin(c), cc = Math.cos(c);
+        latA[k] = rho < 1e-9 ? tilt : Math.asin(cc * s0 + y * sc * c0 / rho);
+        lonA[k] = Math.atan2(x * sc, rho * cc * c0 - y * sc * s0);
+      }
+      texCv = document.createElement('canvas'); texCv.width = S; texCv.height = S;
+      tex = { S, tilt, latA, lonA, img: texCv.getContext('2d').createImageData(S, S) };
+    }
+    const { S: SS, latA, lonA, img } = tex, px = img.data;
+    const TW = EARTH.w, TH = EARTH.h, TD = EARTH.d, TAU = 6.283185307;
+    for (let k = 0, n = SS * SS; k < n; k++) {
+      if (latA[k] > 900) { px[k * 4 + 3] = 0; continue; }
+      let lon = lonA[k] + spin;
+      lon = ((lon + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      const u = ((lon + Math.PI) / TAU * TW) | 0;
+      const v = ((1.5707963 - latA[k]) / Math.PI * TH) | 0;
+      const t = ((v < 0 ? 0 : v >= TH ? TH - 1 : v) * TW + (u < 0 ? 0 : u >= TW ? TW - 1 : u)) << 2;
+      px[k * 4] = TD[t]; px[k * 4 + 1] = TD[t + 1]; px[k * 4 + 2] = TD[t + 2]; px[k * 4 + 3] = 255;
+    }
+    texCv.getContext('2d').putImageData(img, 0, 0);
+    ctx.save(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(texCv, cx0 - R, cy0 - R, R * 2, R * 2); ctx.restore();
+    return true;
+  }
+  function drawGlobe(cx0, cy0, R, alpha, small) {
+    const mx = Math.max(...values.map(Math.abs)) || 1;
+    gOv.x = cx0; gOv.y = cy0; gOv.r = R;
+    ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
+    ctx.globalAlpha = alpha; ctx.fillStyle = '#0a1220'; ctx.fill();
+    ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
+    const textured = drawEarth(cx0, cy0, R, alpha);
+    ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
+    ctx.strokeStyle = '#58a6ff44'; ctx.lineWidth = 1; ctx.globalAlpha = alpha; ctx.stroke();
+    // ── 沒有貼圖時,退回海岸線向量(每點都走同一支 layout cell 投影)──
+    if (!textured && COAST.length) {
+      ctx.strokeStyle = small ? '#2f6b8f' : '#397ea6';
+      ctx.lineWidth = small ? 0.7 : 1;
+      ctx.globalAlpha = alpha * (small ? 0.75 : 0.9);
+      const G = { 7: 1, 8: W, 9: H, 19: 3, 20: spin, 21: zoom, 22: tilt, 23: cx0, 24: cy0, 25: R };
+      for (const ring of COAST) {
+        ctx.beginPath(); let on = false;
+        for (let k = 0; k < ring.length; k++) {
+          const a = { ...G, 18: ring[k][0], 17: ring[k][1] };
+          if (lay({ ...a, 5: 7 }) < 0) { on = false; continue; }   // 背面不畫
+          const px = lay({ ...a, 5: 5 }), py = lay({ ...a, 5: 6 });
+          if (!on) { ctx.moveTo(px, py); on = true; } else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = alpha;
+    }
+    for (let i = 0; i < N; i++) {
+      if (!geo || !geo[i]) continue;
+      if (RING) {                                    // 緯度帶 → 在它的範圍內畫成一「帶」
+        const lo = geo[i].latLo, hi = geo[i].latHi;
+        if (lo === undefined || lo > 900) continue;
+        const span = Math.abs(hi - lo);
+        const steps = Math.max(2, Math.min(9, Math.round(span / 9)));   // 帶越寬,線越多
+        const wt = 0.8 + 3.2 * Math.abs(values[i]) / mx;
+        ctx.strokeStyle = COLOR[i];
+        ctx.lineWidth = i === sel ? wt + 1.6 : (i === hoverI ? wt + 0.8 : wt);
+        ctx.globalAlpha = alpha * (i === sel ? 1 : (i === hoverI ? 0.95 : 0.7));
+        let got = false;
+        for (let t = 0; t <= steps; t++) {
+          const latDeg = lo + (hi - lo) * (t / steps);
+          ctx.beginPath(); let on = false;
+          for (let k = 0; k <= 36; k++) {
+            const a = { ...base(i), 17: latDeg, 18: -180 + k * 10, 5: 7, 19: 3 };
+            if (lay(a) < 0) { on = false; continue; }
+            const gx = lay({ ...a, 5: 5 }), gy = lay({ ...a, 5: 6 });
+            if (!on) { ctx.moveTo(gx, gy); on = true; } else ctx.lineTo(gx, gy);
+            if (!got) { pos[i] = { x: gx, y: gy, r: 9 }; got = true; }   // 第一個看得見的點 → 可點選
+          }
+          ctx.stroke();
+        }
+        if (!got) pos[i] = null;
+      } else {                                       // 國家 → 畫成點
+        const vis = lay({ ...base(i), 5: 7, 19: 3 });
+        if (vis < 0) { pos[i] = null; continue; }
+        const gx = lay({ ...base(i), 5: 5, 19: 3 }), gy = lay({ ...base(i), 5: 6, 19: 3 });
+        const rad = (small ? 1.6 : 2.5) + (small ? 2.4 : 4) * Math.abs(values[i]) / mx;
+        ctx.globalAlpha = alpha * (0.35 + 0.65 * Math.min(1, vis));
+        ctx.beginPath(); ctx.arc(gx, gy, i === sel ? rad + 2 : rad, 0, 6.2831853);
+        ctx.fillStyle = COLOR[i]; ctx.fill();
+        pos[i] = { x: gx, y: gy, r: rad };
+        if (i === sel || i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      }
+    }
+    gOv.r = 0;
+    ctx.globalAlpha = alpha;
+    if (!small) {
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const top = RING ? 5 : 10;
+      const rank = values.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, top).map(p => p[1]);
+      const used = [];
+      for (const i of new Set([...rank, hoverI, sel])) {
+        if (i < 0 || !pos[i]) continue;
+        let ly = pos[i].y;
+        while (used.some(u => Math.abs(u - ly) < 13)) ly += 13;    // 疊到就往下讓
+        used.push(ly);
+        const txt = `${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`;
+        const tw = ctx.measureText(txt).width;
+        ctx.fillStyle = '#0b0f14bb'; ctx.fillRect(pos[i].x + pos[i].r + 1, ly - 6, tw + 6, 13);
+        ctx.fillStyle = (i === sel || i === hoverI) ? '#fff' : '#c9d1d9';
+        ctx.fillText(txt, pos[i].x + pos[i].r + 4, ly);
+      }
+    } else {
+      const show = hoverI >= 0 ? hoverI : sel;         // 指到誰就標誰,沒指就標選中的
+      if (show >= 0 && pos[show]) {
+        ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`${labels[show]} ${values[show] > 0 ? '+' : ''}${fmt(values[show])}`, cx0, cy0 - R - 5);
+        ctx.beginPath(); ctx.arc(pos[show].x, pos[show].y, pos[show].r + 3, 0, 6.2831853);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+    }
+  }
+  function crisp(L, alpha) {
+    ctx.save(); ctx.globalAlpha = alpha;
+    if (L === 0) {
+      ctx.font = '10px ui-monospace, monospace';
+      for (let i = 0; i < N; i++) {
+        const cx = lay({ ...base(i), 5: 5, 19: 0 }), top = lay({ ...base(i), 5: 6, 19: 0 }), hw = lay({ ...base(i), 5: 7, 19: 0 });
+        ctx.fillStyle = COLOR[i]; ctx.fillRect(cx - hw, top, hw * 2, (H - 74) - top);
+        if (i === sel) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(cx - hw, top, hw * 2, (H - 74) - top); }
+        barBox[i] = { x: cx - hw, y: top, w: hw * 2, h: (H - 74) - top };
+        const dense = N > Math.max(8, Math.floor(W / 34));
+        const keep = !dense || i === sel || i === hoverI || i < 3 || i === N - 1;
+        if (keep) {
+          ctx.fillStyle = i === sel ? '#fff' : '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(fmt(values[i]), cx, top - 4);
+          ctx.save(); ctx.translate(cx, H - 68); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
+          ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.textBaseline = 'middle';
+          ctx.fillStyle = i === sel ? '#fff' : '#c9d1d9'; ctx.fillText(labels[i], 0, 0); ctx.restore();
+        }
+      }
+    }
+    if (L === 1) {
+      for (let i = 0; i < N; i++) {
+        const cx = lay({ ...base(i), 5: 5, 19: 1 }), cy = lay({ ...base(i), 5: 6, 19: 1 }),
+              R = lay({ ...base(i), 5: 7, 19: 1 }), a0 = lay({ ...base(i), 5: 8, 19: 1 }), a1 = lay({ ...base(i), 5: 9, 19: 1 });
+        ctx.fillStyle = COLOR[i]; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
+        if (N <= 24) { ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke(); }
+        if (i === sel || i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
+        const frac = norm[i] / sum;
+        if (frac > 0.05) { const m = (a0 + a1) / 2, lr = R * 0.62;
+          ctx.fillStyle = '#fff'; ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(labels[i], cx + lr * Math.cos(m), cy + lr * Math.sin(m) - 6);
+          ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
+      }
+    }
+    if ((L === 0 || L === 1) && geo && W >= 460) {   // 長條/圓餅右上角的連動小地球(太窄就讓位)
+      const R = Math.min(W < 700 ? 62 : 104, H * 0.26);
+      drawGlobe(W - R - 18, R + 22, R, alpha * 0.95, true);
+      ctx.globalAlpha = alpha; ctx.fillStyle = '#6e7681'; ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(T('hintInset'), W - R - 18, R * 2 + 34);
+    }
+    if (L === 3) {                                   // 🌍 正射投影的地球:座標由 layout cell 算
+      const gcx = 58 + (W - 84) / 2, gcy = 34 + (H - 108) / 2, GR = (H - 108) * 0.44 * zoom;
+      drawGlobe(gcx, gcy, GR, alpha, false);
+      ctx.fillStyle = '#8b949e'; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
+      ctx.fillText(T('hintGlobe'), gcx, H - 14);
+    }
+    if (L === 2) {
+      const pts = []; for (let i = 0; i < N; i++) pts.push([lay({ ...base(i), 5: 5, 19: 2 }), lay({ ...base(i), 5: 6, 19: 2 })]);
+      ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+      pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke();
+      ctx.font = '10px ui-monospace, monospace';
+      pts.forEach((q, i) => { ctx.beginPath(); ctx.arc(q[0], q[1], 4.5, 0, 6.2831853);
+        ctx.fillStyle = COLOR[i]; ctx.fill(); ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.save(); ctx.translate(q[0], H - 56); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
+        ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.fillText(labels[i], 0, 0); ctx.restore(); });
+    }
+    // 目前指到/選到的那一項:直接把名字標在圖上(瓣太細、長條太密時,這是唯一看得到的方式)
+    if (idling) {
+      ctx.globalAlpha = alpha * 0.55; ctx.fillStyle = '#7ee787';
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+      ctx.fillText(T('idle'), W - 12, 10);
+      ctx.globalAlpha = alpha;
+    }
+    const hi = hoverI >= 0 ? hoverI : sel;
+    if (hi >= 0 && (L === 0 || L === 1)) {
+      ctx.globalAlpha = alpha; ctx.font = '600 12px ui-monospace, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const txt = `${labels[hi]}  ${values[hi] > 0 ? '+' : ''}${fmt(values[hi])}`;
+      const w = ctx.measureText(txt).width;
+      ctx.fillStyle = '#0b0f14dd'; ctx.fillRect(56, 8, w + 16, 22);
+      ctx.fillStyle = COLOR[hi]; ctx.fillRect(56, 8, 3, 22);
+      ctx.fillStyle = '#e6edf3'; ctx.fillText(txt, 66, 13);
+    }
+    ctx.restore();
+  }
+  function frame(now) {
+    if (!box.isConnected) return;
+    ctx.clearRect(0, 0, W, H);
+    if (lastAct && now - lastAct > IDLE_MS) {         // 沒人碰 → 回到自動展示
+      if (!idling) { idling = true; lastCycle = now; sel = -1; hoverI = -1; }
+      autoSpin = true;
+      if (!animating && now - lastCycle > CYCLE_MS) {
+        lastCycle = now;
+        const cur = VIEWS.findIndex(v => v[1] === toL);
+        goView((cur + 1) % VIEWS.length);              // 三個視角自動輪播
+      }
+    }
+    if (spinT !== null) {                             // 點了長條 → 球轉過去
+      let d = spinT - spin; while (d > Math.PI) d -= 6.2831853; while (d < -Math.PI) d += 6.2831853;
+      spin += d * 0.14; if (Math.abs(d) < 0.01) spinT = null;
+    } else if (autoSpin) spin += 0.0035;              // 沒人碰就慢慢自轉
+    if (animating) { prog = Math.min(1, (now - tStart) / 1100); if (prog >= 1) { animating = false; fromL = toL; } }
+    if (!animating) { crisp(toL, 1); requestAnimationFrame(frame); return; }
+    const g = prog, srcA = 1 - smooth(0, .32, g), tgtA = smooth(.68, 1, g),
+          partA = smooth(0, .22, g) * (1 - smooth(.8, 1, g));
+    if (srcA > .01) crisp(fromL, srcA);
+    if (tgtA > .01) crisp(toL, tgtA);
+    if (partA > .01) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let p = 0; p < P; p++) {
+        const i = (p / K) | 0;
+        const a = { ...base(i), ...nextXY(i), 0: fromL, 1: toL, 10: jit[p*4], 11: jit[p*4+1], 12: jit[p*4+2], 13: prog, 14: jit[p*4+3] };
+        const x = lay({ ...a, 5: 0 }), y = lay({ ...a, 5: 1 });
+        ctx.globalAlpha = partA * .9; ctx.fillStyle = COLOR[i];
+        ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2831853); ctx.fill();
+      }
+      ctx.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+  function goView(k) {
+    const L = VIEWS[k][1];
+    if (L === toL && !animating) return;
+    fromL = toL; toL = L; prog = 0; tStart = performance.now(); animating = true;
+    btns.forEach((x, j) => x.style.borderColor = j === k ? '#58a6ff' : '#30363d');
+  }
+  btns.forEach((b, k) => b.onclick = () => { touch(); goView(k); });
+  btns[0].style.borderColor = '#58a6ff';
+  // ── 地球互動:拖曳轉、滾輪縮放、游標指出國名 ──
+  const globeArea = () => {                          // 目前這個視角裡,地球在哪
+    if (toL === 3) { const R = (H - 108) * 0.44 * zoom; return { x: 58 + (W - 84) / 2, y: 34 + (H - 108) / 2, r: R }; }
+    if ((toL === 0 || toL === 1) && geo && W >= 460) { const R = Math.min(W < 700 ? 62 : 104, H * 0.26); return { x: W - R - 18, y: R + 22, r: R }; }
+    return null;
+  };
+  const xy = e => { const r = cv.getBoundingClientRect();
+    return [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height]; };
+  const pick = (mx, my, tol) => { let b = -1, bd = tol * tol;
+    for (let i = 0; i < N; i++) { const p = pos[i]; if (!p) continue;
+      const d = (p.x - mx) ** 2 + (p.y - my) ** 2; if (d < bd) { bd = d; b = i; } } return b; };
+  function pieAt(mx, my) {
+    const ccx = 58 + (W - 84) / 2, ccy = 34 + (H - 108) / 2, RR = (H - 108) * 0.46;
+    const dx = mx - ccx, dy = my - ccy; if (Math.hypot(dx, dy) > RR) return -1;
+    let ang = Math.atan2(dy, dx) + Math.PI / 2; while (ang < 0) ang += 6.2831853; while (ang > 6.2831853) ang -= 6.2831853;
+    const frac = ang / 6.2831853 * sum; let acc = 0;
+    for (let i = 0; i < N; i++) { acc += norm[i]; if (frac <= acc) return i; }
+    return -1;
+  }
+  function barAt(mx, my) {
+    for (let i = 0; i < N; i++) { const b = barBox[i];
+      if (b && mx >= b.x - 2 && mx <= b.x + b.w + 2 && my >= b.y - 12 && my <= b.y + b.h) return i; }
+    return -1;
+  }
+  function select(i) {
+    if (i < 0) return; sel = i; autoSpin = false;
+    if (geo && geo[i] && geo[i].lat < 900) spinT = geo[i].lon * 0.0174533;   // 球轉到它
+  }
+  let drag = null, moved = 0;
+  cv.style.cursor = 'crosshair';
+  cv.addEventListener('pointerdown', e => {
+    touch();
+    const [mx, my] = xy(e), g = globeArea(); moved = 0;
+    if (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) {      // 在球上 → 準備拖
+      drag = { x: e.clientX, y: e.clientY }; autoSpin = false; spinT = null;
+      cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
+    } else if (toL === 0) {                                              // 在長條上 → 選它,球轉過去
+      select(barAt(mx, my));
+    } else if (toL === 1) { select(pieAt(mx, my)); }                     // 在圓餅上 → 選那一瓣
+  });
+  cv.addEventListener('pointerup', e => {
+    if (drag && moved < 4) { const [mx, my] = xy(e); select(pick(mx, my, 14)); }   // 球上點一下 = 選取
+    drag = null; cv.style.cursor = 'crosshair';
+  });
+  cv.addEventListener('pointermove', e => {
+    touch();
+    const [mx, my] = xy(e);
+    if (drag) { moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
+      spin -= (e.clientX - drag.x) * 0.006; tilt = Math.max(-1.3, Math.min(1.3, tilt + (e.clientY - drag.y) * 0.005));
+      drag = { x: e.clientX, y: e.clientY }; return; }
+    const g = globeArea();
+    if (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) { hoverI = pick(mx, my, 12); }
+    else if (toL === 1) { hoverI = pieAt(mx, my); }          // 圓餅:滑到哪一瓣就是哪一國
+    else if (toL === 0) { hoverI = barAt(mx, my); }          // 長條同理
+    else hoverI = -1;
+    cv.style.cursor = hoverI >= 0 ? 'pointer' : 'crosshair';
+  });
+  cv.addEventListener('pointerleave', () => { hoverI = -1; lastAct = performance.now(); });
+  cv.addEventListener('wheel', e => { touch(); const g = globeArea(); if (!g) return;
+    const [mx, my] = xy(e); if ((mx - g.x) ** 2 + (my - g.y) ** 2 > (g.r + 20) ** 2) return;
+    e.preventDefault(); zoom = Math.max(0.6, Math.min(3.2, zoom * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
+
+  lastAct = performance.now();
+  requestAnimationFrame(frame);
+  return box;
+}
+
+// ── 問一句 → 只送 schema → 本機跑 ───────────────────────────────
+const EXAMPLES = ['各部門平均薪資,長條圖', '薪資的平均、中位數、最高、最低',
+                  '各部門人數佔比,圓餅圖', '薪資高於平均 1.5 倍的有幾筆'];
+$('chips').innerHTML = EXAMPLES.map(e => `<span class="chip">${e}</span>`).join('');
+document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = EXAMPLES[i]; $('intent').focus(); });
+
+let lastSchema = null, currentSchema = null, compileCount = 0, reTimer = null;
+
+async function showSchema(schema, meta) {          // 展開後再顯示,證據欄才看得到合成的 cell
+  const ex = expandAggregates(schema);
+  $('stage').innerHTML = '';
+  $('stage').appendChild(await manifestUi(ex));
+  renderEvidence(ex, meta);
+}
+async function renderStage(schema) {
+  $('stage').innerHTML = '';
+  $('stage').appendChild(await manifestUi(schema));
+}
+
+let prevCells = {};        // 上一代的 cell 原始碼,用來看「你那句話改了程式的哪幾行」
+function diffLines(oldSrc, newSrc) {
+  const oldSet = new Set((oldSrc || '').split('\n').map(l => l.trim()));
+  return newSrc.split('\n').map(l => ({ t: l, chg: oldSrc != null && !oldSet.has(l.trim()) }));
+}
+
+function renderEvidence(schema, meta) {
+  currentSchema = schema;
+  const cells = schema.cells || [];
+  $('evidence').innerHTML =
+    `<div style="font-size:.74rem;color:#8b949e;margin-bottom:.55rem"><b style="color:#c9d1d9">${schema.title || ''}</b>` +
+    ` · ${cells.length} 支 cell${meta ? ` · 第 ${meta.attempt} 次過關` : ''} · 本頁已編譯 <b style="color:#c9d1d9" id="ccount">${compileCount}</b> 次</div>` +
+    `<div class="live">⚡ <b>${T('changed')}</b><br>` +
+    `下面<span style="color:#7ee787">綠色的行</span>就是這一代 cell 因你而改寫的地方;改完立刻重編成 wasm、熱抽換進正在跑的 App。</div>` +
+    cells.map((c, i) => {
+      const old = prevCells[c.id];
+      const d = diffLines(old, c.script);
+      const nch = d.filter(x => x.chg).length;
+      const tag = old == null ? '新生' : (nch ? `改寫 ${nch} 行` : '未變');
+      return `<div class="cell"><div class="ch"><span>${c.id}</span>` +
+        `<span class="rc">${tag}${c.bytes ? ` · ${c.bytes} bytes wasm` : ''}</span></div>` +
+        `<pre>${d.map(x => `<span class="dl${x.chg ? ' chg' : ''}">${(x.t || ' ').replace(/</g, '&lt;')}</span>`).join('')}</pre></div>`;
+    }).join('') +
+    `<div class="gen">🧪 ${T('fenceQ')}<button class="fencebtn" id="fencetest">${T('fenceBtn')}</button>` +
+    `<span id="fenceout" style="margin-left:.5rem"></span></div>` +
+    `<div class="fence">圍籬:每支 cell 只能 import <code>${((meta && meta.fence) || ['env.sin','env.cos','env.get','env.set','env.ld','env.sd']).join(', ')}</code>` +
+    ` —— <b>沒有網路</b>。它讀得到你的資料(<code>ld</code>),但沒有能力送出去;這裡 <code>sd</code> 也是 no-op,連改都改不了。</div>`;
+  for (const c of cells) prevCells[c.id] = c.script;      // 記下這一代,供下一代 diff
+  const fb = $('fencetest');
+  if (fb) fb.onclick = () => {
+    const out = $('fenceout');
+    const evil = 'let a = ld(0.0);\nfetch(0.0);\na';
+    try { compileUiCell(evil); out.textContent = '⚠ 竟然編過了(不該發生)'; out.style.color = '#f85149'; }
+    catch (e) { out.innerHTML = `<b style="color:#7ee787">✓ 編譯期死了</b> <span style="color:#8b949e">${String(e.message || e).slice(0, 60)}</span>`; }
+  };
+}
+
+async function analyze() {
+  const intent = $('intent').value.trim(); if (!intent) { status('問一句吧', 'err'); return; }
+  $('go').disabled = true;
+  const sent = buildSchema();
+  status(T('working'));
+  let data;
+  try {
+    const r = await fetch('/api/gen', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ intent, data_schema: sent, prev_schema: lastSchema }) });
+    data = await r.json();
+  } catch (e) { $('evidence').insertAdjacentHTML('afterbegin', `<div class="live">${T('noApi')}</div>`);
+    status('—', ''); $('go').disabled = false; return; }
+  if (!data || !data.ok) { $('evidence').insertAdjacentHTML('afterbegin', `<div class="live">${T('noApi')}</div>`);
+    status('—', ''); $('go').disabled = false; return; }
+  lastSchema = data.schema;
+  try {
+    compileCount += (data.cells || []).length;
+    await showSchema(data.schema, data);
+    status(T('done'), 'ok');
+  } catch (e) { status('✗ 執行錯誤:' + e, 'err'); console.error(e); }
+  $('go').disabled = false;
+}
+$('go').onclick = analyze;
+$('intent').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') analyze(); });
+
+// ── 拖檔 / 選檔 / 範例 ───────────────────────────────────────────
+const drop = $('drop');
+drop.onclick = e => { if (e.target.id !== 'sample') $('file').click(); };
+$('file').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => ingest(t, f.name, f.size)); };
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) f.text().then(t => ingest(t, f.name, f.size)); });
+$('sample').onclick = e => {
+  e.stopPropagation();
+  const depts = ['研發', '業務', '行銷', '客服', '財務'], titles = ['工程師', '資深工程師', '主管', '專員'];
+  let s = 1234567; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  let csv = '員工編號,部門,職稱,年資,月薪\n';
+  for (let i = 1; i <= 240; i++) {
+    const d = (rnd() * depts.length) | 0, t = (rnd() * titles.length) | 0;
+    const yrs = Math.round(rnd() * 18);
+    const base = [78000, 62000, 55000, 48000, 58000][d] + t * 12000 + yrs * 1400 + Math.round((rnd() - 0.5) * 9000);
+    csv += `E${1000 + i},${depts[d]},${titles[t]},${yrs},${base}\n`;
+  }
+  ingest(csv, '薪資範例.csv(本機產生)', csv.length);
+};
+
+// 預烘的第一張圖:全球各區域平均距平(由高到低)。不叫 API,0 秒就在。
+const SEED_ANALYSIS = {
+  title: '全球升溫:各區域平均距平(°C,1880–2025)',
+  cells: [{ id: 'regionMean', script:
+    'let n = get(30.0);\nlet c = get(31.0);\nlet target = x;\nlet sum = 0.0;\nlet cnt = 0.0;\nlet r = 0.0;\n' +
+    'while r < n {\n let region = ld(r * c + 3.0);\n if region >= target { if region <= target {\n' +
+    '  let a = ld(r * c + 7.0);\n  sum = sum + a;\n  cnt = cnt + 1.0;\n } }\n r = r + 1.0;\n}\n' +
+    'let result = 0.0;\nif cnt > 0.0 { result = sum / cnt; }\nresult' }],
+  tree: { type: 'stack', children: [
+    { type: 'label', text: '全球升溫:各區域平均距平(°C,1880–2025,由高到低)' },
+    { type: 'bar', groups: { col: 3, bind: 'regionMean', sort: 'desc' } },
+  ] },
+};
+async function bootTemp() {
+  try {
+    const t = await (await fetch('assets/global-temp.csv')).text();
+    ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
+    useTempExamples();
+    lastSchema = JSON.parse(JSON.stringify(SEED_ANALYSIS));
+    compileCount += SEED_ANALYSIS.cells.length;
+    await showSchema(lastSchema, null);
+    status('👋 這是 NASA 真實資料的第一張圖 —— 下面說一句話就能改它', 'ok');
+    return true;
+  } catch (e) { console.warn(e); return false; }
+}
+function useTempExamples() {
+  $('chips').innerHTML = TEMP_EX.map(x => `<span class="chip">${x}</span>`).join('');
+  document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = TEMP_EX[i]; $('intent').focus(); });
+}
+
+const COUNTRY_EX = [
+  '各國平均距平排名(由高到低)',
+  '用地球圖看各國平均距平',
+  '各氣候帶的平均距平比較',
+  '南北半球平均距平',
+  '各國 1990 年以後的平均距平,地球圖',
+];
+$('sampleCountry').onclick = async e => {
+  e.stopPropagation();
+  status('載入 181 國真實資料…');
+  try {
+    const t = await (await fetch('assets/country-temp.csv')).text();
+    ingest(t, 'country-temp.csv(OWID/Berkeley Earth + 經緯度, 1950–2025)', t.length);
+    $('chips').innerHTML = COUNTRY_EX.map(x => `<span class="chip">${x}</span>`).join('');
+    document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = COUNTRY_EX[i]; $('intent').focus(); });
+    // 直接給一張宣告式的地球圖(不叫 API)
+    const seed = { title: '各國平均氣溫距平(°C,1990 年後)',
+      tree: { type: 'stack', children: [
+        { type: 'label', text: '各國平均氣溫距平(°C,1990 年後 · 基準 1991–2020)· 可切長條/圓餅/地球' },
+        { type: 'bar', groups: { col: 1, agg: 'mean', of: 6, sort: 'desc', where: { col: 0, min: 1990 } } } ] } };
+    lastSchema = seed; await showSchema(seed, null);
+    status('👋 181 國真實資料 —— 切到 🌍 地球看看,可拖曳旋轉、滾輪縮放', 'ok');
+  } catch (err) { status('✗ 取不到:' + err, 'err'); }
+};
+
+$('sampleTemp').onclick = async e => {
+  e.stopPropagation();
+  status('抓取範例…(這份是真的 NASA GISTEMP 資料,由本機伺服器提供)');
+  try {
+    const t = await (await fetch('assets/global-temp.csv')).text();
+    ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
+    $('chips').innerHTML = TEMP_EX.map(x => `<span class="chip">${x}</span>`).join('');
+    document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = TEMP_EX[i]; $('intent').focus(); });
+  } catch (err) { status('✗ 取不到範例:' + err, 'err'); }
+};
+const TEMP_EX = [
+  '改成由高到低排名',
+  '只看北極區(64-90N)歷年距平,折線圖',
+  '北極區(64-90N)歷年距平,折線圖',
+  '南北半球平均距平比較',
+  '1880-1950 與 1976-2025 兩段的全球平均距平各是多少',
+  '各尺度的資料筆數佔比,圓餅圖',
+];
+
+applyI18N();
+$('langbtn').onclick = async () => {
+  LANG = LANG === 'zh' ? 'en' : 'zh';
+  localStorage.setItem('analyst.lang', LANG);
+  applyI18N();
+  if (lastSchema && VALUES) { try { await showSchema(lastSchema, null); } catch (e) {} }   // 重畫,標籤跟著換
+};
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js'); await mod.default();
+    compileUiCell = mod.compile_ui_cell_wasm;
+    await initMorph();
+    try { COAST = await (await fetch('assets/coast.json')).json(); } catch (e) { console.warn('coast', e); }
+    await loadEarth();
+    const booted = await bootTemp();          // 一進來就有一張真資料的圖
+    if (VALUES) $('go').disabled = false;
+    if (!booted) status('編譯器就緒 —— 拖一份 CSV 進來');
+  } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
+})();
+</script>
+</body>
+</html>

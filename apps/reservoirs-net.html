@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣水庫 · 珠珠互映 · cell 相互包容 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.06rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 78ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
+  .stage { border: 1px solid #30363d; border-radius: 14px; background: #0b0f14;
+           padding: .5rem; box-shadow: 0 10px 40px #0006; }
+  canvas { display: block; width: 100%; max-width: 960px; margin: 0 auto; border-radius: 10px; }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .9rem 0 .3rem; }
+  button { font: inherit; font-size: .82rem; padding: .42rem .9rem; border-radius: 999px;
+           border: 1px solid #30363d; background: #161b22; color: #c9d1d9; cursor: pointer;
+           transition: border-color .15s, background .15s, color .15s; }
+  button:hover { border-color: #58a6ff66; color: #e6edf3; }
+  button.on { background: #1f6feb33; border-color: #58a6ff; color: #cae2ff; }
+  .spacer { flex: 1; }
+  .toggle { font-size: .76rem; color: #8b949e; display: inline-flex; gap: .4rem; align-items: center; cursor: pointer; user-select: none; }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-top: .9rem; font-size: .74rem; }
+  .lg { display: inline-flex; align-items: center; gap: .35rem; color: #b9c2cc; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .lg b { color: #e6edf3; font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 1.2rem; font-size: .74rem; color: #8b949e; border-top: 1px solid #21262d; padding-top: .9rem; }
+  .foot b { color: #c9d1d9; }
+  .tag { font-size: .66rem; color: #d29922; border: 1px solid #d2992244; background: #d299221a; border-radius: 999px; padding: .1rem .5rem; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>台灣水庫 · 珠珠互映 · cell 相互包容 <span class="tag">示意資料</span></h1>
+  <p class="lede">承 <a href="/reservoirs-native">全 cell-native 版</a>:那版每顆粒子只<b>各映一支 cell</b>(帝網「萬珠共映一燈」),彼此不相映,故有空隙。
+    這版把 UI 圍籬本有的<b>共享場 <code>ld/sd</code></b> 接上——每顆粒子把座標<b>寫進共享場</b>、又<b>讀鄰居的座標</b>,
+    近了就相讓(<b>相互包容</b>),於是<b>合作把空隙補實</b>,顯化更真的長條。這正是<a href="/">定本</a>裡標「只成一半」的
+    <b>因陀羅網第七門</b>——珠珠互映,今補其半。啞畫筆仍一無所知,只照共享場畫點。</p>
+
+  <div class="stage"><canvas id="cv"></canvas></div>
+
+  <div class="controls">
+    <button id="b-bar" class="on">長條 Bar</button>
+    <button id="b-pie">圓餅 Pie</button>
+    <button id="b-line">折線 Line</button>
+    <div class="spacer"></div>
+    <label class="toggle"><input type="checkbox" id="net" checked> 珠珠互映(相讓)</label>
+    <label class="toggle"><input type="checkbox" id="auto"> 自動輪播</label>
+  </div>
+  <div class="legend" id="legend"></div>
+  <p class="foot" id="foot">載入中…</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const RES = [
+  { name: '石門', v: 0.62 }, { name: '新山', v: 0.55 }, { name: '寶山', v: 0.70 },
+  { name: '寶二', v: 0.48 }, { name: '永和山', v: 0.58 }, { name: '鯉魚潭', v: 0.44 },
+  { name: '德基', v: 0.81 }, { name: '霧社', v: 0.66 }, { name: '日月潭', v: 0.88 },
+  { name: '曾文', v: 0.40 }, { name: '烏山頭', v: 0.52 }, { name: '南化', v: 0.63 },
+];
+const N = RES.length, COLS = 5, ROWS = 30, K = COLS * ROWS, P = N * K, CW = 960, CH = 560;
+const COLORS = RES.map((_, i) => `hsl(${Math.round(i / N * 360)}, 72%, 62%)`);
+const RGB = RES.map((_, i) => hsl2rgb(i / N * 360, 0.72, 0.62).join(','));
+function hsl2rgb(h, s, l) { h /= 360; const a = s * Math.min(l, 1 - l);
+  const f = n => { const k = (n + h * 12) % 12; return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); };
+  return [f(0), f(8), f(4)]; }
+
+// ── 行為 cell:碎化→飛→凝實 + 讀共享場相讓。axis=2 吐凝聚度;axis=3 算(x,y)+相讓、寫入共享場 ──
+const CELL = `
+let fromL = get(0.0);
+let toL = get(1.0);
+let val = get(2.0);
+let i = get(3.0);
+let N = get(4.0);
+let axis = get(5.0);
+let cum = get(6.0);
+let sum = get(7.0);
+let W = get(8.0);
+let H = get(9.0);
+let pu = get(10.0);
+let pRect = get(11.0);
+let pWedge = get(12.0);
+let prog = get(13.0);
+let curveAmp = get(14.0);
+let nextX = get(15.0);
+let nextY = get(16.0);
+let p = get(17.0);
+let net = get(18.0);
+
+let mL = 64.0;
+let mR = 34.0;
+let mT = 46.0;
+let mB = 70.0;
+let plotW = W - mL - mR;
+let plotH = H - mT - mB;
+let baseline = H - mB;
+let colStep = plotW / N;
+let cx = mL + (i + 0.5) * colStep;
+let ccx = mL + plotW / 2.0;
+let ccy = mT + plotH / 2.0;
+let RR = plotH * 0.46;
+
+let barW = colStep * 0.72;
+let bx = cx - barW / 2.0 + pu * barW;
+let by = baseline - pRect * (val * plotH);
+let a0 = cum / sum * 6.2831853 - 1.5707963;
+let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
+let ang = a0 + pu * (a1 - a0);
+let rr = pWedge * RR;
+let pex = ccx + rr * cos(ang);
+let pey = ccy + rr * sin(ang);
+let vy = baseline - val * plotH;
+let lnx = cx + pu * (nextX - cx) + (pRect - 0.5) * 5.0;
+let lny = vy + pu * (nextY - vy) + (pRect - 0.5) * 5.0;
+
+let fromX = bx;
+let fromY = by;
+if fromL >= 0.5 { if fromL < 1.5 { fromX = pex; fromY = pey; } }
+if fromL >= 1.5 { fromX = lnx; fromY = lny; }
+let toX = bx;
+let toY = by;
+if toL >= 0.5 { if toL < 1.5 { toX = pex; toY = pey; } }
+if toL >= 1.5 { toX = lnx; toY = lny; }
+
+let e = prog * prog * (3.0 - 2.0 * prog);
+let dx = toX - fromX;
+let dy = toY - fromY;
+let baseX = fromX + dx * e;
+let baseY = fromY + dy * e;
+let bulge = curveAmp * 0.26 * sin(3.1415927 * prog);
+let ax = baseX - dy * bulge;
+let ay = baseY + dx * bulge;
+let coh = 1.0 - 0.92 * sin(3.1415927 * prog);
+let scat = (1.0 - coh) * 46.0;
+let sdir = pu * 6.2831853 + curveAmp * 3.0;
+let selfX = ax + cos(sdir) * scat;
+let selfY = ay + sin(sdir) * scat;
+
+let out = 0.0;
+
+// 凝聚度通道
+if axis >= 1.5 { if axis < 2.5 { out = coh; } }
+
+// 相讓通道:靜止且長條時,讀共享場鄰居、互推相讓、限在本欄內 → 合作把空隙填實
+if axis >= 2.5 {
+  let ox = selfX;
+  let oy = selfY;
+  let relax = 0.0;
+  if net >= 0.5 { if prog >= 0.999 { if toL < 0.5 { relax = 1.0; } } }
+  if relax >= 0.5 {
+    let cxp = ld(2.0 * p);
+    let cyp = ld(2.0 * p + 1.0);
+    if cxp < 1.0 { cxp = selfX; cyp = selfY; }
+    let px = 0.0;
+    let py = 0.0;
+    let m = 0.0;
+    while m < 15.0 {
+      let q = p + (m - 7.0) * 6.0;
+      let nx = ld(2.0 * q);
+      let ny = ld(2.0 * q + 1.0);
+      let rx = cxp - nx;
+      let ry = cyp - ny;
+      let d2 = rx * rx + ry * ry;
+      if d2 < 340.0 { if d2 > 0.05 {
+        let w = (340.0 - d2) / 340.0;
+        px = px + rx * w;
+        py = py + ry * w;
+      } }
+      m = m + 1.0;
+    }
+    let nxp = cxp + px * 0.7;
+    let nyp = cyp + py * 0.7;
+    let loX = cx - barW / 2.0;
+    let hiX = cx + barW / 2.0;
+    let topY = baseline - val * plotH;
+    if nxp < loX { nxp = loX; }
+    if nxp > hiX { nxp = hiX; }
+    if nyp < topY { nyp = topY; }
+    if nyp > baseline { nyp = baseline; }
+    ox = nxp;
+    oy = nyp;
+  }
+  set(24.0, ox);
+  set(25.0, oy);
+  sd(2.0 * p, ox);
+  sd(2.0 * p + 1.0, oy);
+}
+out
+`;
+
+// ── 受圍籬 JS 宿主:ld/sd 接上真的共享場(這就是把第七門補圓的一步)──
+const field = new Float64Array(4096);
+const slots = new Float64Array(32);
+const imports = { env: {
+  sin: Math.sin, cos: Math.cos,
+  get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+  ld: i => { const k = i | 0; return (k >= 0 && k < 4096) ? field[k] : 0; },
+  sd: (i, v) => { const k = i | 0; if (k >= 0 && k < 4096) field[k] = v; },
+}};
+
+// 每顆粒子的身分:刻意「結塊」——每欄聚成幾團、團與團間留空隙(這就是關掉相讓時的樣子)。
+// 空隙要靠「珠珠互映」——粒子讀共享場、彼此相讓——才鋪開填實。這才是重點。
+const jit = new Float32Array(P * 4);
+(() => { let s = 20260721;
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  const CC = 6; // 每欄結塊數
+  for (let i = 0; i < N; i++) {
+    const cu = [], cv = [];
+    for (let c = 0; c < CC; c++) { cu.push(0.15 + rnd() * 0.7); cv.push(0.1 + rnd() * 0.85); }
+    for (let j = 0; j < K; j++) {
+      const p = i * K + j, c = j % CC;
+      jit[p * 4] = Math.max(0.02, Math.min(0.98, cu[c] + (rnd() - 0.5) * 0.13));
+      jit[p * 4 + 1] = Math.max(0.02, Math.min(0.98, cv[c] + (rnd() - 0.5) * 0.13));
+      jit[p * 4 + 2] = Math.sqrt(rnd());
+      jit[p * 4 + 3] = rnd() * 2 - 1;
+    }
+  }
+})();
+const sumV = RES.reduce((a, r) => a + r.v, 0);
+const cum = []; { let c = 0; for (const r of RES) { cum.push(c); c += r.v; } }
+const M = { L: 64, R: 34, T: 46, B: 70 };
+const plotW = CW - M.L - M.R, plotH = CH - M.T - M.B, baseline = CH - M.B, colStep = plotW / N;
+const cxOf = i => M.L + (i + 0.5) * colStep;
+const nextX = RES.map((_, i) => cxOf(Math.min(i + 1, N - 1)));
+const nextY = RES.map((_, i) => baseline - RES[Math.min(i + 1, N - 1)].v * plotH);
+
+let runFn = null, fuelG = null;
+function relax(p) {                 // axis=3:cell 讀共享場相讓、寫回;回傳的新座標在 slot 24/25
+  const i = (p / K) | 0;
+  slots[0] = fromL; slots[1] = toL; slots[2] = RES[i].v; slots[3] = i; slots[4] = N;
+  slots[5] = 3; slots[6] = cum[i]; slots[7] = sumV; slots[8] = CW; slots[9] = CH;
+  slots[10] = jit[p * 4]; slots[11] = jit[p * 4 + 1]; slots[12] = jit[p * 4 + 2];
+  slots[13] = prog; slots[14] = jit[p * 4 + 3]; slots[15] = nextX[i]; slots[16] = nextY[i];
+  slots[17] = p; slots[18] = netOn ? 1 : 0;
+  if (fuelG) fuelG.value = 200000; runFn(0);
+  return [slots[24], slots[25]];
+}
+
+const cv = $('cv'), ctx = cv.getContext('2d');
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+cv.width = CW * DPR; cv.height = CH * DPR; ctx.scale(DPR, DPR);
+const DUR = 1200;
+let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false, netOn = true;
+
+function goTo(L) {
+  if (L === toL && !animating) return;
+  fromL = toL; toL = L; prog = 0; tStart = performance.now(); animating = true;
+  ['bar', 'pie', 'line'].forEach((n, k) => $('b-' + n).classList.toggle('on', k === L));
+}
+
+function frame(now) {
+  ctx.clearRect(0, 0, CW, CH);
+  if (animating) { prog = Math.min(1, (now - tStart) / DUR); if (prog >= 1) { animating = false; fromL = toL; } }
+
+  slots[13] = prog; slots[5] = 2; if (fuelG) fuelG.value = 200000; const coh = runFn(0);
+  const size = 2.4 + coh * 3.6;
+  ctx.globalCompositeOperation = coh > 0.55 ? 'source-over' : 'lighter';
+  for (let p = 0; p < P; p++) {
+    const [x, y] = relax(p);           // cell 讀鄰居、相讓、寫共享場;回傳新座標
+    ctx.globalAlpha = 0.55 + coh * 0.45;
+    ctx.fillStyle = `rgb(${RGB[(p / K) | 0]})`;
+    ctx.beginPath(); ctx.arc(x, y, size, 0, 6.2831853); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  requestAnimationFrame(frame);
+}
+
+$('b-bar').onclick = () => goTo(0);
+$('b-pie').onclick = () => goTo(1);
+$('b-line').onclick = () => goTo(2);
+$('net').onchange = e => { netOn = e.target.checked; };
+let autoTimer = null;
+$('auto').onchange = e => { clearInterval(autoTimer); if (e.target.checked) autoTimer = setInterval(() => goTo((toL + 1) % 3), 2800); };
+$('legend').innerHTML = RES.map((r, i) => `<span class="lg"><span class="sw" style="background:${COLORS[i]}"></span>${r.name} <b>${Math.round(r.v * 100)}%</b></span>`).join('');
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js');
+    await mod.default();
+    const bytes = mod.compile_ui_cell_wasm(CELL);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFn = instance.exports.run; fuelG = instance.exports.fuel || null;
+    $('foot').innerHTML = `一支 <b>${bytes.length}-byte cell</b>:每幀每顆粒子把座標<b>寫進共享場 <code>sd</code></b>、又<b>讀鄰居 <code>ld</code></b>,` +
+      `近了(<20px)就互推相讓——<b>珠珠互映</b>。空隙由粒子<b>合作補實</b>,非 host 畫向量。` +
+      `勾掉「相讓」可即時對照:關掉=各映一燈(有空隙),開啟=珠珠互映(補實)。` +
+      `共享場正是 UI 圍籬本有的 <code>ld/sd</code>(${P} 粒子 × 座標寫入 &lt; 4096 槽);啞畫筆仍只照場畫點。`;
+    requestAnimationFrame(frame);
+  } catch (err) {
+    $('foot').innerHTML = `<span style="color:#f85149">需要 /pkg 內的 wasm-jit 編譯器:${err}</span>`;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

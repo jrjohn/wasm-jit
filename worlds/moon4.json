@@ -1,236 +1,392 @@
 {
- "name": "moon4",
- "surface": "field",
- "chat": [],
- "payload": {
-  "grid": 96,
-  "view": "top",
-  "ambient": "let gw = get(0.0) * 0.9995 + noise() * 0.0005;\nset(0.0, gw);\nbreath(0.16 + gw * 6.0);\nif noise() > 0.99993 { bubble(0.25); }\nif noise() > 0.99997 { drop(0.12); }\n0.0",
-  "cells": [
-   {
-    "id": "shan-shui",
-    "mode": "once",
-    "order": 1,
-    "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  let h = 10.0 + 5.0 * sin(x * 0.11) * cos(y * 0.09) + 2.5 * sin((x + y) * 0.06);\n  let wx = 16.0 - x;\n  if wx > 0.0 { h = h + wx * wx * 0.22; }\n  if x > 62.0 { if y < 30.0 { h = h + 3.0; } }\n  fw(0.0, x, y, h);\n  fw(1.0, x, y, 0.0);\n  fw(3.0, x, y, 0.0);\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
-   },
-   {
-    "id": "jiang",
-    "mode": "once",
-    "order": 2,
-    "script": "let x = 0.0;\nwhile x < gw {\n let cy = 48.0 + sin(x * 0.045) * 9.0 - (x - 48.0) * 0.10;\n let y = cy - 7.0;\n while y < cy + 7.0 {\n  if y >= 0.0 { if y < gh {\n   let d = abs(y - cy);\n   let k = 1.0 - d / 7.0;\n   if k > 0.0 {\n    let hh = fr(0.0, x, y);\n    let cut = k * 0.75;\n    fw(0.0, x, y, hh * (1.0 - cut) + 3.5 * cut);\n    if k > 0.45 { fw(1.0, x, y, 2.6 * ((k - 0.45) / 0.55)); }\n   }\n  } }\n  y = y + 1.0;\n }\n x = x + 1.0;\n}\n1.0"
-   },
-   {
-    "id": "shuang",
-    "mode": "frame",
-    "order": 3,
-    "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 {\n   let sn = fr(3.0, x, y) + 0.0008;\n   if sn > 0.6 { sn = 0.6; }\n   fw(3.0, x, y, sn);\n  }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
-   }
-  ],
-  "entities": [
-   {
-    "id": "boat",
-    "type": "boat",
-    "at": [
-     56,
-     52.4
+  "chat": [],
+  "name": "moon4",
+  "payload": {
+    "ambient": "let gw = get(0.0) * 0.999 + noise() * 0.001;\nset(0.0, gw);\nlet gust = 0.5 + 0.5 * sin(t * 0.13);\nlet g2 = 0.5 + 0.5 * sin(t * 0.055 + 2.0);\nlet flick = 0.5 + 0.5 * sin(t * 0.37 + 1.0);\nbreath(0.05 + 0.38 * gust * gust * (0.55 + 0.45 * g2) + 0.09 * flick + gw * 0.4);\nif noise() > 0.99996 { bubble(0.22); }\nif noise() > 0.99998 { drop(0.10); }\n0.0",
+    "cells": [
+      {
+        "id": "shan-shui",
+        "mode": "once",
+        "order": 1,
+        "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  let h = 10.0 + 5.0 * sin(x * 0.11) * cos(y * 0.09) + 2.5 * sin((x + y) * 0.06);\n  let wx = 16.0 - x;\n  if wx > 0.0 { h = h + wx * wx * 0.22; }\n  if x > 62.0 { if y < 30.0 { h = h + 3.0; } }\n  fw(0.0, x, y, h);\n  fw(1.0, x, y, 0.0);\n  fw(3.0, x, y, 0.0);\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "jiang",
+        "mode": "once",
+        "order": 2,
+        "script": "let x = 0.0;\nwhile x < gw {\n let cy = 48.0 + sin(x * 0.045) * 9.0 - (x - 48.0) * 0.10;\n let y = cy - 7.0;\n while y < cy + 7.0 {\n  if y >= 0.0 { if y < gh {\n   let d = abs(y - cy);\n   let k = 1.0 - d / 7.0;\n   if k > 0.0 {\n    let hh = fr(0.0, x, y);\n    let cut = k * 0.75;\n    fw(0.0, x, y, hh * (1.0 - cut) + 3.5 * cut);\n    if k > 0.45 { fw(1.0, x, y, 2.6 * ((k - 0.45) / 0.55)); }\n   }\n  } }\n  y = y + 1.0;\n }\n x = x + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "shuang",
+        "mode": "frame",
+        "order": 3,
+        "script": "let y = 0.0;\nwhile y < gh {\n let x = 0.0;\n while x < gw {\n  if fr(1.0, x, y) < 0.05 {\n   let sn = fr(3.0, x, y) + 0.0008;\n   if sn > 0.6 { sn = 0.6; }\n   fw(3.0, x, y, sn);\n  }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      },
+      {
+        "id": "terrace",
+        "mode": "once",
+        "order": 1.5,
+        "script": "let hc = fr(0.0, 78.0, 26.0);\nlet y = 20.0;\nwhile y < 32.0 {\n let x = 71.0;\n while x < 85.0 {\n  let ex = 5.2 - abs(x - 78.0);\n  let ey = 4.6 - abs(y - 26.0);\n  if ex > 0.0 { if ey > 0.0 {\n   let m = ex;\n   if ey < m { m = ey; }\n   if m > 1.0 { m = 1.0; }\n   let ho = fr(0.0, x, y);\n   fw(0.0, x, y, ho * (1.0 - m) + hc * m);\n   if m > 0.5 { fw(1.0, x, y, 0.0); }\n  } }\n  x = x + 1.0;\n }\n y = y + 1.0;\n}\n1.0"
+      }
     ],
-    "habitat": "water",
-    "body_seed": "rgb(0.32, 0.22, 0.14);\nbox(0.0, 0.35, 0.0, 3.4, 0.3, 1.3);\nbox(0.0, 0.62, 0.0, 3.8, 0.24, 1.5);\nrgb(0.26, 0.18, 0.11);\npush();\nmove(1.9, 0.5, 0.0);\nrotz(0.35);\nbox(0.0, 0.0, 0.0, 0.9, 0.22, 1.1);\npop();\npush();\nmove(0.0 - 1.9, 0.5, 0.0);\nrotz(0.0 - 0.35);\nbox(0.0, 0.0, 0.0, 0.9, 0.22, 1.1);\npop();\nrgb(0.55, 0.45, 0.28);\npush();\nmove(0.45, 1.1, 0.0);\nbox(0.0, 0.3, 0.0, 1.7, 0.08, 1.5);\npush();\nmove(0.0, 0.22, 0.6);\nrotx(0.6);\nbox(0.0, 0.0, 0.0, 1.7, 0.08, 0.8);\npop();\npush();\nmove(0.0, 0.22, 0.0 - 0.6);\nrotx(0.0 - 0.6);\nbox(0.0, 0.0, 0.0, 1.7, 0.08, 0.8);\npop();\npop();\nlum(0.9);\nrgb(1.0, 0.62, 0.25);\nsphere(0.0 - 1.35, 0.95, 0.0, 0.14);\nlum(0.0);\n0.0"
-   },
-   {
-    "id": "weng",
-    "type": "fisherman",
-    "at": [
-     56,
-     52.4
+    "entities": [
+      {
+        "at": [
+          56,
+          52.4
+        ],
+        "body_seed": "move(0.0, sin(t * 0.7) * 0.07, 0.0);\nrotz(sin(t * 0.55) * 0.035);\nrotx(sin(t * 0.47 + 1.0) * 0.025);\nrgb(0.32, 0.22, 0.14);\nbox(0.0, 0.35, 0.0, 3.4, 0.3, 1.3);\nbox(0.0, 0.62, 0.0, 3.8, 0.24, 1.5);\nrgb(0.26, 0.18, 0.11);\npush();\nmove(1.9, 0.5, 0.0);\nrotz(0.35);\nbox(0.0, 0.0, 0.0, 0.9, 0.22, 1.1);\npop();\npush();\nmove(0.0 - 1.9, 0.5, 0.0);\nrotz(0.0 - 0.35);\nbox(0.0, 0.0, 0.0, 0.9, 0.22, 1.1);\npop();\nrgb(0.55, 0.45, 0.28);\npush();\nmove(0.45, 1.1, 0.0);\nbox(0.0, 0.3, 0.0, 1.7, 0.08, 1.5);\npush();\nmove(0.0, 0.22, 0.6);\nrotx(0.6);\nbox(0.0, 0.0, 0.0, 1.7, 0.08, 0.8);\npop();\npush();\nmove(0.0, 0.22, 0.0 - 0.6);\nrotx(0.0 - 0.6);\nbox(0.0, 0.0, 0.0, 1.7, 0.08, 0.8);\npop();\npop();\nlum(0.9);\nrgb(1.0, 0.62, 0.25);\nsphere(0.0 - 1.35, 0.95, 0.0, 0.14);\nlum(0.0);\n0.0",
+        "habitat": "water",
+        "id": "boat",
+        "type": "boat"
+      },
+      {
+        "at": [
+          56,
+          52.4
+        ],
+        "behavior": "0.0",
+        "body_seed": "move(0.0, sin(t * 0.7) * 0.07, 0.0);\nrotz(sin(t * 0.55) * 0.035);\nrotx(sin(t * 0.47 + 1.0) * 0.025);\nmove(0.0, (0.5 + 0.5 * sin(t * 0.26)) * 0.03, 0.0);\nrotx(sin(t * 0.26) * 0.018);\nrgb(0.45, 0.38, 0.3);\npush();\nmove(0.0 - 0.85, 0.62, 0.0);\ncone(0.42, 0.85);\nrgb(0.85, 0.78, 0.62);\nmove(0.0, 0.88, 0.0);\nsphere(0.0, 0.0, 0.0, 0.16);\nrgb(0.72, 0.62, 0.38);\nmove(0.0, 0.13, 0.0);\ncone(0.36, 0.16);\npop();\nrgb(0.3, 0.24, 0.16);\npush();\nmove(0.0 - 0.5, 0.8, 0.12);\nroty(0.15);\nrotz(0.55);\ncyl(0.022, 1.7);\npop();\n0.0",
+        "id": "weng",
+        "mind": {
+          "persona": "孤舟蓑笠翁，獨釣寒江雪 — a solitary old man in a straw cloak and bamboo hat, fishing alone on a frozen river under falling snow. He speaks rarely, in short quiet lines, at peace with the silence and cold."
+        },
+        "on": "boat",
+        "type": "fisherman"
+      },
+      {
+        "at": [
+          64,
+          48.7
+        ],
+        "behavior": "0.0",
+        "body_seed": "rgb(0.52, 0.5, 0.47);\nlet k = 0.0;\nwhile k < 11.0 {\n let a = (k - 5.0) * 0.3;\n push();\n move(0.0, 3.8 - a * a * 1.0, (k - 5.0) * 1.15);\n rotx(a * 0.5);\n box(0.0, 0.0, 0.0, 2.2, 0.24, 1.35);\n pop();\n k = k + 1.0;\n}\nrgb(0.42, 0.4, 0.38);\npush();\nmove(0.0, 1.2, 3.1);\ncyl(0.45, 2.4);\npop();\npush();\nmove(0.0, 1.2, 0.0 - 3.1);\ncyl(0.45, 2.4);\npop();\nrgb(0.47, 0.45, 0.43);\nlet p = 0.0;\nwhile p < 7.0 {\n let b = (p - 3.0) * 0.45;\n push();\n move(0.95, 4.55 - b * b * 1.0, (p - 3.0) * 1.72);\n box(0.0, 0.0, 0.0, 0.12, 0.55, 0.14);\n pop();\n push();\n move(0.0 - 0.95, 4.55 - b * b * 1.0, (p - 3.0) * 1.72);\n box(0.0, 0.0, 0.0, 0.12, 0.55, 0.14);\n pop();\n p = p + 1.0;\n}\n0.0",
+        "id": "bridge",
+        "skin_seed": "rgb(0.55, 0.53, 0.5);\nrect(px - s * 0.18, py - s * 0.6, s * 0.36, s * 1.2);\nrgb(0.42, 0.4, 0.38);\nline(px - s * 0.18, py - s * 0.6, px - s * 0.18, py + s * 0.6);\nline(px + s * 0.18, py - s * 0.6, px + s * 0.18, py + s * 0.6);\n0.0",
+        "type": "bridge",
+        "walkable": {
+          "span": 5.75,
+          "width": 1.0,
+          "peak": 3.8,
+          "curve": 0.0681,
+          "ramp": 1.4,
+          "top": 0.15
+        }
+      },
+      {
+        "at": [
+          78,
+          26
+        ],
+        "body_seed": "rgb(0.4, 0.4, 0.44);\nbox(0.0, 0.2, 0.0, 8.2, 0.4, 6.4);\nrgb(0.5, 0.19, 0.15);\nbox(0.0, 2.85, 0.0 - 2.7, 5.8, 5.1, 0.35);\nbox(0.0 - 2.9, 2.85, 0.0, 0.35, 5.1, 5.4);\nbox(2.9, 2.85, 0.0, 0.35, 5.1, 5.4);\nrgb(0.34, 0.14, 0.11);\nbox(0.0, 5.35, 0.0, 5.8, 0.35, 5.4);\nrgb(0.74, 0.68, 0.6);\nbox(0.0, 5.6, 0.0, 6.2, 0.35, 5.8);\nrgb(0.3, 0.11, 0.09);\npush();\nmove(0.0 - 2.6, 2.7, 3.0);\ncyl(0.24, 5.2);\npop();\npush();\nmove(2.6, 2.7, 3.0);\ncyl(0.24, 5.2);\npop();\nrgb(0.12, 0.14, 0.19);\nshine(0.3);\npush();\nmove(0.0, 6.5, 1.7);\nrotx(0.6);\nbox(0.0, 0.0, 0.0, 7.6, 0.2, 3.8);\npop();\npush();\nmove(0.0, 6.5, 0.0 - 1.7);\nrotx(0.0 - 0.6);\nbox(0.0, 0.0, 0.0, 7.6, 0.2, 3.8);\npop();\nbox(0.0, 7.5, 0.0, 6.6, 0.32, 0.7);\nshine(0.15);\nlum(0.85);\nrgb(1.0, 0.63, 0.28);\nsphere(0.0 - 2.2, 2.1, 2.9, 0.26);\nlum(0.0);\n0.0",
+        "id": "temple",
+        "skin_seed": "hsl(0.0, 0.0, 0.32);\nrect(px - s * 2.4, py + s * 1.45, s * 4.8, s * 0.35);\nhsl(0.02, 0.45, 0.34);\nrect(px - s * 1.7, py - s * 0.15, s * 3.4, s * 1.6);\nhsl(0.06, 0.2, 0.55);\nrect(px - s * 1.7, py - s * 0.38, s * 3.4, s * 0.26);\nhsl(0.05, 0.35, 0.06);\nrect(px - s * 0.52, py + s * 0.32, s * 1.04, s * 1.12);\ndisc(px, py + s * 0.34, s * 0.52);\nhsl(0.62, 0.32, 0.15);\ntri(px - s * 2.45, py - s * 0.34, px + s * 2.45, py - s * 0.34, px, py - s * 1.6);\ntri(px - s * 2.45, py - s * 0.34, px - s * 2.9, py - s * 0.8, px - s * 1.75, py - s * 0.62);\ntri(px + s * 2.45, py - s * 0.34, px + s * 2.9, py - s * 0.8, px + s * 1.75, py - s * 0.62);\nhsl(0.6, 0.2, 0.28);\nrect(px - s * 0.14, py - s * 1.72, s * 0.28, s * 0.18);\nhsl(0.07, 0.9, 0.5);\ndisc(px - s * 1.3, py + s * 0.68, s * 0.16);\nhsl(0.08, 1.0, 0.72);\ndisc(px - s * 1.3, py + s * 0.68, s * 0.09);\n0.0",
+        "type": "temple",
+        "shelter": {
+          "w": 2.8,
+          "d": 2.6,
+          "h": 5.3,
+          "floor": 0.2
+        },
+        "collide": [
+          {
+            "cx": 0,
+            "cz": -2.7,
+            "hx": 2.9,
+            "hz": 0.25
+          },
+          {
+            "cx": -2.9,
+            "cz": 0,
+            "hx": 0.25,
+            "hz": 2.7
+          },
+          {
+            "cx": 2.9,
+            "cz": 0,
+            "hx": 0.25,
+            "hz": 2.7
+          },
+          {
+            "cx": -2.6,
+            "cz": 3.0,
+            "hx": 0.35,
+            "hz": 0.35
+          },
+          {
+            "cx": 2.6,
+            "cz": 3.0,
+            "hx": 0.35,
+            "hz": 0.35
+          }
+        ]
+      },
+      {
+        "id": "buddha",
+        "type": "buddha",
+        "at": [
+          78,
+          24.2
+        ],
+        "image": "amituofo",
+        "iconH": 3.2
+      },
+      {
+        "at": [
+          78,
+          27
+        ],
+        "body_seed": "rgb(0.42, 0.3, 0.15);\nshine(0.5);\npush();\nmove(0.0, 1.7, 0.6);\nsphere(0.0, 0.0, 0.0, 0.32);\nmove(0.0, 0.0 - 0.3, 0.0);\ncyl(0.36, 0.22);\nmove(0.0, 0.55, 0.0);\ncyl(0.05, 0.35);\npop();\nshine(0.15);\n0.0",
+        "id": "bell",
+        "offset": [
+          -2.3,
+          1.2
+        ],
+        "on": "temple",
+        "skin_seed": "hsl(0.09, 0.5, 0.3);\ndisc(px, py - s * 0.16, s * 0.2);\ntri(px - s * 0.2, py - s * 0.2, px + s * 0.2, py - s * 0.2, px + s * 0.3, py + s * 0.3);\ntri(px - s * 0.2, py - s * 0.2, px - s * 0.3, py + s * 0.3, px + s * 0.3, py + s * 0.3);\nhsl(0.08, 0.45, 0.22);\nrect(px - s * 0.32, py + s * 0.26, s * 0.64, s * 0.09);\nrect(px - s * 0.05, py - s * 0.44, s * 0.1, s * 0.14);\nhsl(0.07, 0.55, 0.14);\ndisc(px, py + s * 0.42, s * 0.06);\n0.0",
+        "sound_seed": "let bt = get(0.0) + 1.0;\nif bt < 1.5 { bt = 1050000.0; }\nset(0.0, bt);\nif bt > 1400000.0 { strike(98.0, 1.0); set(0.0, 0.0); }\n0.0",
+        "type": "bell"
+      },
+      {
+        "at": [
+          58,
+          44
+        ],
+        "body_seed": "rgb(0.35, 0.24, 0.16);\ncyl(0.13, 2.4);\npush();\nmove(0.0, 1.6, 0.0);\nrotz(0.5);\ncyl(0.07, 1.1);\npop();\npush();\nmove(0.0, 1.9, 0.0);\nrotz(0.0 - 0.6);\nrotx(0.3);\ncyl(0.07, 0.95);\npop();\nrgb(0.72, 0.18, 0.1);\nsphere(0.55, 2.75, 0.15, 0.62);\nsphere(0.0 - 0.5, 2.6, 0.0 - 0.2, 0.58);\nrgb(0.82, 0.28, 0.12);\nsphere(0.15, 3.15, 0.0 - 0.1, 0.55);\nsphere(0.0 - 0.15, 2.9, 0.35, 0.48);\nrgb(0.88, 0.4, 0.16);\nsphere(0.35, 3.35, 0.25, 0.34);\n0.0",
+        "id": "maple1",
+        "skin_seed": "rgb(0.8, 0.25, 0.12);\ndisc(px, py, s * 0.42);\nrgb(0.88, 0.4, 0.18);\ndisc(px + s * 0.18, py - s * 0.1, s * 0.22);\nrgb(0.4, 0.26, 0.16);\ndisc(px, py, s * 0.07);\n0.0",
+        "type": "maple"
+      },
+      {
+        "at": [
+          68,
+          55
+        ],
+        "body_seed": "rgb(0.35, 0.24, 0.16);\ncyl(0.13, 2.4);\npush();\nmove(0.0, 1.6, 0.0);\nrotz(0.5);\ncyl(0.07, 1.1);\npop();\npush();\nmove(0.0, 1.9, 0.0);\nrotz(0.0 - 0.6);\nrotx(0.3);\ncyl(0.07, 0.95);\npop();\nrgb(0.72, 0.18, 0.1);\nsphere(0.55, 2.75, 0.15, 0.62);\nsphere(0.0 - 0.5, 2.6, 0.0 - 0.2, 0.58);\nrgb(0.82, 0.28, 0.12);\nsphere(0.15, 3.15, 0.0 - 0.1, 0.55);\nsphere(0.0 - 0.15, 2.9, 0.35, 0.48);\nrgb(0.88, 0.4, 0.16);\nsphere(0.35, 3.35, 0.25, 0.34);\n0.0",
+        "id": "maple2",
+        "skin_seed": "rgb(0.8, 0.25, 0.12);\ndisc(px, py, s * 0.42);\nrgb(0.88, 0.4, 0.18);\ndisc(px + s * 0.18, py - s * 0.1, s * 0.22);\nrgb(0.4, 0.26, 0.16);\ndisc(px, py, s * 0.07);\n0.0",
+        "type": "maple"
+      },
+      {
+        "at": [
+          74,
+          33
+        ],
+        "body_seed": "rgb(0.35, 0.24, 0.16);\ncyl(0.13, 2.4);\npush();\nmove(0.0, 1.6, 0.0);\nrotz(0.5);\ncyl(0.07, 1.1);\npop();\npush();\nmove(0.0, 1.9, 0.0);\nrotz(0.0 - 0.6);\nrotx(0.3);\ncyl(0.07, 0.95);\npop();\nrgb(0.72, 0.18, 0.1);\nsphere(0.55, 2.75, 0.15, 0.62);\nsphere(0.0 - 0.5, 2.6, 0.0 - 0.2, 0.58);\nrgb(0.82, 0.28, 0.12);\nsphere(0.15, 3.15, 0.0 - 0.1, 0.55);\nsphere(0.0 - 0.15, 2.9, 0.35, 0.48);\nrgb(0.88, 0.4, 0.16);\nsphere(0.35, 3.35, 0.25, 0.34);\n0.0",
+        "id": "maple3",
+        "skin_seed": "rgb(0.8, 0.25, 0.12);\ndisc(px, py, s * 0.42);\nrgb(0.88, 0.4, 0.18);\ndisc(px + s * 0.18, py - s * 0.1, s * 0.22);\nrgb(0.4, 0.26, 0.16);\ndisc(px, py, s * 0.07);\n0.0",
+        "type": "maple"
+      },
+      {
+        "at": [
+          36,
+          57
+        ],
+        "behavior": "mv(sin(t * get(24.0) + get(28.0)) * get(25.0) + cos(t * 0.05) * 0.004, cos(t * get(26.0) + get(29.0)) * get(27.0) + sin(t * 0.13) * 0.004);\n0.0",
+        "body_seed": "rgb(0.16, 0.42, 0.24);\npush();\nmove(0.0, 0.05, 0.0);\ncyl(0.55, 0.05);\npop();\npush();\nmove(0.55, 0.04, 0.32);\ncyl(0.3, 0.04);\npop();\nrgb(0.95, 0.6, 0.75);\npush();\nmove(0.0 - 0.2, 0.08, 0.15);\ncone(0.16, 0.32);\nrgb(1.0, 0.78, 0.86);\nmove(0.0, 0.34, 0.0);\nsphere(0.0, 0.0, 0.0, 0.11);\npop();\n0.0",
+        "habitat": "water",
+        "id": "lotus1",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus",
+        "innate": [
+          0.18,
+          0.01,
+          0.15,
+          0.009,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "at": [
+          33,
+          58
+        ],
+        "behavior": "mv(sin(t * get(24.0) + get(28.0)) * get(25.0) + cos(t * 0.05) * 0.004, cos(t * get(26.0) + get(29.0)) * get(27.0) + sin(t * 0.13) * 0.004);\n0.0",
+        "body_seed": "rgb(0.16, 0.42, 0.24);\npush();\nmove(0.0, 0.05, 0.0);\ncyl(0.55, 0.05);\npop();\npush();\nmove(0.55, 0.04, 0.32);\ncyl(0.3, 0.04);\npop();\nrgb(0.95, 0.6, 0.75);\npush();\nmove(0.0 - 0.2, 0.08, 0.15);\ncone(0.16, 0.32);\nrgb(1.0, 0.78, 0.86);\nmove(0.0, 0.34, 0.0);\nsphere(0.0, 0.0, 0.0, 0.11);\npop();\n0.0",
+        "habitat": "water",
+        "id": "lotus2",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus",
+        "innate": [
+          0.13,
+          0.009,
+          0.21,
+          0.01,
+          2.0,
+          1.2,
+          0.0,
+          1.5
+        ]
+      },
+      {
+        "at": [
+          39,
+          56
+        ],
+        "behavior": "mv(sin(t * get(24.0) + get(28.0)) * get(25.0) + cos(t * 0.05) * 0.004, cos(t * get(26.0) + get(29.0)) * get(27.0) + sin(t * 0.13) * 0.004);\n0.0",
+        "body_seed": "rgb(0.16, 0.42, 0.24);\npush();\nmove(0.0, 0.05, 0.0);\ncyl(0.55, 0.05);\npop();\npush();\nmove(0.55, 0.04, 0.32);\ncyl(0.3, 0.04);\npop();\nrgb(0.95, 0.6, 0.75);\npush();\nmove(0.0 - 0.2, 0.08, 0.15);\ncone(0.16, 0.32);\nrgb(1.0, 0.78, 0.86);\nmove(0.0, 0.34, 0.0);\nsphere(0.0, 0.0, 0.0, 0.11);\npop();\n0.0",
+        "habitat": "water",
+        "id": "lotus3",
+        "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0",
+        "type": "lotus",
+        "innate": [
+          0.24,
+          0.008,
+          0.19,
+          0.01,
+          3.5,
+          2.2,
+          0.0,
+          3.0
+        ]
+      },
+      {
+        "at": [
+          44,
+          55
+        ],
+        "behavior": "mv(sin(t * get(24.0) + get(28.0)) * get(25.0) + sin(t * 0.11) * 0.005, cos(t * get(26.0) + get(29.0)) * get(27.0) + sin(t * 0.19) * 0.005);\n0.0",
+        "body_seed": "rgb(0.4, 0.48, 0.58);\npush();\nmove(0.0, 0.02 + sin(t * 2.6) * 0.05, 0.0);\nroty(3.14159 + sin(t * 1.1) * 0.4);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.18, 0.0, 0.0, 0.12);\nsphere(0.33, 0.0, 0.0, 0.08);\nrgb(0.3, 0.38, 0.48);\ntri(0.4, 0.0, 0.0, 0.6, 0.24, 0.0, 0.6, 0.0 - 0.12, 0.0);\npop();\n0.0",
+        "habitat": "water",
+        "id": "fish1",
+        "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0",
+        "type": "fish",
+        "innate": [
+          0.43,
+          0.013,
+          0.37,
+          0.011,
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "at": [
+          50,
+          53
+        ],
+        "behavior": "mv(sin(t * get(24.0) + get(28.0)) * get(25.0) + sin(t * 0.11) * 0.005, cos(t * get(26.0) + get(29.0)) * get(27.0) + sin(t * 0.19) * 0.005);\n0.0",
+        "body_seed": "rgb(0.4, 0.48, 0.58);\npush();\nmove(0.0, 0.02 + sin(t * 2.6) * 0.05, 0.0);\nroty(3.14159 + sin(t * 1.1) * 0.4);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.18, 0.0, 0.0, 0.12);\nsphere(0.33, 0.0, 0.0, 0.08);\nrgb(0.3, 0.38, 0.48);\ntri(0.4, 0.0, 0.0, 0.6, 0.24, 0.0, 0.6, 0.0 - 0.12, 0.0);\npop();\n0.0",
+        "habitat": "water",
+        "id": "fish2",
+        "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0",
+        "type": "fish",
+        "innate": [
+          0.29,
+          0.012,
+          0.33,
+          0.013,
+          2.0,
+          2.5,
+          0.0,
+          2.1
+        ]
+      },
+      {
+        "at": [
+          60,
+          50
+        ],
+        "behavior": "mv(sin(t * get(24.0) + get(28.0)) * get(25.0) + sin(t * 0.11) * 0.005, cos(t * get(26.0) + get(29.0)) * get(27.0) + sin(t * 0.19) * 0.005);\n0.0",
+        "body_seed": "rgb(0.4, 0.48, 0.58);\npush();\nmove(0.0, 0.02 + sin(t * 2.6) * 0.05, 0.0);\nroty(3.14159 + sin(t * 1.1) * 0.4);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.18, 0.0, 0.0, 0.12);\nsphere(0.33, 0.0, 0.0, 0.08);\nrgb(0.3, 0.38, 0.48);\ntri(0.4, 0.0, 0.0, 0.6, 0.24, 0.0, 0.6, 0.0 - 0.12, 0.0);\npop();\n0.0",
+        "habitat": "water",
+        "id": "fish3",
+        "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0",
+        "type": "fish",
+        "innate": [
+          0.51,
+          0.011,
+          0.41,
+          0.012,
+          4.0,
+          4.0,
+          0.0,
+          4.3
+        ]
+      },
+      {
+        "altitude": 0.34,
+        "at": [
+          60,
+          42
+        ],
+        "behavior": "mv(cos(t * get(24.0) + get(28.0)) * get(25.0) + sin(t * get(26.0)) * 0.028, sin(t * get(24.0) + get(28.0) + 1.57) * get(25.0) + cos(t * get(27.0)) * 0.024);\n0.0",
+        "body_seed": "rgb(0.08, 0.08, 0.1);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.2, 0.09, 0.0, 0.1);\nrgb(0.85, 0.7, 0.3);\npush();\nmove(0.32, 0.09, 0.0);\nrotz(0.0 - 1.57);\ncone(0.03, 0.13);\npop();\nrgb(0.08, 0.08, 0.1);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 8.5) * 0.30, 0.55, 0.1, 0.06, 0.15);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 8.5) * 0.30, 0.0 - 0.55, 0.1, 0.06, 0.0 - 0.15);\n0.0",
+        "id": "crow1",
+        "realm": "sky",
+        "skin_seed": "rgb(0.1, 0.1, 0.12);\ndisc(px, py, s * 0.13);\nline(px, py, px - s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\nline(px, py, px + s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\n0.0",
+        "sound_seed": "let ph = get(0.0);\nif ph <= 0.0 { if noise() > 0.99998 { set(0.0, 3.0); } }\nelse {\n set(0.0, ph - 0.0003);\n if ph > 2.9999 { chirp(820.0, 540.0, 0.14); }\n if ph > 1.9999 { if ph < 2.0001 { chirp(760.0, 500.0, 0.12); } }\n}\n0.0",
+        "type": "crow",
+        "innate": [
+          0.1,
+          0.09,
+          0.037,
+          0.051,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "altitude": 0.28,
+        "at": [
+          63,
+          40
+        ],
+        "behavior": "mv(cos(t * get(24.0) + get(28.0)) * get(25.0) + sin(t * get(26.0)) * 0.028, sin(t * get(24.0) + get(28.0) + 1.57) * get(25.0) + cos(t * get(27.0)) * 0.024);\n0.0",
+        "body_seed": "rgb(0.08, 0.08, 0.1);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.2, 0.09, 0.0, 0.1);\nrgb(0.85, 0.7, 0.3);\npush();\nmove(0.32, 0.09, 0.0);\nrotz(0.0 - 1.57);\ncone(0.03, 0.13);\npop();\nrgb(0.08, 0.08, 0.1);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 8.5) * 0.30, 0.55, 0.1, 0.06, 0.15);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 8.5) * 0.30, 0.0 - 0.55, 0.1, 0.06, 0.0 - 0.15);\n0.0",
+        "id": "crow2",
+        "realm": "sky",
+        "skin_seed": "rgb(0.1, 0.1, 0.12);\ndisc(px, py, s * 0.13);\nline(px, py, px - s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\nline(px, py, px + s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\n0.0",
+        "type": "crow",
+        "innate": [
+          0.075,
+          0.105,
+          0.043,
+          0.029,
+          2.5,
+          0.0,
+          0.0,
+          3.0
+        ]
+      },
+      {
+        "id": "ball",
+        "type": "ball",
+        "at": [
+          49,
+          82
+        ],
+        "physics": {
+          "r": 0.8,
+          "bounce": 0.55,
+          "roll": 6,
+          "friction": 1.4,
+          "kick": 6,
+          "g": 15,
+          "h0": 4
+        },
+        "body_seed": "rgb(0.86, 0.28, 0.2);\nshine(0.4);\nsphere(0.0, 0.8, 0.0, 0.8);\nrgb(1.0, 0.92, 0.86);\nsphere(0.3, 1.12, 0.5, 0.15);\n0.0"
+      }
     ],
-    "on": "boat",
-    "behavior": "0.0",
-    "body_seed": "rgb(0.45, 0.38, 0.3);\npush();\nmove(0.0 - 0.85, 0.62, 0.0);\ncone(0.42, 0.85);\nrgb(0.85, 0.78, 0.62);\nmove(0.0, 0.88, 0.0);\nsphere(0.0, 0.0, 0.0, 0.16);\nrgb(0.72, 0.62, 0.38);\nmove(0.0, 0.13, 0.0);\ncone(0.36, 0.16);\npop();\nrgb(0.3, 0.24, 0.16);\npush();\nmove(0.0 - 0.5, 0.8, 0.12);\nroty(0.15);\nrotz(0.55);\ncyl(0.022, 1.7);\npop();\n0.0",
-    "mind": {
-     "persona": "孤舟蓑笠翁，獨釣寒江雪 — a solitary old man in a straw cloak and bamboo hat, fishing alone on a frozen river under falling snow. He speaks rarely, in short quiet lines, at peace with the silence and cold."
-    },
-    "sound_seed": "let ph = get(0.0) + 0.00000026;\nif ph > 1.0 { ph = 0.0; }\nset(0.0, ph);\nif ph < 0.25 {\n let cp = ph * 4.0;\n if cp < 0.3 { voice(108.0, 0.0, 0.3 + cp * 2.0); }\n if cp >= 0.3 { if cp < 0.36 { voice(0.0, 0.0, 0.0); } }\n if cp >= 0.36 { if cp < 0.62 { voice(114.0, 1.0, 0.08); } }\n if cp >= 0.62 { if cp < 0.68 { voice(0.0, 2.0, 0.0); } }\n if cp >= 0.68 { if cp < 0.96 { voice(104.0, 2.0, 0.85); } }\n if cp >= 0.96 { voice(0.0, 2.0, 0.0); }\n} else {\n voice(0.0, 2.0, 0.0);\n}\n0.0"
-   },
-   {
-    "id": "bridge",
-    "type": "bridge",
-    "at": [
-     64,
-     48.7
-    ],
-    "behavior": "0.0",
-    "body_seed": "rgb(0.52, 0.5, 0.47);\nlet k = 0.0;\nwhile k < 11.0 {\n let a = (k - 5.0) * 0.3;\n push();\n move(0.0, 3.8 - a * a * 1.0, (k - 5.0) * 1.15);\n rotx(a * 0.5);\n box(0.0, 0.0, 0.0, 2.2, 0.24, 1.35);\n pop();\n k = k + 1.0;\n}\nrgb(0.42, 0.4, 0.38);\npush();\nmove(0.0, 1.2, 3.1);\ncyl(0.45, 2.4);\npop();\npush();\nmove(0.0, 1.2, 0.0 - 3.1);\ncyl(0.45, 2.4);\npop();\nrgb(0.47, 0.45, 0.43);\nlet p = 0.0;\nwhile p < 7.0 {\n let b = (p - 3.0) * 0.45;\n push();\n move(0.95, 4.55 - b * b * 1.0, (p - 3.0) * 1.72);\n box(0.0, 0.0, 0.0, 0.12, 0.55, 0.14);\n pop();\n push();\n move(0.0 - 0.95, 4.55 - b * b * 1.0, (p - 3.0) * 1.72);\n box(0.0, 0.0, 0.0, 0.12, 0.55, 0.14);\n pop();\n p = p + 1.0;\n}\n0.0",
-    "skin_seed": "rgb(0.55, 0.53, 0.5);\nrect(px - s * 0.18, py - s * 0.6, s * 0.36, s * 1.2);\nrgb(0.42, 0.4, 0.38);\nline(px - s * 0.18, py - s * 0.6, px - s * 0.18, py + s * 0.6);\nline(px + s * 0.18, py - s * 0.6, px + s * 0.18, py + s * 0.6);\n0.0"
-   },
-   {
-    "id": "temple",
-    "type": "temple",
-    "at": [
-     78,
-     26
-    ],
-    "body_seed": "rgb(0.4, 0.4, 0.44);\nbox(0.0, 0.15, 0.0, 6.4, 0.3, 4.6);\nrgb(0.5, 0.19, 0.15);\nbox(0.0, 1.5, 0.0, 4.6, 2.4, 3.2);\nrgb(0.74, 0.68, 0.6);\nbox(0.0, 2.85, 0.0, 4.9, 0.3, 3.5);\nrgb(0.3, 0.11, 0.09);\npush();\nmove(0.0 - 1.9, 1.4, 1.8);\ncyl(0.16, 2.8);\npop();\npush();\nmove(1.9, 1.4, 1.8);\ncyl(0.16, 2.8);\npop();\nrgb(0.12, 0.14, 0.19);\nshine(0.3);\npush();\nmove(0.0, 3.55, 0.95);\nrotx(0.6);\nbox(0.0, 0.0, 0.0, 6.0, 0.16, 2.4);\npop();\npush();\nmove(0.0, 3.55, 0.0 - 0.95);\nrotx(0.0 - 0.6);\nbox(0.0, 0.0, 0.0, 6.0, 0.16, 2.4);\npop();\nbox(0.0, 4.2, 0.0, 5.2, 0.24, 0.5);\nshine(0.15);\nrgb(0.05, 0.05, 0.07);\nbox(0.0, 1.1, 1.62, 1.3, 1.9, 0.12);\nlum(0.85);\nrgb(1.0, 0.63, 0.28);\nsphere(0.0 - 1.6, 1.05, 1.78, 0.17);\nlum(0.0);\n0.0",
-    "skin_seed": "hsl(0.0, 0.0, 0.32);\nrect(px - s * 2.4, py + s * 1.45, s * 4.8, s * 0.35);\nhsl(0.02, 0.45, 0.34);\nrect(px - s * 1.7, py - s * 0.15, s * 3.4, s * 1.6);\nhsl(0.06, 0.2, 0.55);\nrect(px - s * 1.7, py - s * 0.38, s * 3.4, s * 0.26);\nhsl(0.05, 0.35, 0.06);\nrect(px - s * 0.52, py + s * 0.32, s * 1.04, s * 1.12);\ndisc(px, py + s * 0.34, s * 0.52);\nhsl(0.62, 0.32, 0.15);\ntri(px - s * 2.45, py - s * 0.34, px + s * 2.45, py - s * 0.34, px, py - s * 1.6);\ntri(px - s * 2.45, py - s * 0.34, px - s * 2.9, py - s * 0.8, px - s * 1.75, py - s * 0.62);\ntri(px + s * 2.45, py - s * 0.34, px + s * 2.9, py - s * 0.8, px + s * 1.75, py - s * 0.62);\nhsl(0.6, 0.2, 0.28);\nrect(px - s * 0.14, py - s * 1.72, s * 0.28, s * 0.18);\nhsl(0.07, 0.9, 0.5);\ndisc(px - s * 1.3, py + s * 0.68, s * 0.16);\nhsl(0.08, 1.0, 0.72);\ndisc(px - s * 1.3, py + s * 0.68, s * 0.09);\n0.0"
-   },
-   {
-    "id": "bell",
-    "type": "bell",
-    "at": [
-     78,
-     27
-    ],
-    "on": "temple",
-    "offset": [
-     0.0,
-     1.0
-    ],
-    "body_seed": "rgb(0.42, 0.3, 0.15);\nshine(0.5);\npush();\nmove(0.0, 1.7, 0.6);\nsphere(0.0, 0.0, 0.0, 0.32);\nmove(0.0, 0.0 - 0.3, 0.0);\ncyl(0.36, 0.22);\nmove(0.0, 0.55, 0.0);\ncyl(0.05, 0.35);\npop();\nshine(0.15);\n0.0",
-    "skin_seed": "hsl(0.09, 0.5, 0.3);\ndisc(px, py - s * 0.16, s * 0.2);\ntri(px - s * 0.2, py - s * 0.2, px + s * 0.2, py - s * 0.2, px + s * 0.3, py + s * 0.3);\ntri(px - s * 0.2, py - s * 0.2, px - s * 0.3, py + s * 0.3, px + s * 0.3, py + s * 0.3);\nhsl(0.08, 0.45, 0.22);\nrect(px - s * 0.32, py + s * 0.26, s * 0.64, s * 0.09);\nrect(px - s * 0.05, py - s * 0.44, s * 0.1, s * 0.14);\nhsl(0.07, 0.55, 0.14);\ndisc(px, py + s * 0.42, s * 0.06);\n0.0",
-    "sound_seed": "let bt = get(0.0) + 1.0;\nif bt < 1.5 { bt = 1050000.0; }\nset(0.0, bt);\nif bt > 1400000.0 { strike(98.0, 1.0); set(0.0, 0.0); }\n0.0"
-   },
-   {
-    "id": "moon",
-    "type": "moon",
-    "at": [
-     10,
-     42
-    ],
-    "realm": "sky",
-    "altitude": 0.26,
-    "behavior": "0.0",
-    "body_seed": "lum(1.0);\nrgb(1.0, 0.96, 0.8);\nsphere(0.0, 0.0, 0.0, 3.2);\nlum(0.0);\n0.0",
-    "skin_seed": "hue(0.57);\ndisc(px, py, s * 0.5);\nhue(0.61);\nring(px, py, s * 0.74);\n0.0"
-   },
-   {
-    "id": "maple1",
-    "type": "maple",
-    "at": [
-     58,
-     44
-    ],
-    "body_seed": "rgb(0.35, 0.24, 0.16);\ncyl(0.13, 2.4);\npush();\nmove(0.0, 1.6, 0.0);\nrotz(0.5);\ncyl(0.07, 1.1);\npop();\npush();\nmove(0.0, 1.9, 0.0);\nrotz(0.0 - 0.6);\nrotx(0.3);\ncyl(0.07, 0.95);\npop();\nrgb(0.72, 0.18, 0.1);\nsphere(0.55, 2.75, 0.15, 0.62);\nsphere(0.0 - 0.5, 2.6, 0.0 - 0.2, 0.58);\nrgb(0.82, 0.28, 0.12);\nsphere(0.15, 3.15, 0.0 - 0.1, 0.55);\nsphere(0.0 - 0.15, 2.9, 0.35, 0.48);\nrgb(0.88, 0.4, 0.16);\nsphere(0.35, 3.35, 0.25, 0.34);\n0.0",
-    "skin_seed": "rgb(0.8, 0.25, 0.12);\ndisc(px, py, s * 0.42);\nrgb(0.88, 0.4, 0.18);\ndisc(px + s * 0.18, py - s * 0.1, s * 0.22);\nrgb(0.4, 0.26, 0.16);\ndisc(px, py, s * 0.07);\n0.0"
-   },
-   {
-    "id": "maple2",
-    "type": "maple",
-    "at": [
-     68,
-     55
-    ],
-    "body_seed": "rgb(0.35, 0.24, 0.16);\ncyl(0.13, 2.4);\npush();\nmove(0.0, 1.6, 0.0);\nrotz(0.5);\ncyl(0.07, 1.1);\npop();\npush();\nmove(0.0, 1.9, 0.0);\nrotz(0.0 - 0.6);\nrotx(0.3);\ncyl(0.07, 0.95);\npop();\nrgb(0.72, 0.18, 0.1);\nsphere(0.55, 2.75, 0.15, 0.62);\nsphere(0.0 - 0.5, 2.6, 0.0 - 0.2, 0.58);\nrgb(0.82, 0.28, 0.12);\nsphere(0.15, 3.15, 0.0 - 0.1, 0.55);\nsphere(0.0 - 0.15, 2.9, 0.35, 0.48);\nrgb(0.88, 0.4, 0.16);\nsphere(0.35, 3.35, 0.25, 0.34);\n0.0",
-    "skin_seed": "rgb(0.8, 0.25, 0.12);\ndisc(px, py, s * 0.42);\nrgb(0.88, 0.4, 0.18);\ndisc(px + s * 0.18, py - s * 0.1, s * 0.22);\nrgb(0.4, 0.26, 0.16);\ndisc(px, py, s * 0.07);\n0.0"
-   },
-   {
-    "id": "maple3",
-    "type": "maple",
-    "at": [
-     74,
-     33
-    ],
-    "body_seed": "rgb(0.35, 0.24, 0.16);\ncyl(0.13, 2.4);\npush();\nmove(0.0, 1.6, 0.0);\nrotz(0.5);\ncyl(0.07, 1.1);\npop();\npush();\nmove(0.0, 1.9, 0.0);\nrotz(0.0 - 0.6);\nrotx(0.3);\ncyl(0.07, 0.95);\npop();\nrgb(0.72, 0.18, 0.1);\nsphere(0.55, 2.75, 0.15, 0.62);\nsphere(0.0 - 0.5, 2.6, 0.0 - 0.2, 0.58);\nrgb(0.82, 0.28, 0.12);\nsphere(0.15, 3.15, 0.0 - 0.1, 0.55);\nsphere(0.0 - 0.15, 2.9, 0.35, 0.48);\nrgb(0.88, 0.4, 0.16);\nsphere(0.35, 3.35, 0.25, 0.34);\n0.0",
-    "skin_seed": "rgb(0.8, 0.25, 0.12);\ndisc(px, py, s * 0.42);\nrgb(0.88, 0.4, 0.18);\ndisc(px + s * 0.18, py - s * 0.1, s * 0.22);\nrgb(0.4, 0.26, 0.16);\ndisc(px, py, s * 0.07);\n0.0"
-   },
-   {
-    "id": "lotus1",
-    "type": "lotus",
-    "at": [
-     36,
-     57
-    ],
-    "habitat": "water",
-    "behavior": "mv(sin(t*0.2)*0.01, cos(t*0.17)*0.01);\n0.0",
-    "body_seed": "rgb(0.16, 0.42, 0.24);\npush();\nmove(0.0, 0.05, 0.0);\ncyl(0.55, 0.05);\npop();\npush();\nmove(0.55, 0.04, 0.32);\ncyl(0.3, 0.04);\npop();\nrgb(0.95, 0.6, 0.75);\npush();\nmove(0.0 - 0.2, 0.08, 0.15);\ncone(0.16, 0.32);\nrgb(1.0, 0.78, 0.86);\nmove(0.0, 0.34, 0.0);\nsphere(0.0, 0.0, 0.0, 0.11);\npop();\n0.0",
-    "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0"
-   },
-   {
-    "id": "lotus2",
-    "type": "lotus",
-    "at": [
-     33,
-     58
-    ],
-    "habitat": "water",
-    "behavior": "mv(sin(t*0.2)*0.01, cos(t*0.17)*0.01);\n0.0",
-    "body_seed": "rgb(0.16, 0.42, 0.24);\npush();\nmove(0.0, 0.05, 0.0);\ncyl(0.55, 0.05);\npop();\npush();\nmove(0.55, 0.04, 0.32);\ncyl(0.3, 0.04);\npop();\nrgb(0.95, 0.6, 0.75);\npush();\nmove(0.0 - 0.2, 0.08, 0.15);\ncone(0.16, 0.32);\nrgb(1.0, 0.78, 0.86);\nmove(0.0, 0.34, 0.0);\nsphere(0.0, 0.0, 0.0, 0.11);\npop();\n0.0",
-    "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0"
-   },
-   {
-    "id": "lotus3",
-    "type": "lotus",
-    "at": [
-     39,
-     56
-    ],
-    "habitat": "water",
-    "behavior": "mv(sin(t*0.2)*0.01, cos(t*0.17)*0.01);\n0.0",
-    "body_seed": "rgb(0.16, 0.42, 0.24);\npush();\nmove(0.0, 0.05, 0.0);\ncyl(0.55, 0.05);\npop();\npush();\nmove(0.55, 0.04, 0.32);\ncyl(0.3, 0.04);\npop();\nrgb(0.95, 0.6, 0.75);\npush();\nmove(0.0 - 0.2, 0.08, 0.15);\ncone(0.16, 0.32);\nrgb(1.0, 0.78, 0.86);\nmove(0.0, 0.34, 0.0);\nsphere(0.0, 0.0, 0.0, 0.11);\npop();\n0.0",
-    "skin_seed": "hue(0.92);\nlet k = 0.0;\nwhile k < 6.0 {\n  let a = k * 1.047;\n  disc(px + cos(a) * s * 0.5, py + sin(a) * s * 0.5, s * 0.28);\n  k = k + 1.0;\n}\nhue(0.17);\ndisc(px, py, s * 0.3);\n0.0"
-   },
-   {
-    "id": "fish1",
-    "type": "fish",
-    "at": [
-     44,
-     55
-    ],
-    "habitat": "water",
-    "behavior": "mv(sin(t*0.5)*0.01, cos(t*0.5)*0.008);\n0.0",
-    "body_seed": "rgb(0.4, 0.48, 0.58);\npush();\nmove(0.0, 0.02 + sin(t * 2.6) * 0.05, 0.0);\nroty(sin(t * 1.1) * 0.4);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.18, 0.0, 0.0, 0.12);\nsphere(0.33, 0.0, 0.0, 0.08);\nrgb(0.3, 0.38, 0.48);\ntri(0.4, 0.0, 0.0, 0.6, 0.24, 0.0, 0.6, 0.0 - 0.12, 0.0);\npop();\n0.0",
-    "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0"
-   },
-   {
-    "id": "fish2",
-    "type": "fish",
-    "at": [
-     50,
-     53
-    ],
-    "habitat": "water",
-    "behavior": "mv(sin(t*0.5)*0.01, cos(t*0.5)*0.008);\n0.0",
-    "body_seed": "rgb(0.4, 0.48, 0.58);\npush();\nmove(0.0, 0.02 + sin(t * 2.6) * 0.05, 0.0);\nroty(sin(t * 1.1) * 0.4);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.18, 0.0, 0.0, 0.12);\nsphere(0.33, 0.0, 0.0, 0.08);\nrgb(0.3, 0.38, 0.48);\ntri(0.4, 0.0, 0.0, 0.6, 0.24, 0.0, 0.6, 0.0 - 0.12, 0.0);\npop();\n0.0",
-    "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0"
-   },
-   {
-    "id": "fish3",
-    "type": "fish",
-    "at": [
-     60,
-     50
-    ],
-    "habitat": "water",
-    "behavior": "mv(sin(t*0.5)*0.01, cos(t*0.5)*0.008);\n0.0",
-    "body_seed": "rgb(0.4, 0.48, 0.58);\npush();\nmove(0.0, 0.02 + sin(t * 2.6) * 0.05, 0.0);\nroty(sin(t * 1.1) * 0.4);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.18, 0.0, 0.0, 0.12);\nsphere(0.33, 0.0, 0.0, 0.08);\nrgb(0.3, 0.38, 0.48);\ntri(0.4, 0.0, 0.0, 0.6, 0.24, 0.0, 0.6, 0.0 - 0.12, 0.0);\npop();\n0.0",
-    "skin_seed": "hsl(0.55,0.4,0.62);\ndisc(px,py,s*0.2);\nhsl(0.55,0.4,0.48);\nline(px+s*0.18,py,px+s*0.42,py-s*0.16);\nline(px+s*0.18,py,px+s*0.42,py+s*0.16);\n0.0"
-   },
-   {
-    "id": "crow1",
-    "type": "crow",
-    "at": [
-     60,
-     42
-    ],
-    "realm": "sky",
-    "altitude": 0.34,
-    "behavior": "mv(cos(t*0.45)*0.02, sin(t*0.45)*0.014);\n0.0",
-    "body_seed": "rgb(0.08, 0.08, 0.1);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.2, 0.09, 0.0, 0.1);\nrgb(0.85, 0.7, 0.3);\npush();\nmove(0.32, 0.09, 0.0);\nrotz(0.0 - 1.57);\ncone(0.03, 0.13);\npop();\nrgb(0.08, 0.08, 0.1);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 9.0) * 0.28, 0.55, 0.1, 0.06, 0.15);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 9.0) * 0.28, 0.0 - 0.55, 0.1, 0.06, 0.0 - 0.15);\n0.0",
-    "skin_seed": "rgb(0.1, 0.1, 0.12);\ndisc(px, py, s * 0.13);\nline(px, py, px - s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\nline(px, py, px + s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\n0.0",
-    "sound_seed": "let ph = get(0.0);\nif ph <= 0.0 { if noise() > 0.99998 { set(0.0, 3.0); } }\nelse {\n set(0.0, ph - 0.0003);\n if ph > 2.9999 { chirp(820.0, 540.0, 0.14); }\n if ph > 1.9999 { if ph < 2.0001 { chirp(760.0, 500.0, 0.12); } }\n}\n0.0"
-   },
-   {
-    "id": "crow2",
-    "type": "crow",
-    "at": [
-     63,
-     40
-    ],
-    "realm": "sky",
-    "altitude": 0.28,
-    "behavior": "mv(cos(t*0.45)*0.02, sin(t*0.45)*0.014);\n0.0",
-    "body_seed": "rgb(0.08, 0.08, 0.1);\nsphere(0.0, 0.0, 0.0, 0.16);\nsphere(0.2, 0.09, 0.0, 0.1);\nrgb(0.85, 0.7, 0.3);\npush();\nmove(0.32, 0.09, 0.0);\nrotz(0.0 - 1.57);\ncone(0.03, 0.13);\npop();\nrgb(0.08, 0.08, 0.1);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 9.0) * 0.28, 0.55, 0.1, 0.06, 0.15);\ntri(0.0, 0.06, 0.0, 0.0 - 0.15, 0.06 + sin(t * 9.0) * 0.28, 0.0 - 0.55, 0.1, 0.06, 0.0 - 0.15);\n0.0",
-    "skin_seed": "rgb(0.1, 0.1, 0.12);\ndisc(px, py, s * 0.13);\nline(px, py, px - s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\nline(px, py, px + s * 0.4, py - s * 0.18 - sin(t * 9.0) * s * 0.2);\n0.0"
-   }
-  ]
- }
+    "grid": 96,
+    "view": "top",
+    "sky": {
+      "bodies": [
+        {
+          "kind": "moon",
+          "azimuth": 2.8916,
+          "elevation": 0.52,
+          "size": 0.032
+        }
+      ]
+    }
+  },
+  "surface": "field"
 }

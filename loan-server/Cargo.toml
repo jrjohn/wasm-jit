@@ -1,0 +1,27 @@
+[package]
+name = "loan-server"
+version = "0.1.0"
+edition = "2021"
+description = "Server-side compute twin of apps/form.html: the loan cells (DSL) compile + run natively behind the SAME capability fence; the browser only POSTs {p,r,y} and gets numbers back — the formula never leaves the server."
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "time"] }
+tower-http = { version = "0.6", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# host-side fetch of ALLOW-LISTED data sources. The cell never gets this — the host
+# fetches, feeds the numbers into slots, and the cell only reads them. Reach unchanged.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# the native pure compiler (parser + codegen + the UI capability fence) — no wasm-bindgen.
+# same crate, same UI_IMPORTS the browser uses, so client and server mint byte-identical cells.
+wasm-jit = { path = "..", default-features = false }
+# a pure-Rust wasm runtime: this is the fence, made real on the server. the linker below
+# offers EXACTLY the 6 UI host functions — a cell that reached for anything else could not
+# have compiled, and could not link here either.
+wasmi = "0.40"
+
+[dev-dependencies]
+# only for `examples/reveal.rs`: disassemble a compiled cell to show that shipping the
+# .wasm to the client obscures the logic but does not hide it.
+wasmparser = "0.252.0"

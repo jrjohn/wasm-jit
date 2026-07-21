@@ -789,7 +789,11 @@ let lastRaf = 0;
 // Perspective is the HOST's eye, never a property of the world — the AI can
 // only declare "view":"first_person"; rendering and movement stay vocabulary.
 let fieldView = 'top';   // 'top' | 'fp'
-const cam = { px: 48, pz: 78, yaw: 0, yoff: 0, vy: 0 };
+// pitch: the walker may now raise the eye (抬頭) — 0 = level (matches the old
+// fixed 0.16 horizon offset), positive = look up at the sky/moon. pitchT is the
+// eased target the look-up button drives; drag sets both at once.
+const cam = { px: 48, pz: 78, yaw: 0, yoff: 0, vy: 0, pitch: 0, pitchT: 0 };
+const PITCH_MIN = -0.35, PITCH_MAX = 1.15;
 const FKEYS = { left: 0, right: 0, fwd: 0, back: 0, jump: 0 };
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
@@ -808,6 +812,49 @@ window.addEventListener('keyup', e => {
   const k = KEYMAP[e.code];
   if (k) FKEYS[k] = 0;
 });
+
+// Look around with the pointer (drag = mouse-look; works with touch too, so the
+// kiosk can 抬頭 by dragging up). Drag right → turn right; drag up → look up.
+// The dpad buttons sit above the canvas (own z-layer), so a drag on them never
+// reaches here — walking and looking don't fight.
+(function () {
+  let on = false, lx = 0, ly = 0, moved = 0;
+  const start = e => {
+    if (fieldView !== 'fp' || !fieldWorld) return;
+    const p = (e.touches && e.touches[0]) || e;
+    on = true; moved = 0; lx = p.clientX; ly = p.clientY;
+  };
+  const move = e => {
+    if (!on) return;
+    const p = (e.touches && e.touches[0]) || e;
+    const dx = p.clientX - lx, dy = p.clientY - ly; lx = p.clientX; ly = p.clientY;
+    moved += Math.abs(dx) + Math.abs(dy);
+    cam.yaw += dx * 0.0042;
+    cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.pitch - dy * 0.0042));
+    cam.pitchT = cam.pitch;                 // a manual look overrides the eased target
+    if (moved > 6) e.preventDefault();
+  };
+  const end = () => { on = false; };
+  addEventListener('pointerdown', start); addEventListener('pointermove', move, { passive: false });
+  addEventListener('pointerup', end); addEventListener('pointercancel', end);
+})();
+
+// 抬頭: a plain look-up toggle for anyone who won't think to drag. Tap → the eye
+// eases up to the moon; tap again → back to level. Shown only while walking.
+let lookBtn = null;
+function ensureLookBtn() {
+  if (lookBtn) return lookBtn;
+  const b = document.createElement('button');
+  b.id = 'lookbtn'; b.type = 'button'; b.textContent = '🌙 抬頭 look up';
+  b.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:65;' +
+    'border:1px solid #3a5573;border-radius:999px;padding:.5rem 1.1rem;background:#132033cc;' +
+    'color:#cfe6f4;font:14px/1 ui-monospace,monospace;cursor:pointer;display:none;backdrop-filter:blur(3px)';
+  b.addEventListener('click', () => {
+    cam.pitchT = cam.pitchT > 0.35 ? 0 : 0.72;   // toggle: up to the sky / back to level
+    b.textContent = cam.pitchT > 0.35 ? '🌙 平視 look level' : '🌙 抬頭 look up';
+  });
+  document.body.appendChild(b); lookBtn = b; return b;
+}
 
 function terrainH(x, z) {
   const g = fieldWorld.grid;
@@ -832,12 +879,26 @@ function updateCam(dt) {
   const g = fieldWorld.grid;
   cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
   const mv = (FKEYS.fwd - FKEYS.back) * 11 * dt;
-  cam.px = Math.min(Math.max(cam.px + Math.sin(cam.yaw) * mv, 1), g - 2);
-  cam.pz = Math.min(Math.max(cam.pz + Math.cos(cam.yaw) * mv, 1), g - 2);
+  // a wall stops you (and you slide along it): a being may declare solid `collide`
+  // boxes; move each axis only if it wouldn't put the eye inside one. 牆擋人。
+  const R = 0.5;
+  const blocked = (x, z) => {
+    for (const e of ENTITIES) {
+      const cs = e.collide; if (!cs) continue;
+      for (const b of cs) if (Math.abs(x - (e.x + b.cx)) < b.hx + R && Math.abs(z - (e.y + b.cz)) < b.hz + R) return true;
+    }
+    return false;
+  };
+  const nx = Math.min(Math.max(cam.px + Math.sin(cam.yaw) * mv, 1), g - 2);
+  const nz = Math.min(Math.max(cam.pz + Math.cos(cam.yaw) * mv, 1), g - 2);
+  if (!blocked(nx, cam.pz)) cam.px = nx;
+  if (!blocked(cam.px, nz)) cam.pz = nz;
   if (cam.yoff <= 0 && FKEYS.jump) cam.vy = 10;
   cam.vy -= 26 * dt;
   cam.yoff = Math.max(0, cam.yoff + cam.vy * dt);
   if (cam.yoff === 0) cam.vy = 0;
+  cam.pitchT = Math.min(PITCH_MAX, Math.max(PITCH_MIN, cam.pitchT));
+  cam.pitch += (cam.pitchT - cam.pitch) * Math.min(1, dt * 6);   // ease the look-up toggle
 }
 
 // Voxel-space column renderer: per screen column, march the ray far→near is
@@ -926,7 +987,7 @@ function renderFieldFP() {
   if (snowing()) drawSnowfall(performance.now() / 1000, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
   ctx.font = '13px ui-monospace';
-  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump · drag / 🌙 抬頭 to look up at the moon', 12, H - 12);
 }
 
 function setFieldView(view) {
@@ -944,9 +1005,13 @@ function setFieldView(view) {
     if (!wasFp) {
       const g = fieldWorld.grid;
       cam.px = g / 2; cam.pz = g - 8; cam.yaw = Math.PI; cam.yoff = 0; cam.vy = 0; // enter from the south
+      cam.pitch = 0; cam.pitchT = 0;
     }
     // the walker needs the keys — take them back from the chat box
     if (/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName)) document.activeElement.blur();
+    ensureLookBtn().style.display = 'block';
+  } else if (lookBtn) {
+    lookBtn.style.display = 'none';
   }
   if (fieldWorld && view === 'top') renderField();
 }
@@ -955,13 +1020,14 @@ function setFieldView(view) {
 window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from outside the module
 window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
 window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null) cam.pz = pz; if (yaw != null) cam.yaw = yaw; }; // e2e/compose: place the first-person camera
+window.__setPitch = p => { cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, p)); cam.pitchT = cam.pitch; }; // e2e: aim the eye up/down (抬頭)
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
 window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line) } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, hx: e.hx ?? 1, hz: e.hz ?? 0, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
         mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
@@ -1149,6 +1215,17 @@ function compileEntities(world, g) {
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
                   alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
+                  walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
+                  shelter: (def.shelter && typeof def.shelter === 'object') ? def.shelter : null, // a roofed interior — no snow falls within
+                  image: (typeof def.image === 'string') ? loadAsset(def.image) : null, // a host-served icon (佛畫) shown as a standing plate
+                  iconH: (Number.isFinite(def.iconH) && def.iconH > 0) ? def.iconH : 3.4,
+                  physics: (def.physics && typeof def.physics === 'object') ? def.physics : null, // host-simulated dynamics (gravity/roll/bounce/kick)
+                  collide: Array.isArray(def.collide) ? def.collide : null, // solid footprint boxes the walker can't pass through
+
+
+
+
+
                   home: def.home ?? [def.at[0], def.at[1]], // where it first appeared — so it can find its way back
                   attrs: (def.attrs && typeof def.attrs === 'object') ? { ...def.attrs } : {}, // named properties a being carries and may add to (pure data)
                   journal: [], // 宿念: a being's own remembered moments — bounded and lossy BY LAW; mostly self-chosen (the host marks only what it heard and its strongest acts)
@@ -1165,6 +1242,10 @@ function compileEntities(world, g) {
     // same dharma, different karma. The soul may transform them (set), and the
     // skin sees them through st() — a being's innate nature is visible in form.
     if (ent.innate) ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
+    // 一中有多: one shared body/behaviour, yet each is born at its own moment of the
+    // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
+    ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
+    if (ent.physics) { ent.pvx = 0; ent.pvz = 0; ent.pvh = 0; ent.ph = Number.isFinite(ent.physics.h0) ? ent.physics.h0 : 0; } // dynamic state
     if (def.behavior) {
       ent.soul = 'scene (DSL)';
       const bytes = compile_entity_wasm(def.behavior);
@@ -1220,12 +1301,58 @@ function tickEntities(t, g) {
       else { e.x = nx; e.y = ny; }
     }
   }
+  // physics (host law): a being may DECLARE `physics` and the host — not its soul —
+  // moves it: gravity, a bounce off the land, rolling downhill, and a shove when the
+  // walker bumps it. The cell only declares; the dynamics live in the trusted host,
+  // so this is a new world-law, not a capability the cell could abuse. 動則有力。
+  {
+    const K = 0.55;
+    for (const e of ENTITIES) {
+      const ph = e.physics; if (!ph) continue;
+      e.pvh -= (ph.g ?? 15) * dt;                                  // gravity
+      e.ph += e.pvh * dt;
+      if (e.ph <= 0) { e.ph = 0; e.pvh = -e.pvh * (ph.bounce ?? 0.5); if (Math.abs(e.pvh) < 0.5) e.pvh = 0; }
+      if (e.ph < 0.4) {                                            // resting on the land: roll downhill + friction
+        const gx = (sampleF(0, e.x + 0.7, e.y) - sampleF(0, e.x - 0.7, e.y)) * K;
+        const gz = (sampleF(0, e.x, e.y + 0.7) - sampleF(0, e.x, e.y - 0.7)) * K;
+        e.pvx -= gx * (ph.roll ?? 6) * dt; e.pvz -= gz * (ph.roll ?? 6) * dt;
+        const fr = Math.max(0, 1 - (ph.friction ?? 1.0) * dt);
+        e.pvx *= fr; e.pvz *= fr;
+      }
+      const dcx = e.x - cam.px, dcz = e.y - cam.pz, dc = Math.hypot(dcx, dcz); // the walker's shove
+      if (fieldView === 'fp' && dc < (ph.r ?? 0.8) + 0.9 && dc > 0.03) {
+        const k = 1 / dc;
+        e.pvx += dcx * k * (ph.kick ?? 5) * dt * 6; e.pvz += dcz * k * (ph.kick ?? 5) * dt * 6;
+        if (e.ph < 0.3) e.pvh = Math.max(e.pvh, 2.5);             // a little pop
+      }
+      e.x = Math.min(Math.max(e.x + e.pvx * dt, 0.5), g - 1.5);
+      e.y = Math.min(Math.max(e.y + e.pvz * dt, 0.5), g - 1.5);
+      if (e.x <= 0.5 || e.x >= g - 1.5) e.pvx = -e.pvx * 0.5;     // the world's edges
+      if (e.y <= 0.5 || e.y >= g - 1.5) e.pvz = -e.pvz * 0.5;
+      e.alt = e.ph / (60 * K); e.realm = 'ground';                // the renderer lifts a body by alt·60·K
+    }
+  }
   // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
   for (let round = 0; round < 3; round++) {
     for (const e of ENTITIES) {
       if (!e.on) continue;
       const carrier = ENTITIES.find(c => c.id === e.on);
       if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
+    }
+  }
+  // facing (host law): a flyer or swimmer leads with its head — the body turns to
+  // face where it is going, never drifting backward. Bodies author forward as +x;
+  // the host owns the yaw (身在世界,形由種子). Still beings keep their default facing.
+  for (const e of ENTITIES) {
+    if (e.hx === undefined) { e.hx = 1; e.hz = 0; }
+    if (!(e.realm === 'sky' || e.habitat === 'water')) continue;
+    const vx = e.x - (e._px ?? e.x), vz = e.y - (e._py ?? e.y);
+    const sp = Math.hypot(vx, vz);
+    if (sp > 0.004) {                                  // moving enough to have a heading
+      const tx = vx / sp, tz = vz / sp;
+      const a = Math.min(1, dt * 3.5);                 // ease the turn — banking, not snapping
+      e.hx += (tx - e.hx) * a; e.hz += (tz - e.hz) * a;
+      const n = Math.hypot(e.hx, e.hz) || 1; e.hx /= n; e.hz /= n;
     }
   }
   // pass 3: special relativity as host law — moving clocks run slow. v is the
@@ -1359,28 +1486,76 @@ function snowing() { // is any snow on the ground? (cheap sample)
 // Each flake keeps its own speed, sway and size; bigger = nearer = faster,
 // so the fall gains depth. Still pure rendering, replay-free — host weather.
 let SNOWP = null;
+function projW(X, Y, Z, vp, W, H) { // a world point → the FP pinhole's screen coords
+  const cx = vp[0] * X + vp[4] * Y + vp[8] * Z + vp[12];
+  const cy = vp[1] * X + vp[5] * Y + vp[9] * Z + vp[13];
+  const cw = vp[3] * X + vp[7] * Y + vp[11] * Z + vp[15];
+  if (cw <= 0.06) return null;
+  return { sx: (cx / cw * 0.5 + 0.5) * W, sy: (0.5 - cy / cw * 0.5) * H, w: cw };
+}
+let SNOW3 = null;
 function drawSnowfall(nowSec, W, H) {
+  const K = 0.55;
+  // First person: snow is a VOLUME of flakes riding with the eye, each projected
+  // through the scene matrix — so it parallaxes when you turn and rains toward you
+  // when you look up. 雪真的落在世界裡,不黏在螢幕上。
+  if (fieldView === 'fp' && fieldWorld) {
+    const R = 13, yBot = -5, yTop = 16;                   // a box of flakes around the eye
+    const eyeY = terrainH(cam.px, cam.pz) * K + 3.2;
+    if (!SNOW3) {
+      SNOW3 = { t: nowSec, p: [] };
+      for (let i = 0; i < 680; i++) SNOW3.p.push({
+        x: cam.px + (Math.random() - 0.5) * 2 * R,
+        z: cam.pz + (Math.random() - 0.5) * 2 * R,
+        y: eyeY + yBot + Math.random() * (yTop - yBot),
+        v: 0.7 + Math.random() * 1.4,                     // fall speed (world units/s) — a gentle drift
+        a: Math.random() * 6.283, d: 0.4 + Math.random() * 0.7,
+      });
+    }
+    const dt = Math.min(Math.max(nowSec - SNOW3.t, 0), 0.1); SNOW3.t = nowSec;
+    const vp = fpViewProj().vp;
+    const shelters = ENTITIES.filter(e => e.shelter);
+    ctx.fillStyle = 'rgb(240,244,250)';
+    for (const f of SNOW3.p) {
+      f.y -= f.v * dt;                                    // fall
+      f.x += Math.sin(nowSec * f.d + f.a) * 0.5 * dt;     // drift on a breath of wind
+      f.z += Math.cos(nowSec * f.d * 0.8 + f.a) * 0.3 * dt;
+      if (f.x - cam.px > R) f.x -= 2 * R; else if (f.x - cam.px < -R) f.x += 2 * R;  // ride with the eye
+      if (f.z - cam.pz > R) f.z -= 2 * R; else if (f.z - cam.pz < -R) f.z += 2 * R;
+      if (f.y < eyeY + yBot) { f.y = eyeY + yTop; f.x = cam.px + (Math.random() - 0.5) * 2 * R; f.z = cam.pz + (Math.random() - 0.5) * 2 * R; }
+      const surf = sampleF(0, f.x, f.z) * K;
+      if (f.y < surf - 0.3) continue;                    // already settled into the land
+      let hid = false;                                    // no snow under a roof (world-space shelter)
+      for (const e of shelters) {
+        const sh = e.shelter;
+        if (Math.abs(f.x - e.x) < (sh.w ?? 2.9) && Math.abs(f.z - e.y) < (sh.d ?? 2.6) && f.y < surf + (sh.h ?? 5)) { hid = true; break; }
+      }
+      if (hid) continue;
+      const p = projW(f.x, f.y, f.z, vp, W, H);
+      if (!p || p.sx < -4 || p.sx > W + 4 || p.sy < -4 || p.sy > H + 4) continue;
+      const r = Math.min(3.4, Math.max(0.7, 20 / p.w));  // nearer flakes are larger
+      ctx.globalAlpha = Math.min(0.9, Math.max(0.12, 7 / p.w));
+      ctx.fillRect(p.sx, p.sy, r, r);
+    }
+    ctx.globalAlpha = 1;
+    return;
+  }
+  // Top view / fallback: a flat screen-space flurry
   if (!SNOWP || SNOWP.w !== W || SNOWP.h !== H) {
     SNOWP = { w: W, h: H, t: nowSec, p: [] };
-    for (let i = 0; i < 260; i++) SNOWP.p.push({
-      x: Math.random() * W, y: Math.random() * H,
-      v: 16 + Math.random() * 26,      // fall speed (px/s) before depth scaling
-      a: Math.random() * 6.283,        // sway phase
-      s: 0.7 + Math.random() * 1.9,    // size = pseudo-depth layer
-      d: 0.5 + Math.random() * 0.9,    // sway rate
+    for (let i = 0; i < 200; i++) SNOWP.p.push({
+      x: Math.random() * W, y: Math.random() * H, v: 16 + Math.random() * 26,
+      a: Math.random() * 6.283, s: 0.7 + Math.random() * 1.9, d: 0.5 + Math.random() * 0.9,
     });
   }
-  const dt = Math.min(Math.max(nowSec - SNOWP.t, 0), 0.1);
-  SNOWP.t = nowSec;
+  const dt = Math.min(Math.max(nowSec - SNOWP.t, 0), 0.1); SNOWP.t = nowSec;
   ctx.fillStyle = 'rgb(240,244,250)';
   for (const f of SNOWP.p) {
-    f.y += f.v * f.s * dt;                                       // nearer falls faster
-    f.x += Math.sin(nowSec * f.d + f.a) * 13 * dt + 4 * f.s * dt; // sway + a breath of wind
+    f.y += f.v * f.s * dt; f.x += Math.sin(nowSec * f.d + f.a) * 13 * dt + 4 * f.s * dt;
     if (f.y > H) { f.y = -4; f.x = Math.random() * W; }
     if (f.x > W) f.x -= W; else if (f.x < 0) f.x += W;
     ctx.globalAlpha = 0.3 + 0.5 * Math.min(f.s / 1.8, 1);
-    const r = f.s * 1.4;
-    ctx.fillRect(f.x, f.y, r, r);
+    const r = f.s * 1.4; ctx.fillRect(f.x, f.y, r, r);
   }
   ctx.globalAlpha = 1;
 }
@@ -1549,6 +1724,7 @@ function manifestField(world) {
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   fieldWorld = compiled;
+  SKY_BODIES = Array.isArray(world.sky?.bodies) ? world.sky.bodies : []; // the world's declared sky (moon, …)
   for (const c of compiled.cells) if (c.mode === 'once') callWorldCell(c, 0, compiled.grid); // orogeny etc.
   renderField();
   const sndCells = [];
@@ -2400,8 +2576,9 @@ function renderBodiesFP(list, W, H) {
     sampleFieldAll(e.x, e.y, fieldWorld.grid, CPU_SMP);
     // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
     const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
-    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
-    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+    const hx = e.hx ?? 1, hz = e.hz ?? 0;   // yaw the body to face its heading (+x is forward)
+    R.stack = [Float64Array.from([hx, 0, -hz, e.x, 0, 1, 0, surf, hz, 0, hx, e.y])];
+    try { e.bodyRun((e.tau ?? 0) + (e.bornPhase ?? 0), W, H); } catch (err) { e.bodyRun = null; }
   }
   // the walker's pinhole as one matrix: clip.x = 2·xc, clip.y = 1.9·yc + 0.16·zc, w = zc
   const eye = terrainH(cam.px, cam.pz) * K + 3.2 + cam.yoff;
@@ -2461,18 +2638,156 @@ function renderBodiesFP(list, W, H) {
 // occluded by the land per pixel — §22c's silhouette approximation retires on
 // this path (it still guards the CPU fallback). 地非圖層,地即世界.
 let FPT = null; // null = untried, false = no WebGL2 (CPU fallback), object = ready
-function fpViewProj() { // the walker's pinhole, one matrix for land/body/billboard
+// The eye's height as it walks. Normally it rides the terrain; but an entity may
+// be a WALKABLE surface (a bridge you can climb over instead of falling under it).
+// A bridge declares nothing new — the host recognises its shape and lifts the eye
+// onto the arch when you step within its footprint. 走上橋, 不掉下橋.
+function fpEyeY() {
   const K = 0.55;
-  // bilinear eye height: the camera stops stair-stepping between cells as you walk
-  const ey = sampleF(0, cam.px, cam.pz) * K + 3.2 + cam.yoff;
+  let base = sampleF(0, cam.px, cam.pz) * K + 3.2;
+  for (const e of ENTITIES) {
+    const wk = e.walkable; if (!wk) continue;               // a being may DECLARE a walkable surface (a deck you climb)
+    const lx = cam.px - e.x, lz = cam.pz - e.y;             // surface-local (axis-aligned)
+    const halfW = wk.width ?? 1.0, span = wk.span ?? 5.75, ramp = wk.ramp ?? 1.4;
+    const peak = wk.peak ?? 3.8, curve = wk.curve ?? 0.0681, top = wk.top ?? 0.15;   // arch: y = peak − curve·lz²
+    if (Math.abs(lx) > halfW || Math.abs(lz) > span + ramp) continue;
+    const az = Math.abs(lz);
+    let arch;
+    if (az <= span) arch = peak - curve * lz * lz + top;    // on the deck (+surface top)
+    else { const endY = peak - curve * span * span + top;  // ramp the last stretch to the bank
+      arch = Math.max(0, endY * (1 - (az - span) / ramp)); }
+    const h = sampleF(0, e.x, e.y), w = sampleF(1, e.x, e.y);
+    const bb = (h + Math.min(w, 3) * 0.6) * K;              // the deck's own footing (matches its body base)
+    const deckEye = bb + arch + 3.2;
+    if (deckEye > base) base = deckEye;                     // step up onto the span
+  }
+  return base + cam.yoff;
+}
+
+// ---- the night sky as a fixed celestial dome (§ walk-in) ----
+// Stars, the Milky Way and the moon are drawn from the LOOK direction alone —
+// yaw + pitch — never from where you stand. So they don't slide as you walk: a
+// real sky overhead, not billboards pinned to the ground. 真正的天體, 不隨走位.
+// the sky's bodies are DECLARED by the world (data), not fixed in the host — a
+// world opts into a moon (or a sun, later) with an azimuth/elevation. 月亮回歸世界。
+let SKY_BODIES = [];   // [{kind:'moon', azimuth, elevation, size}]
+let SKY = null;
+function buildSky() {
+  let s = 0x9e3779b9 >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const dust = [], milky = [];
+  for (let i = 0; i < 440; i++) {                    // stardust over the whole dome
+    dust.push({ az: rnd() * 6.2832, alt: 0.02 + Math.pow(rnd(), 0.7) * 1.45,
+      mag: 0.25 + rnd() * 0.75, tw: rnd() * 6.2832, ts: 0.5 + rnd() * 1.6 });
+  }
+  const neb = [];
+  const ridge = az => 0.62 + 0.34 * Math.sin(az + 0.6);      // the band's wandering centre
+  for (let i = 0; i < 60; i++) {                     // the Milky Way's cloudy body (soft, additive)
+    const az = rnd() * 6.2832, alt = ridge(az) + (rnd() - 0.5) * 0.17;
+    if (alt < 0.05 || alt > 1.5) continue;
+    neb.push({ az, alt, size: 0.05 + rnd() * 0.09, mag: 0.05 + rnd() * 0.06 });
+  }
+  for (let i = 0; i < 470; i++) {                    // bright stars crowding the band
+    const az = rnd() * 6.2832, alt = ridge(az) + (rnd() + rnd() + rnd() - 1.5) * 0.095;
+    if (alt < 0.05 || alt > 1.5) continue;
+    milky.push({ az, alt, mag: 0.2 + rnd() * 0.6, tw: rnd() * 6.2832, ts: 0.4 + rnd() * 1.2 });
+  }
+  const clouds = [];                                  // a few night clouds, slowly adrift
+  for (let i = 0; i < 5; i++) {
+    const puffs = [], np = 4 + (rnd() * 3 | 0), w = 0.10 + rnd() * 0.08;
+    for (let j = 0; j < np; j++)
+      puffs.push({ dx: (rnd() - 0.5) * w * 2, dy: (rnd() - 0.5) * 0.05, r: 0.5 + rnd() * 0.6, a: 0.14 + rnd() * 0.12 });
+    clouds.push({ az0: rnd() * 6.2832, alt: 0.12 + rnd() * 0.30, size: 0.05 + rnd() * 0.04,
+      drift: (0.006 + rnd() * 0.010) * (rnd() < 0.5 ? 1 : -1), puffs });
+  }
+  SKY = { dust, milky, neb, clouds };
+}
+function drawCelestialDome(W, H, tNow) {
+  if (!SKY) buildSky();
   const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
-  const t0 = -cam.px * sy - cam.pz * cy;
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const xs = 1.9 * H / W;                            // same aspect law as fpViewProj
+  const proj = (az, alt) => {
+    const ca = Math.cos(alt);
+    const dx = Math.sin(az) * ca, dy = Math.sin(alt), dz = Math.cos(az) * ca;
+    const dd = sy * dx + cy * dz, dr = cy * dx - sy * dz;
+    const depth = cp * dd + sp * dy;
+    if (depth <= 0.02) return null;
+    const up = cp * dy - sp * dd;
+    const ndcx = xs * dr / depth;
+    if (ndcx < -1.12 || ndcx > 1.12) return null;
+    const ndcy = 1.9 * up / depth + 0.16;
+    return { x: (ndcx * 0.5 + 0.5) * W, y: (0.5 - ndcy * 0.5) * H };
+  };
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';          // the galactic river: soft glow that sums into a band
+  for (const t of SKY.neb) {
+    const p = proj(t.az, t.alt); if (!p || p.y > H * 0.6) continue;
+    const R = t.size * W;
+    const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+    gr.addColorStop(0, `rgba(150,172,220,${t.mag.toFixed(3)})`); gr.addColorStop(1, 'rgba(150,172,220,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 6.2832); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  for (const t of SKY.milky) {                       // bright stars crowding the band
+    const p = proj(t.az, t.alt); if (!p || p.y > H * 0.62) continue;
+    const a = t.mag * (0.5 + 0.5 * Math.sin(tNow * t.ts + t.tw)) * 0.8;
+    ctx.fillStyle = `rgba(214,224,246,${a.toFixed(3)})`;
+    ctx.fillRect(p.x, p.y, t.mag > 0.6 ? 1.7 : 1.3, t.mag > 0.6 ? 1.7 : 1.3);
+  }
+  for (const t of SKY.dust) {                         // then the sharper stardust
+    const p = proj(t.az, t.alt); if (!p || p.y > H * 0.6) continue;
+    const a = t.mag * (0.55 + 0.45 * Math.sin(tNow * t.ts + t.tw));
+    const r = t.mag > 0.82 ? 1.6 : 1.0;
+    ctx.fillStyle = `rgba(236,241,255,${a.toFixed(3)})`;
+    ctx.fillRect(p.x, p.y, r, r);
+  }
+  for (const bd of SKY_BODIES) {                       // the moon (and any sky body the world declares), fixed aloft
+    if (bd.kind !== 'moon') continue;
+    const mp = proj(bd.azimuth ?? (Math.PI - 0.25), bd.elevation ?? 0.52);
+    if (!mp || mp.y >= H * 0.72) continue;
+    const R = Math.max(15, W * (bd.size ?? 0.032));
+    const gr = ctx.createRadialGradient(mp.x, mp.y, 0, mp.x, mp.y, R * 3.4);
+    gr.addColorStop(0, 'rgba(255,251,232,0.42)'); gr.addColorStop(0.4, 'rgba(226,236,255,0.11)'); gr.addColorStop(1, 'rgba(226,236,255,0)');
+    ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(mp.x, mp.y, R * 3.4, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = '#fdf6dc'; ctx.beginPath(); ctx.arc(mp.x, mp.y, R, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = 'rgba(208,204,178,0.32)';         // faint maria so it reads as a moon
+    ctx.beginPath(); ctx.arc(mp.x + R * 0.28, mp.y - R * 0.2, R * 0.34, 0, 6.2832); ctx.fill();
+    ctx.beginPath(); ctx.arc(mp.x - R * 0.22, mp.y + R * 0.26, R * 0.22, 0, 6.2832); ctx.fill();
+  }
+  for (const c of SKY.clouds) {                        // clouds drift across, veiling stars
+    const caz = c.az0 + tNow * c.drift;
+    for (const pf of c.puffs) {
+      const p = proj(caz + pf.dx, c.alt + pf.dy); if (!p || p.y > H * 0.6) continue;
+      const R = c.size * pf.r * W;
+      const gr = ctx.createRadialGradient(p.x, p.y - R * 0.15, 0, p.x, p.y, R);
+      gr.addColorStop(0, `rgba(134,140,154,${(pf.a * 1.35).toFixed(3)})`);   // moonlit grey, distinct from the blue galaxy
+      gr.addColorStop(0.55, `rgba(88,96,114,${(pf.a * 0.9).toFixed(3)})`);
+      gr.addColorStop(1, 'rgba(88,96,114,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 6.2832); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+function fpViewProj() { // the walker's pinhole, one matrix for land/body/billboard
+  // bilinear eye height (+ walkable bridge decks); no stair-stepping as you walk
+  const ey = fpEyeY();
+  const sy = Math.sin(cam.yaw), cy = Math.cos(cam.yaw);
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  const t0 = -cam.px * sy - cam.pz * cy;              // depth translation
+  const r0 = -cam.px * cy + cam.pz * sy;              // right translation
   const n = 0.1, f = 300, az = (f + n) / (f - n), bz = -2 * f * n / (f - n);
+  // aspect-correct horizontal scale: vertical FOV fixed (1.9), horizontal follows
+  // the real canvas aspect so spheres stay round on any screen (wide OR tall)
+  const xs = 1.9 * cv.height / cv.width;
+  // pitch rotates depth↔up about the eye's right axis; the old 0.16 horizon shift
+  // is kept as a principal-point offset, so pitch=0 is byte-identical to before.
   const vp = new Float32Array([
-    2 * cy, 0.16 * sy, az * sy, sy,
-    0, 1.9, 0, 0,
-    -2 * sy, 0.16 * cy, az * cy, cy,
-    2 * (-cam.px * cy + cam.pz * sy), -1.9 * ey + 0.16 * t0, az * t0 + bz, t0,
+    xs * cy, 1.9 * -sp * sy + 0.16 * cp * sy, az * cp * sy, cp * sy,
+    0, 1.9 * cp + 0.16 * sp, az * sp, sp,
+    -xs * sy, 1.9 * -sp * cy + 0.16 * cp * cy, az * cp * cy, cp * cy,
+    xs * r0, 1.9 * (-cp * ey - sp * t0) + 0.16 * (cp * t0 - sp * ey), az * (cp * t0 - sp * ey) + bz, cp * t0 - sp * ey,
   ]);
   return { vp, eye: [cam.px, ey, cam.pz], az, bz };
 }
@@ -2566,12 +2881,12 @@ void main(){
   frag = vec4(c, 1.0);
 }`;
     const BVS = `#version 300 es
-in vec2 pp; in vec2 tt;
-uniform vec2 vpsz; uniform float zc; uniform vec2 zab;
+in vec2 pp; in vec2 tt; in float zv;
+uniform vec2 vpsz; uniform vec2 zab;
 out vec2 vt;
-void main(){ // a skin card pinned at its being's depth — the land depth-tests it
+void main(){ // a card at its being's depth — PER-VERTEX, so an angled plate depth-tests right
   vec2 ndc = vec2(pp.x / vpsz.x * 2.0 - 1.0, 1.0 - pp.y / vpsz.y * 2.0);
-  gl_Position = vec4(ndc * zc, zab.x * zc + zab.y, zc);
+  gl_Position = vec4(ndc * zv, zab.x * zv + zab.y, zv);
   vt = tt;
 }`;
     const BFS = `#version 300 es
@@ -2589,7 +2904,7 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
       return pr;
     };
     const prog = mk(TVS, TFS, [[0, 'uv']]);
-    const bbProg = mk(BVS, BFS, [[0, 'pp'], [1, 'tt']]);
+    const bbProg = mk(BVS, BFS, [[0, 'pp'], [1, 'tt'], [2, 'zv']]);
     // the ground plan: one static N×N sheet; height lives in the texture
     const N = 256;
     const pos = new Float32Array(N * N * 2);
@@ -2617,9 +2932,10 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
     // billboard gear: one dynamic quad + one skin-card texture + one offscreen card
     const bbVao = gl.createVertexArray(); gl.bindVertexArray(bbVao);
     const bbBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, bbBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(16), gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(20), gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 20, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 8);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 20, 16); // per-vertex depth
     gl.bindVertexArray(null);
     const bbTex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, bbTex);
@@ -2639,7 +2955,7 @@ void main(){ frag = texture(skin, vt); if (frag.a < 0.01) discard; }`;
              u: uni(prog),
              ub: { vpsz: gl.getUniformLocation(bbProg, 'vpsz'), zc: gl.getUniformLocation(bbProg, 'zc'),
                    zab: gl.getUniformLocation(bbProg, 'zab'), skin: gl.getUniformLocation(bbProg, 'skin') },
-             bbVao, bbBuf, bbTex, bbCanvas, bbCtx: bbCanvas.getContext('2d'), bbQuad: new Float32Array(16) };
+             bbVao, bbBuf, bbTex, bbCanvas, bbCtx: bbCanvas.getContext('2d'), bbQuad: new Float32Array(20) };
   } catch (e) { return false; }
 }
 function drawTerrainPass(vpM, L, eye, shOn, lvp) {
@@ -2655,6 +2971,14 @@ function drawTerrainPass(vpM, L, eye, shOn, lvp) {
   gl.bindVertexArray(T.vao);
   gl.drawElements(gl.TRIANGLES, T.icount, gl.UNSIGNED_INT, 0);
   gl.bindVertexArray(null);
+}
+// host-served image assets (fenced: a being names an ID; the host maps it to its
+// OWN /apps/assets dir — never an arbitrary URL, so an image adds no outward reach).
+const ASSETS = {};
+function loadAsset(id) {
+  if (typeof id !== 'string' || !/^[a-z0-9_-]{1,40}$/i.test(id)) return null;
+  if (!ASSETS[id]) { const im = new Image(); im.src = `/apps/assets/${id}.png`; ASSETS[id] = im; }
+  return ASSETS[id];
 }
 function drawBillboardsGL(W, H, eyeH, tNow) {
   const T = FPT, gl = D3.gl, K = 0.55, fov = 1.0;
@@ -2688,19 +3012,41 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
     const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
     const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
+    if (e.image) { // a 佛畫: a host image plate FIXED at the being's spot, facing +z, projected by
+      const img = e.image; //   the SAME matrix as the bodies — so it stays put in the shrine (no drift)
+      if (!img.complete || !img.naturalWidth) continue;   // still loading
+      const vp = fpViewProj().vp, K2 = 0.55;
+      const floorY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2 + (e.alt ?? 0) * 60 * K2;
+      const Hq = e.iconH || 3.2, Wq = Hq * (img.naturalWidth / img.naturalHeight), z = e.y;
+      const tl = projW(e.x - Wq / 2, floorY + Hq, z, vp, W, H), tr = projW(e.x + Wq / 2, floorY + Hq, z, vp, W, H);
+      const bl = projW(e.x - Wq / 2, floorY, z, vp, W, H), br = projW(e.x + Wq / 2, floorY, z, vp, W, H);
+      if (!tl || !tr || !bl || !br) continue;             // (partly) behind the eye
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      const Q = T.bbQuad;
+      Q[0] = tl.sx; Q[1] = tl.sy; Q[2] = 0; Q[3] = 0; Q[4] = tl.w;
+      Q[5] = tr.sx; Q[6] = tr.sy; Q[7] = 1; Q[8] = 0; Q[9] = tr.w;
+      Q[10] = bl.sx; Q[11] = bl.sy; Q[12] = 0; Q[13] = 1; Q[14] = bl.w;
+      Q[15] = br.sx; Q[16] = br.sy; Q[17] = 1; Q[18] = 1; Q[19] = br.w;
+      gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      continue;
+    }
     const s = Math.max(3, (focal / zc) * 1.1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     bctx.clearRect(0, 0, C, C);
     const keep = ctx; ctx = bctx; // the shared pen visits the skin card
     try { drawSkin(e, C / 2, C / 2, SS, tNow); } finally { ctx = keep; }
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, T.bbCanvas);
     const half = s * (C / (2 * SS)), cyp = syg - s * 0.4; // card spans ±2s around the drawn center
     const Q = T.bbQuad;
-    Q[0] = sx - half; Q[1] = cyp - half; Q[2] = 0; Q[3] = 0;
-    Q[4] = sx + half; Q[5] = cyp - half; Q[6] = 1; Q[7] = 0;
-    Q[8] = sx - half; Q[9] = cyp + half; Q[10] = 0; Q[11] = 1;
-    Q[12] = sx + half; Q[13] = cyp + half; Q[14] = 1; Q[15] = 1;
+    Q[0] = sx - half; Q[1] = cyp - half; Q[2] = 0; Q[3] = 0; Q[4] = zc;
+    Q[5] = sx + half; Q[6] = cyp - half; Q[7] = 1; Q[8] = 0; Q[9] = zc;
+    Q[10] = sx - half; Q[11] = cyp + half; Q[12] = 0; Q[13] = 1; Q[14] = zc;
+    Q[15] = sx + half; Q[16] = cyp + half; Q[17] = 1; Q[18] = 1; Q[19] = zc;
     gl.bufferData(gl.ARRAY_BUFFER, Q, gl.DYNAMIC_DRAW);
-    gl.uniform1f(T.ub.zc, zc);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
   gl.depthMask(true); gl.disable(gl.BLEND);
@@ -2714,6 +3060,7 @@ function renderFieldFPGL() {
   const sky = ctx.createLinearGradient(0, 0, 0, H * 0.55);
   sky.addColorStop(0, '#0d1b33'); sky.addColorStop(1, '#3a5d84');
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
+  drawCelestialDome(W, H, tNow);   // stars, Milky Way, moon — before the terrain occludes them
   // the lattice → texture, fresh every frame (living cells rewrite the ground)
   if (T.grid !== g) { T.grid = g; T.staging = new Float32Array(g * g * 4); }
   const st = T.staging, n = g * g;
@@ -2735,8 +3082,9 @@ function renderFieldFPGL() {
     sampleFieldAll(e.x, e.y, g, CPU_SMP);
     // altitude lifts a TRUE body too (the vertical realm) — a moon can hang
     const surf = (CPU_SMP[0] + Math.min(CPU_SMP[1], 3) * 0.6) * K + (e.alt ?? 0) * 60 * K;
-    R.stack = [Float64Array.from([1, 0, 0, e.x, 0, 1, 0, surf, 0, 0, 1, e.y])];
-    try { e.bodyRun(e.tau ?? 0, W, H); } catch (err) { e.bodyRun = null; }
+    const hx = e.hx ?? 1, hz = e.hz ?? 0;   // yaw the body to face its heading (+x is forward)
+    R.stack = [Float64Array.from([hx, 0, -hz, e.x, 0, 1, 0, surf, hz, 0, hx, e.y])];
+    try { e.bodyRun((e.tau ?? 0) + (e.bornPhase ?? 0), W, H); } catch (err) { e.bodyRun = null; }
   }
   const { vp, eye } = fpViewProj();
   const L = [-0.42, -0.85, -0.31];
@@ -2765,7 +3113,7 @@ function renderFieldFPGL() {
   if (snowing()) drawSnowfall(tNow, W, H);
   ctx.fillStyle = 'rgba(230,237,243,.55)';
   ctx.font = '13px ui-monospace';
-  ctx.fillText('← → turn · ↑ ↓ walk · Space jump — the rain keeps falling while you walk', 12, H - 12);
+  ctx.fillText('← → turn · ↑ ↓ walk · Space jump · drag / 🌙 抬頭 to look up at the moon', 12, H - 12);
 }
 
 // ---- scene3d (3D-3): a LIVE 3D PANEL inside a UI — the seed is a full draw3d
@@ -2823,27 +3171,31 @@ class SeedSynth extends AudioWorkletProcessor {
     // the 聲塵器 (zero-import dust engine) + a CHORUS of sound cells, each with
     // its own seat in the world. 聲從身出 · 根塵和合 · 動則有聲 — engine law.
     this.dust = null; this.dustMem = null; this.dustPtr = 0;
-    this.cells = []; this.n = 0;
+    this.cells = []; this.n = 0; this.pending = null;
     this.port.onmessage = (e) => {
       const d = e.data;
       try {
-        if (d.dust) { // instantiated with an EMPTY import object — it can only vibrate
-          const inst = new WebAssembly.Instance(new WebAssembly.Module(d.dust), {});
-          this.dust = inst.exports; this.dust.init(sampleRate);
-          this.dustMem = new Float32Array(this.dust.memory.buffer);
-          this.dustPtr = this.dust.out_ptr() >>> 2;
-          this.port.postMessage({ dustReady: true });
+        if (d.dust) {
+          // worklets can't await; async instantiate (Promise) dodges the >4KB SYNC-compile
+          // limit Safari enforces even in a worklet. EMPTY imports — it can only vibrate.
+          WebAssembly.instantiate(d.dust, {}).then(res => {
+            this.dust = res.instance.exports; this.dust.init(sampleRate);
+            this.dustMem = new Float32Array(this.dust.memory.buffer);
+            this.dustPtr = this.dust.out_ptr() >>> 2;
+            this.port.postMessage({ dustReady: true });
+            if (this.pending) { const q = this.pending; this.pending = null; for (const c of q) this.addCell(c); }
+          }).catch(err => this.port.postMessage({ err: String(err) }));
           return;
         }
-        if (d.stop) { this.cells = []; if (this.dust) this.dust.clear(); return; }
+        if (d.stop) { this.cells = []; this.pending = null; if (this.dust) this.dust.clear(); return; }
         if (d.bytes) { // a single ambient cell (surface "sound" / legacy ambient)
-          this.cells = []; if (this.dust) this.dust.clear();
-          this.addCell({ bytes: d.bytes, id: '__ambient', positional: false, x: 0, y: 0 });
+          this.cells = []; this.pending = null; if (this.dust) this.dust.clear();
+          this.queueCell({ bytes: d.bytes, id: '__ambient', positional: false, x: 0, y: 0 });
           this.n = 0; return;
         }
         if (d.cells) { // a world's chorus: ambient + per-being voices
-          this.cells = []; if (this.dust) this.dust.clear();
-          for (const c of d.cells) this.addCell(c);
+          this.cells = []; this.pending = null; if (this.dust) this.dust.clear();
+          for (const c of d.cells) this.queueCell(c);
           this.n = 0; return;
         }
         if (d.seatpos && this.dust) {
@@ -2855,6 +3207,7 @@ class SeedSynth extends AudioWorkletProcessor {
       } catch (err) { this.port.postMessage({ err: String(err) }); }
     };
   }
+  queueCell(c) { if (this.dust) this.addCell(c); else (this.pending || (this.pending = [])).push(c); } // wait for the engine
   addCell(c) {
     const slots = new Float64Array(32);
     const seat = this.dust ? this.dust.seat_add(c.positional ? 1 : 0) : -1;
@@ -2871,10 +3224,9 @@ class SeedSynth extends AudioWorkletProcessor {
       voice:  (f0, vw, na) => { if (dust && S >= 0) dust.voice_set(S, f0, vw, na); },
       breath: (l) => { if (dust && S >= 0) dust.breath_set(S, l); },
     };
-    try {
-      const run = new WebAssembly.Instance(new WebAssembly.Module(c.bytes), { env }).exports.run;
-      this.cells.push({ run, id: c.id, seat, positional: !!c.positional, dead: false });
-    } catch (err) { this.port.postMessage({ err: String(err) }); }
+    WebAssembly.instantiate(c.bytes, { env }).then(res => {   // async — dodges the sync-compile size limit
+      this.cells.push({ run: res.instance.exports.run, id: c.id, seat, positional: !!c.positional, dead: false });
+    }).catch(err => this.port.postMessage({ err: String(err) }));
   }
   process(inputs, outputs) {
     const out = outputs[0]; if (!out || !out[0]) return true;

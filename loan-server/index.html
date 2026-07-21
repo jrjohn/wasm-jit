@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>房貸試算 · server-side compute · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5;
+         min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+         padding: 2.2rem 1rem; gap: 1.1rem; }
+  .card { width: 100%; max-width: 430px; border: 1px solid #30363d; border-radius: 14px;
+          background: linear-gradient(180deg, #11161d, #0f141a); padding: 1.5rem 1.6rem;
+          box-shadow: 0 10px 40px #0006; }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+          margin-bottom: 1.2rem; }
+  .title { font-size: 1.06rem; font-weight: 600; letter-spacing: .01em; }
+  .badge { font-size: .62rem; color: #79b8ff; border: 1px solid #58a6ff40;
+           background: #58a6ff14; border-radius: 999px; padding: .2rem .55rem; white-space: nowrap; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: .9rem;
+         margin: .55rem 0; }
+  .lab { font-size: .9rem; color: #c9d1d9; }
+  input { font: inherit; font-size: .9rem; text-align: right; padding: .42rem .7rem;
+          border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: inherit;
+          width: 150px; font-variant-numeric: tabular-nums;
+          transition: border-color .15s, box-shadow .15s; }
+  input:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  .rule { border: none; border-top: 1px solid #21262d; margin: 1rem 0; }
+  .pill { font-variant-numeric: tabular-nums; color: #79b8ff; font-weight: 600; font-size: .95rem;
+          background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px;
+          padding: .24rem .8rem; min-width: 92px; text-align: right;
+          transition: background .2s; }
+  .pill.flash { background: #58a6ff33; }
+  .foot { max-width: 430px; width: 100%; font-size: .72rem; color: #8b949e; }
+  .foot b { color: #c9d1d9; font-weight: 600; }
+  details { border: 1px solid #21262d; border-radius: 10px; background: #0d1117; margin-top: .7rem; }
+  summary { cursor: pointer; padding: .5rem .8rem; font-size: .74rem; color: #8b949e;
+            user-select: none; }
+  summary:hover { color: #c9d1d9; }
+  .io { padding: 0 .8rem .7rem; display: grid; grid-template-columns: auto 1fr; gap: .3rem .7rem;
+        font-size: .72rem; }
+  .io .k { color: #6e7681; white-space: nowrap; }
+  .io .v { color: #9ecbff; word-break: break-all; font-variant-numeric: tabular-nums; }
+  .io .out { color: #7ee787; }
+  .receipt { padding: 0 .8rem .8rem; font-size: .68rem; color: #8b949e; }
+  .receipt .c { color: #d2a8ff; }
+  .receipt .ok { color: #7ee787; }
+  .proof { margin-top: .1rem; }
+  .proof button { font: inherit; font-size: .72rem; padding: .35rem .7rem; border-radius: 8px;
+          border: 1px solid #30363d; background: #161b22; color: #c9d1d9; cursor: pointer; }
+  .proof button:hover { border-color: #58a6ff55; }
+  .proof .res { font-size: .72rem; margin-top: .5rem; }
+  .proof .res.no { color: #7ee787; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="head">
+      <span class="title">房貸試算 · Loan Calculator</span>
+      <span class="badge">server-side compute</span>
+    </div>
+
+    <div class="row"><span class="lab">本金 Principal $</span><input id="p" type="number" value="300000" step="1000"></div>
+    <div class="row"><span class="lab">年利率 Rate %</span><input id="r" type="number" value="5" step="0.1"></div>
+    <div class="row"><span class="lab">年數 Years</span><input id="y" type="number" value="30" step="1"></div>
+
+    <hr class="rule">
+
+    <div class="row"><span class="lab">月付 Monthly $</span><span class="pill" id="monthly">—</span></div>
+    <div class="row"><span class="lab">總繳 Total $</span><span class="pill" id="total">—</span></div>
+    <div class="row"><span class="lab">總利息 Interest $</span><span class="pill" id="interest">—</span></div>
+  </div>
+
+  <div class="foot">
+    每個數字都由一顆<b>受能力圍籬的 WASM cell</b> 在<b>伺服器上</b>算出 —— 瀏覽器只送出你的意圖
+    <b>{p, r, y}</b>、收回數字。攤還公式從不下載到這一頁。
+    <span style="opacity:.7">(同一套詞彙的另一種部署:<a href="/">留在 client 的版本</a> 可讀但一樣安全)</span>
+
+    <details open>
+      <summary>▸ 這一次的往返(打開 DevTools Network 也看得到)</summary>
+      <div class="io">
+        <span class="k">送出 →</span><span class="v" id="io-req">—</span>
+        <span class="k">收回 ←</span><span class="v out" id="io-res">—</span>
+      </div>
+      <div class="receipt" id="receipt"></div>
+    </details>
+
+    <div class="proof">
+      <details>
+        <summary>▸ 這一頁的原始碼裡有沒有那條公式?</summary>
+        <div style="padding:0 .8rem .8rem">
+          <button id="grepbtn">GET /api/source — 檢查整份 client bytes</button>
+          <div class="res" id="grepres"></div>
+        </div>
+      </details>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+let timer = null;
+function schedule() { clearTimeout(timer); timer = setTimeout(compute, 120); }
+['p', 'r', 'y'].forEach(id => $(id).addEventListener('input', schedule));
+
+async function compute() {
+  const body = { p: +$('p').value || 0, r: +$('r').value || 0, y: +$('y').value || 0 };
+  $('io-req').textContent = JSON.stringify(body);
+  let data;
+  try {
+    const resp = await fetch('/api/loan', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+    });
+    data = await resp.json();
+  } catch (e) { $('io-res').textContent = 'network error: ' + e; return; }
+  if (data.error) { $('io-res').textContent = 'error: ' + data.error; return; }
+
+  for (const k of ['monthly', 'total', 'interest']) {
+    const el = $(k);
+    el.textContent = fmt(data[k]);
+    el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 200);
+  }
+  $('io-res').textContent = JSON.stringify({ monthly: data.monthly, total: data.total, interest: data.interest });
+
+  // the honest receipt: which fenced machine produced these numbers
+  const f = data.fence;
+  const cells = f.cells.map(c =>
+    `<div><span class="c">${c.id}</span>: ${c.bytes} bytes, reaches {${c.imports.join(', ')}}</div>`
+  ).join('');
+  $('receipt').innerHTML =
+    `<div style="margin:.4rem 0 .3rem">fence offered: {${f.imports_offered.join(', ')}} ` +
+    `<span class="ok">— nothing else</span></div>${cells}`;
+}
+
+$('grepbtn').addEventListener('click', async () => {
+  const r = await (await fetch('/api/source')).json();
+  const has = r.contains_amortization_formula;
+  $('grepres').className = 'res ' + (has ? '' : 'no');
+  $('grepres').innerHTML = has
+    ? `找到公式(不該發生)`
+    : `client 共 <b>${r.client_bytes.toLocaleString()}</b> bytes,` +
+      `<code>contains_amortization_formula: <b>false</b></code> — 公式只在伺服器二進位裡。`;
+});
+
+compute();
+</script>
+</body>
+</html>

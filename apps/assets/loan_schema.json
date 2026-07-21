@@ -1,0 +1,25 @@
+{
+  "cells": [
+    {"id":"setP","script":"set(0.0, x);\nx"},
+    {"id":"setR","script":"set(1.0, x);\nx"},
+    {"id":"setY","script":"set(2.0, x);\nx"},
+    {"id":"monthly","script":"let P = get(0.0);\nlet r = get(1.0) / 1200.0;\nlet n = get(2.0) * 12.0;\nlet M = 0.0;\nif n >= 1.0 {\n if r < 0.0000001 { M = P / n; }\n if r >= 0.0000001 {\n  let pw = 1.0;\n  let i = 0.0;\n  while i < n { pw = pw * (1.0 + r); i = i + 1.0; }\n  M = P * r * pw / (pw - 1.0);\n }\n}\nset(3.0, M);\nM"},
+    {"id":"totalPaid","script":"get(3.0) * get(2.0) * 12.0"},
+    {"id":"interest","script":"get(3.0) * get(2.0) * 12.0 - get(0.0)"}
+  ],
+  "wires": [
+    {"from":"setP","to":"monthly"},{"from":"setR","to":"monthly"},{"from":"setY","to":"monthly"},
+    {"from":"monthly","to":"totalPaid"},{"from":"monthly","to":"interest"}
+  ],
+  "init": [{"cell":"setP","arg":300000},{"cell":"setR","arg":5},{"cell":"setY","arg":30}],
+  "tree": {"type":"stack","children":[
+    {"type":"label","text":"房貸試算 · Loan Calculator"},
+    {"type":"row","children":[{"type":"label","text":"本金 Principal $"},{"type":"input","placeholder":"300000","on_input":{"cell":"setP"}}]},
+    {"type":"row","children":[{"type":"label","text":"年利率 Rate %"},{"type":"input","placeholder":"5","on_input":{"cell":"setR"}}]},
+    {"type":"row","children":[{"type":"label","text":"年數 Years"},{"type":"input","placeholder":"30","on_input":{"cell":"setY"}}]},
+    {"type":"label","text":"────────"},
+    {"type":"row","children":[{"type":"label","text":"月付 Monthly $"},{"type":"value","bind":"monthly"}]},
+    {"type":"row","children":[{"type":"label","text":"總繳 Total $"},{"type":"value","bind":"totalPaid"}]},
+    {"type":"row","children":[{"type":"label","text":"總利息 Interest $"},{"type":"value","bind":"interest"}]}
+  ]}
+}
