@@ -888,6 +888,25 @@ function sampleF(c, x, y) {
   return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + d * (1 - tx) * ty + e * tx * ty;
 }
 
+// World law, not seed discipline: what a being rests ON.
+//
+// The old rule lifted everything by 0.6 x min(depth, 3). That is right for
+// someone wading through a puddle and it drowns a boat, because a river deeper
+// than about five units puts the water's surface well above where the rule
+// placed the hull — the boat and the fisherman riding it sank as the water got
+// deeper, which is exactly backwards.
+//
+// A floating being rests at the water's actual surface: terrain + full depth.
+// A walking one still gets the damped lift, so shallow water does not make it
+// bob. Riders inherit their carrier's position, so fixing the hull lifts the
+// fisherman with it — nobody has to declare that a boat floats.
+const FLOATS = new Set(['boat', 'raft', 'lotus', 'leaf', 'duck', 'swan']);
+function restY(e, sampleF) {
+  const th = sampleF(0, e.x, e.y), wd = sampleF(1, e.x, e.y);
+  const floats = e.habitat === 'water' || FLOATS.has(e.type);
+  return th + (floats ? wd : Math.min(wd, 3) * 0.6);
+}
+
 function updateCam(dt) {
   const g = fieldWorld.grid;
   cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
@@ -985,7 +1004,7 @@ function renderFieldFP() {
     const off = xc / zc;
     if (Math.abs(off) > fov * 0.7) continue;
     const sx = (off / fov + 0.5) * W;
-    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2;
+    const groundY = restY(e, sampleF) * K2;
     // altitude lifts a being off the ground toward the sky (the vertical realm)
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K2;
     const sy = horizon + ((eye - surfaceY) * focal) / zc;
@@ -2011,7 +2030,13 @@ const cv = $('cv');
 // viewport so a wide monitor does not push the whole world below the screen.
 function sizeStage() {
   const box = cv.parentElement;
-  const side = Math.round(Math.max(320, Math.min(box.clientWidth || 900, window.innerHeight * 0.78)));
+  // 78vh was wrong: the canvas does not start at the top of the window. The
+  // heading, the lede and the stage's own status line sit above it, so a square
+  // of 78vh plus ~130px of header ran off the bottom of the screen. Measure the
+  // gap that is actually left instead of guessing a fraction of the viewport.
+  const top = box.getBoundingClientRect().top;
+  const room = Math.max(300, window.innerHeight - top - 28);
+  const side = Math.round(Math.max(320, Math.min(box.clientWidth || 900, room)));
   if (cv.width === side && cv.height === side) return;
   cv.width = side; cv.height = side;
   try { if (typeof renderField === 'function' && fieldWorld) renderField(); } catch (e) {}
@@ -3035,7 +3060,7 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
   const SS = 60, C = 256, bctx = T.bbCtx;
   for (const { e, zc, off } of list) {
     const sx = (off / fov + 0.5) * W;
-    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
+    const groundY = restY(e, sampleF) * K;
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
     const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
     if (e.image) { // a 佛畫: a host image plate FIXED at the being's spot, facing +z, projected by

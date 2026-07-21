@@ -335,6 +335,7 @@ async fn claude_stream(
     prompt: &str,
     model: &str,
     attempt: u32,
+    user: &str,
     tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
 ) -> Result<String, String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
@@ -399,6 +400,24 @@ async fn claude_stream(
                 }
             }
             Some("result") => {
+                // The streaming envelope carries the same usage block as the
+                // one-shot form. This is the path the page actually takes, so a
+                // meter attached only to the other one measures zero forever.
+                let u = &v["usage"];
+                metrics::record("generate", user, json!({
+                    "ok": v["is_error"].as_bool() != Some(true),
+                    "streamed": true,
+                    "attempt": attempt,
+                    "model": model,
+                    "ms": v["duration_ms"].as_u64().unwrap_or(0),
+                    "ttft_ms": v["ttft_ms"].as_u64().unwrap_or(0),
+                    "tok_in": u["input_tokens"].as_u64().unwrap_or(0),
+                    "tok_out": u["output_tokens"].as_u64().unwrap_or(0),
+                    "tok_cache": u["cache_creation_input_tokens"].as_u64().unwrap_or(0)
+                        + u["cache_read_input_tokens"].as_u64().unwrap_or(0),
+                    "cost_usd": v["total_cost_usd"].as_f64().unwrap_or(0.0),
+                    "ledger_hit": false,
+                }));
                 if v.get("is_error").and_then(|b| b.as_bool()) == Some(true) {
                     let msg = v.get("result").and_then(|r| r.as_str()).unwrap_or("api error");
                     let _ = child.wait().await;
@@ -1691,12 +1710,13 @@ async fn generate_stream(headers: axum::http::HeaderMap, Json(req): Json<GenReq>
         }
     };
     let (tx, rx) = tokio::sync::mpsc::channel(256);
-    tokio::spawn(async move { run_generation_stream(req, tx).await });
+    tokio::spawn(async move { run_generation_stream(req, who, tx).await });
     Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default()).into_response()
 }
 
 async fn run_generation_stream(
     req: GenReq,
+    who: String,
     tx: tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
 ) {
     let model = req
@@ -1743,7 +1763,7 @@ async fn run_generation_stream(
                 "{prompt}\n\nYour previous reply failed validation:\n{last_err}\nPrevious reply:\n{trimmed}\nReturn ONLY the corrected JSON object."
             )
         };
-        match claude_stream(&p, &model, attempt, &tx).await {
+        match claude_stream(&p, &model, attempt, &who, &tx).await {
             Ok(text) => {
                 raw = text;
                 match extract_json(&raw).and_then(|obj| validate(&obj).map(|_| obj)) {
