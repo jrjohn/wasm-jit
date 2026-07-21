@@ -293,6 +293,9 @@ NODES:
  {"type":"value","label":"...","bind":"cellId"}                  // shows cellId's latest return (2 decimals)
  {"type":"button","text":"...","on_click":{"cell":"id"}}         // runs cell with x=0
  {"type":"slider","min":0,"max":100,"step":1,"label":"...","on_input":{"cell":"id"}}
+ {"type":"grid","cols":2,"children":[...]}                     // 2-D layout: children flow across N columns (rows cannot align columns; this is a real primitive)
+ {"type":"repeat","count":5,"template":{...}}                   // repeat the template N times; "$i" inside it becomes the 0-based index. template may be an ARRAY of nodes (e.g. to fill 2 grid columns per row)
+ {"type":"value","bind":"cellId","arg":"$i"}                    // value with arg: runs the bound cell with x=arg — this is how a table row reads its own datum, e.g. cell {"id":"at","script":"ld(x)"}
  {"type":"pie","slices":[{"label":"美國","bind":"usa"},{"label":"中國","bind":"china"}]}   // pie chart; each slice's ANGLE = its bound cell's return value (percentages auto-computed & drawn inside each slice)
  {"type":"bar","slices":[{"label":"...","bind":"cellId"}]}                                    // bar chart; each bar's HEIGHT = its bound cell's return value
 
@@ -306,6 +309,73 @@ EXAMPLE (loan calculator):
 #[derive(Deserialize)]
 struct GenReq {
     intent: String,
+}
+
+/// The word library — composites the AI has defined, persisted so everyone gets them next time.
+/// A word is made of fenced parts, so a word is fenced too (§21 attenuation: child ⊆ parent);
+/// growing the vocabulary therefore never widens reach.
+const WORDS_FILE: &str = "apps/assets/words.json";
+
+fn load_words() -> Vec<serde_json::Value> {
+    std::fs::read_to_string(WORDS_FILE)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_words(words: &[serde_json::Value]) -> Result<(), String> {
+    let s = serde_json::to_string_pretty(words).map_err(|e| e.to_string())?;
+    std::fs::write(WORDS_FILE, s).map_err(|e| e.to_string())
+}
+
+/// Substitute a word's $param defaults so its cells can be compile-checked like any other.
+fn bake_defaults(script: &str, params: &[serde_json::Value]) -> String {
+    let mut s = script.to_string();
+    for p in params {
+        if let (Some(n), Some(d)) = (p["name"].as_str(), p.get("default")) {
+            let val = d.as_str().map(|x| x.to_string()).unwrap_or_else(|| d.to_string());
+            s = s.replace(&format!("${n}"), &val);
+        }
+    }
+    s
+}
+
+/// Render the library into the prompt so the model composes with proven words instead of
+/// re-deriving them — this is what makes "define once, everyone reuses" real.
+fn words_section(words: &[serde_json::Value]) -> String {
+    if words.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\nAVAILABLE WORDS (詞庫 — already-proven reusable composites; PREFER these over rebuilding from scratch):\n");
+    for w in words {
+        let name = w["name"].as_str().unwrap_or("?");
+        let desc = w["desc"].as_str().unwrap_or("");
+        let ps: Vec<String> = w["params"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|p| p["name"].as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        out.push_str(&format!("- {name}({}) — {desc}\n", ps.join(", ")));
+        let cells: Vec<String> = w["cells"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|c| c["id"].as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        if !cells.is_empty() {
+            out.push_str(&format!("    its cells become \"<id>.{}\" — wire from those\n", cells.join("\", \"<id>.")));
+        }
+    }
+    out.push_str(
+        r#"USE a word:  {"type":"word","name":"input_row","id":"p","args":{"label":"本金","slot":"0.0"}}
+   ("id" prefixes that instance's cells, so the same word can be used many times; wire from "p.set".)
+DEFINE a new word by adding a top-level "define_words": [{"name":"...","desc":"...","params":[{"name":"x","default":"0"}],"cells":[{"id":"c","script":"...$x..."}],"tree":{...}}].
+   Define one whenever the pattern is generally reusable (a donut, a gauge, a stat card, a sortable table).
+   Words are saved and offered to EVERY future generation — define once, everyone reuses.
+"#,
+    );
+    out
+}
+
+async fn api_words() -> impl IntoResponse {
+    Json(load_words())
 }
 
 async fn call_claude(prompt: &str) -> Result<String, String> {
@@ -342,10 +412,11 @@ async fn api_gen(Json(req): Json<GenReq>) -> Response {
     if intent.is_empty() {
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "說一句話吧"}))).into_response();
     }
+    let wsec = words_section(&load_words());
     let mut repair = String::new();
     let mut last_err = String::from("unknown");
     for attempt in 1..=3u32 {
-        let prompt = format!("{GEN_SPEC}\n{repair}\nUSER INTENT: {intent}\n\nOutput the JSON now.");
+        let prompt = format!("{GEN_SPEC}\n{wsec}\n{repair}\nUSER INTENT: {intent}\n\nOutput the JSON now.");
         let raw = match call_claude(&prompt).await {
             Ok(o) => o,
             Err(e) => {
@@ -377,10 +448,29 @@ async fn api_gen(Json(req): Json<GenReq>) -> Response {
             None => errs.push("缺 cells 陣列".to_string()),
         }
         if errs.is_empty() {
+            // the model may DEFINE new reusable words — compile-check them, then persist for everyone
+            let mut lib = load_words();
+            let mut added: Vec<String> = Vec::new();
+            if let Some(defs) = schema["define_words"].as_array() {
+                for d in defs {
+                    let name = d["name"].as_str().unwrap_or("").trim().to_string();
+                    if name.is_empty() || !d["tree"].is_object() { continue; }
+                    if lib.iter().any(|w| w["name"].as_str() == Some(name.as_str())) { continue; }
+                    let params = d["params"].as_array().cloned().unwrap_or_default();
+                    let ok = d["cells"].as_array().map_or(true, |cs| {
+                        cs.iter().all(|c| {
+                            try_compile_ui(&bake_defaults(c["script"].as_str().unwrap_or(""), &params)).is_ok()
+                        })
+                    });
+                    if ok { lib.push(d.clone()); added.push(name); }
+                }
+                if !added.is_empty() { let _ = save_words(&lib); }
+            }
             let fence: Vec<String> = UI_IMPORTS.iter().map(|h| format!("env.{}", h.name)).collect();
             return Json(json!({
                 "ok": true, "attempt": attempt, "intent": intent,
                 "schema": schema, "cells": cells_out, "fence": fence,
+                "words": lib, "new_words": added,
             }))
             .into_response();
         }
@@ -474,6 +564,7 @@ async fn main() {
         .route("/reservoirs-solid", get(reservoirs_solid))
         .route("/genapp", get(genapp))
         .route("/api/gen", post(api_gen))
+        .route("/api/words", get(api_words))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))

@@ -1,0 +1,175 @@
+[
+  {
+    "cells": [
+      {
+        "id": "set",
+        "script": "set($slot, x);\nx"
+      }
+    ],
+    "desc": "一列:標籤 + 數字輸入框。輸入的數字會寫進指定 slot,供其他 cell 用 get(slot) 讀。",
+    "name": "input_row",
+    "params": [
+      {
+        "default": "數值",
+        "name": "label"
+      },
+      {
+        "default": "0.0",
+        "name": "slot"
+      },
+      {
+        "default": "",
+        "name": "placeholder"
+      }
+    ],
+    "tree": {
+      "children": [
+        {
+          "text": "$label",
+          "type": "label"
+        },
+        {
+          "on_input": {
+            "cell": "set"
+          },
+          "placeholder": "$placeholder",
+          "type": "input"
+        }
+      ],
+      "type": "row"
+    }
+  },
+  {
+    "cells": [
+      {
+        "id": "at",
+        "script": "ld(x)"
+      }
+    ],
+    "desc": "兩欄資料表(用 grid + repeat 組成,證明 Table 是複合詞不是圖元)。第 i 列的數值 = collection store 的 ld(i);先用別的 cell 以 sd(i, v) 把資料寫進去。rows=列數。",
+    "name": "table2",
+    "params": [
+      {
+        "default": "資料表",
+        "name": "title"
+      },
+      {
+        "default": "項目",
+        "name": "h1"
+      },
+      {
+        "default": "數值",
+        "name": "h2"
+      },
+      {
+        "default": "3",
+        "name": "rows"
+      }
+    ],
+    "tree": {
+      "children": [
+        {
+          "text": "$title",
+          "type": "label"
+        },
+        {
+          "children": [
+            {
+              "text": "$h1",
+              "type": "label"
+            },
+            {
+              "text": "$h2",
+              "type": "label"
+            },
+            {
+              "count": "$rows",
+              "template": [
+                {
+                  "text": "#$i",
+                  "type": "label"
+                },
+                {
+                  "arg": "$i",
+                  "bind": "at",
+                  "type": "value"
+                }
+              ],
+              "type": "repeat"
+            }
+          ],
+          "cols": 2,
+          "type": "grid"
+        }
+      ],
+      "type": "stack"
+    }
+  },
+  {
+    "cells": [],
+    "desc": "一列:標籤 + 綁定某支 cell 的即時數值(藥丸樣式)。bind 填 App 自己的 cell id。",
+    "name": "stat_row",
+    "params": [
+      {
+        "default": "結果",
+        "name": "label"
+      },
+      {
+        "default": "result",
+        "name": "bind"
+      }
+    ],
+    "tree": {
+      "children": [
+        {
+          "text": "$label",
+          "type": "label"
+        },
+        {
+          "bind": "$bind",
+          "type": "value"
+        }
+      ],
+      "type": "row"
+    }
+  },
+  {
+    "cells": [
+      {
+        "id": "set",
+        "script": "set($slot, x);\nx"
+      }
+    ],
+    "desc": "標籤 + 百分比滑桿,寫入指定 slot",
+    "name": "pct_slider",
+    "params": [
+      {
+        "default": "百分比",
+        "name": "label"
+      },
+      {
+        "default": "0",
+        "name": "slot"
+      }
+    ],
+    "tree": {
+      "children": [
+        {
+          "text": "$label",
+          "type": "label"
+        },
+        {
+          "label": "$label",
+          "max": 100,
+          "min": 0,
+          "on_input": {
+            "cell": "set"
+          },
+          "step": 1,
+          "type": "slider"
+        }
+      ],
+      "type": "stack"
+    }
+  }
+]
