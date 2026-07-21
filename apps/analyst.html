@@ -9,7 +9,15 @@
   * { box-sizing: border-box; }
   body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
          background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
-  .wrap { max-width: 1080px; margin: 0 auto; }
+  .wrap { max-width: 1560px; margin: 0 auto; }
+  @media (max-width: 640px) {
+    body { padding: .9rem .55rem 2rem; }
+    h1 { font-size: 1rem; } .lede { font-size: .74rem; }
+    .panel { padding: .7rem .7rem; border-radius: 11px; }
+    .bar { flex-direction: column; } #go { padding: .55rem 0; }
+    .chip { font-size: .7rem; padding: .24rem .55rem; }
+    .prev th, .prev td { font-size: .62rem; }
+  }
   h1 { font-size: 1.12rem; font-weight: 600; margin: 0 0 .25rem; }
   .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 84ch; }
   .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
@@ -54,7 +62,7 @@
   .w-value { font-size: .85rem; color: #8b949e; display: inline-flex; align-items: baseline; gap: .35rem;
              background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px; padding: .2rem .7rem; }
   .w-value b { color: #79b8ff; font-variant-numeric: tabular-nums; font-size: .95rem; }
-  #stage canvas { max-width: 100%; height: auto; }
+  #stage canvas { max-width: 100%; display: block; }
   .cell { border: 1px solid #21262d; border-radius: 8px; margin-bottom: .5rem; overflow: hidden; }
   .cell .ch { display: flex; justify-content: space-between; font-size: .72rem; padding: .35rem .6rem; background: #0b0f14; color: #d2a8ff; }
   .cell pre { margin: 0; padding: .5rem .6rem; font-size: .68rem; color: #a5d6ff; white-space: pre; overflow-x: auto; line-height: 1.4; }
@@ -130,6 +138,14 @@ function status(m, c) { const s = $('status'); s.textContent = m; s.className = 
 
 let compileUiCell = null;
 let COAST = [];                       // 真實海岸線(Natural Earth 110m,簡化到 ~900 點)
+let EARTH = null;                     // 地球貼圖(等距長方投影)
+async function loadEarth() {
+  const img = new Image(); img.src = '/assets/earth.jpg';
+  try { await img.decode(); } catch (e) { return; }
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+  EARTH = { d: g.getImageData(0, 0, img.width, img.height).data, w: img.width, h: img.height };
+}
 let COLS = [], NROWS = 0, NCOLS = 0, VALUES = null, FILEINFO = { name: '', bytes: 0 };
 
 // ── CSV(全在本機)──────────────────────────────────────────────
@@ -535,18 +551,25 @@ function lay(args) {
 }
 
 function findGeoCols() {
+  const lb = COLS.findIndex(c => /緯度低/.test(c.name)), lt = COLS.findIndex(c => /緯度高/.test(c.name));
+  if (lb >= 0 && lt >= 0) return { band: true, lb, lt };     // 一段緯度範圍 → 畫成帶
   const la = COLS.findIndex(c => /緯度|^lat/i.test(c.name));
   const lo = COLS.findIndex(c => /經度|^lon|^lng/i.test(c.name));
-  return la >= 0 ? { la, lo } : null;      // 沒有經度 → 環模式(緯度帶是一圈,不是一點)
+  return la >= 0 ? { la, lo } : null;
 }
 function geoForCats(col, cats) {
   const g = findGeoCols(); if (!g || !cats.length) return null;
-  const acc = cats.map(() => ({ a: 0, o: 0, n: 0 }));
+  const acc = cats.map(() => ({ a: 0, b: 0, o: 0, n: 0 }));
   for (let r = 0; r < NROWS; r++) {
     const k = VALUES[r * NCOLS + col] | 0;
-    if (k >= 0 && k < acc.length) { acc[k].a += VALUES[r * NCOLS + g.la]; if (g.lo >= 0) acc[k].o += VALUES[r * NCOLS + g.lo]; acc[k].n++; }
+    if (k < 0 || k >= acc.length) continue;
+    if (g.band) { acc[k].a += VALUES[r * NCOLS + g.lb]; acc[k].b += VALUES[r * NCOLS + g.lt]; }
+    else { acc[k].a += VALUES[r * NCOLS + g.la]; if (g.lo >= 0) acc[k].o += VALUES[r * NCOLS + g.lo]; }
+    acc[k].n++;
   }
-  return acc.map(v => v.n ? { lat: v.a / v.n, lon: g.lo >= 0 ? v.o / v.n : 0, ring: g.lo < 0 } : null);
+  return acc.map(v => !v.n ? null : (g.band
+    ? { latLo: v.a / v.n, latHi: v.b / v.n, lat: (v.a + v.b) / (2 * v.n), lon: 0, ring: true }
+    : { lat: v.a / v.n, lon: g.lo >= 0 ? v.o / v.n : 0, ring: g.lo < 0 }));
 }
 
 // labels 來自本機類別;values 由 AI 寫的受圍籬 cell 在本機算出
@@ -559,11 +582,24 @@ function makeMorphChart(labels, values, geo, ordered) {
                         : (geo ? [['長條', 0], ['圓餅', 1], ['🌍 地球', 3]] : [['長條', 0], ['圓餅', 1]]);
   const btns = VIEWS.map(([n]) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
   box.appendChild(bar);
-  const W = Math.min(980, Math.max(420, N * 64)), H = 380, dpr = Math.min(2, window.devicePixelRatio || 1);
+  let W = 900, H = 380;
   const cv = document.createElement('canvas');
-  cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
-  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
+  const ctx = cv.getContext('2d');
   box.appendChild(cv);
+  function resize() {
+    const host = document.getElementById('stage');
+    const avail = Math.max(300, (host ? host.clientWidth : 900) - 2);
+    W = Math.min(1500, avail);
+    H = W < 560 ? Math.max(260, Math.round(W * 0.72)) : Math.min(460, Math.max(300, Math.round(W * 0.40)));
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = W * dpr; cv.height = H * dpr;
+    cv.style.width = W + 'px'; cv.style.height = H + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr);
+  }
+  resize();
+  const ro = new ResizeObserver(() => resize());
+  const stageEl = document.getElementById('stage'); if (stageEl) ro.observe(stageEl);
+  window.addEventListener('resize', resize);
   const note = document.createElement('div');
   note.style.cssText = 'font-size:.66rem;color:#6e7681;margin-top:.35rem';
   note.textContent = `同一份資料三種視角 · 值由受圍籬 cell 在本機算 · 版面由 ${MORPH_BYTES}-byte layout cell 算`;
@@ -594,14 +630,51 @@ function makeMorphChart(labels, values, geo, ordered) {
   let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t*t*(3-2*t); };
   const pos = [], barBox = [];
+  let tex = null, texCv = null;
+  function drawEarth(cx0, cy0, R, alpha) {          // 真實地球貼圖(反投影取樣)
+    if (!EARTH) return false;
+    const S = Math.max(64, Math.min(420, Math.round(R * 2)));
+    if (!tex || tex.S !== S || tex.tilt !== tilt) {  // 只有尺寸/傾角變了才重算反投影表
+      const latA = new Float32Array(S * S), lonA = new Float32Array(S * S);
+      const s0 = Math.sin(tilt), c0 = Math.cos(tilt);
+      for (let j = 0; j < S; j++) for (let i2 = 0; i2 < S; i2++) {
+        const x = (i2 - S / 2 + 0.5) / (S / 2), y = -(j - S / 2 + 0.5) / (S / 2);
+        const rho = Math.hypot(x, y), k = j * S + i2;
+        if (rho > 1) { latA[k] = 999; continue; }
+        const c = Math.asin(Math.min(1, rho)), sc = Math.sin(c), cc = Math.cos(c);
+        latA[k] = rho < 1e-9 ? tilt : Math.asin(cc * s0 + y * sc * c0 / rho);
+        lonA[k] = Math.atan2(x * sc, rho * cc * c0 - y * sc * s0);
+      }
+      texCv = document.createElement('canvas'); texCv.width = S; texCv.height = S;
+      tex = { S, tilt, latA, lonA, img: texCv.getContext('2d').createImageData(S, S) };
+    }
+    const { S: SS, latA, lonA, img } = tex, px = img.data;
+    const TW = EARTH.w, TH = EARTH.h, TD = EARTH.d, TAU = 6.283185307;
+    for (let k = 0, n = SS * SS; k < n; k++) {
+      if (latA[k] > 900) { px[k * 4 + 3] = 0; continue; }
+      let lon = lonA[k] + spin;
+      lon = ((lon + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      const u = ((lon + Math.PI) / TAU * TW) | 0;
+      const v = ((1.5707963 - latA[k]) / Math.PI * TH) | 0;
+      const t = ((v < 0 ? 0 : v >= TH ? TH - 1 : v) * TW + (u < 0 ? 0 : u >= TW ? TW - 1 : u)) << 2;
+      px[k * 4] = TD[t]; px[k * 4 + 1] = TD[t + 1]; px[k * 4 + 2] = TD[t + 2]; px[k * 4 + 3] = 255;
+    }
+    texCv.getContext('2d').putImageData(img, 0, 0);
+    ctx.save(); ctx.globalAlpha = alpha; ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(texCv, cx0 - R, cy0 - R, R * 2, R * 2); ctx.restore();
+    return true;
+  }
   function drawGlobe(cx0, cy0, R, alpha, small) {
     const mx = Math.max(...values.map(Math.abs)) || 1;
     gOv.x = cx0; gOv.y = cy0; gOv.r = R;
     ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
     ctx.globalAlpha = alpha; ctx.fillStyle = '#0a1220'; ctx.fill();
     ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
-    // ── 真實陸地輪廓:每個點都走同一支 layout cell 的正射投影 ──
-    if (COAST.length) {
+    const textured = drawEarth(cx0, cy0, R, alpha);
+    ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
+    ctx.strokeStyle = '#58a6ff44'; ctx.lineWidth = 1; ctx.globalAlpha = alpha; ctx.stroke();
+    // ── 沒有貼圖時,退回海岸線向量(每點都走同一支 layout cell 投影)──
+    if (!textured && COAST.length) {
       ctx.strokeStyle = small ? '#2f6b8f' : '#397ea6';
       ctx.lineWidth = small ? 0.7 : 1;
       ctx.globalAlpha = alpha * (small ? 0.75 : 0.9);
@@ -620,20 +693,29 @@ function makeMorphChart(labels, values, geo, ordered) {
     }
     for (let i = 0; i < N; i++) {
       if (!geo || !geo[i]) continue;
-      if (RING) {                                    // 緯度帶 → 畫成一圈
-        if (geo[i].lat > 900) continue;
-        ctx.beginPath(); let started = false;
-        for (let k = 0; k <= 36; k++) {
-          const lonDeg = -180 + k * 10;
-          const a = { ...base(i), 18: lonDeg, 5: 7, 19: 3 };
-          if (lay(a) < 0) { started = false; continue; }
-          const gx = lay({ ...a, 5: 5 }), gy = lay({ ...a, 5: 6 });
-          if (!started) { ctx.moveTo(gx, gy); started = true; } else ctx.lineTo(gx, gy);
-          if (k === 18) pos[i] = { x: gx, y: gy, r: 6 };
+      if (RING) {                                    // 緯度帶 → 在它的範圍內畫成一「帶」
+        const lo = geo[i].latLo, hi = geo[i].latHi;
+        if (lo === undefined || lo > 900) continue;
+        const span = Math.abs(hi - lo);
+        const steps = Math.max(2, Math.min(9, Math.round(span / 9)));   // 帶越寬,線越多
+        const wt = 0.8 + 3.2 * Math.abs(values[i]) / mx;
+        ctx.strokeStyle = COLOR[i];
+        ctx.lineWidth = i === sel ? wt + 1.6 : (i === hoverI ? wt + 0.8 : wt);
+        ctx.globalAlpha = alpha * (i === sel ? 1 : (i === hoverI ? 0.95 : 0.7));
+        let got = false;
+        for (let t = 0; t <= steps; t++) {
+          const latDeg = lo + (hi - lo) * (t / steps);
+          ctx.beginPath(); let on = false;
+          for (let k = 0; k <= 36; k++) {
+            const a = { ...base(i), 17: latDeg, 18: -180 + k * 10, 5: 7, 19: 3 };
+            if (lay(a) < 0) { on = false; continue; }
+            const gx = lay({ ...a, 5: 5 }), gy = lay({ ...a, 5: 6 });
+            if (!on) { ctx.moveTo(gx, gy); on = true; } else ctx.lineTo(gx, gy);
+            if (!got) { pos[i] = { x: gx, y: gy, r: 9 }; got = true; }   // 第一個看得見的點 → 可點選
+          }
+          ctx.stroke();
         }
-        const wt = 1 + 4 * Math.abs(values[i]) / mx;      // 粗細 = |值|
-        ctx.strokeStyle = COLOR[i]; ctx.lineWidth = i === sel ? wt + 2 : (i === hoverI ? wt + 1 : wt);
-        ctx.globalAlpha = alpha * (i === sel ? 1 : 0.8); ctx.stroke();
+        if (!got) pos[i] = null;
       } else {                                       // 國家 → 畫成點
         const vis = lay({ ...base(i), 5: 7, 19: 3 });
         if (vis < 0) { pos[i] = null; continue; }
@@ -676,7 +758,7 @@ function makeMorphChart(labels, values, geo, ordered) {
         ctx.fillStyle = COLOR[i]; ctx.fillRect(cx - hw, top, hw * 2, (H - 74) - top);
         if (i === sel) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(cx - hw, top, hw * 2, (H - 74) - top); }
         barBox[i] = { x: cx - hw, y: top, w: hw * 2, h: (H - 74) - top };
-        const dense = N > 34;
+        const dense = N > Math.max(8, Math.floor(W / 34));
         const keep = !dense || i === sel || i === hoverI || i < 3 || i === N - 1;
         if (keep) {
           ctx.fillStyle = i === sel ? '#fff' : '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
@@ -701,8 +783,8 @@ function makeMorphChart(labels, values, geo, ordered) {
           ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
       }
     }
-    if ((L === 0 || L === 1) && geo) {               // 長條/圓餅右上角的連動小地球
-      const R = Math.min(96, H * 0.26);
+    if ((L === 0 || L === 1) && geo && W >= 460) {   // 長條/圓餅右上角的連動小地球(太窄就讓位)
+      const R = Math.min(W < 700 ? 62 : 104, H * 0.26);
       drawGlobe(W - R - 18, R + 22, R, alpha * 0.95, true);
       ctx.globalAlpha = alpha; ctx.fillStyle = '#6e7681'; ctx.font = '9px ui-monospace, monospace';
       ctx.textAlign = 'center';
@@ -774,7 +856,7 @@ function makeMorphChart(labels, values, geo, ordered) {
   // ── 地球互動:拖曳轉、滾輪縮放、游標指出國名 ──
   const globeArea = () => {                          // 目前這個視角裡,地球在哪
     if (toL === 3) { const R = (H - 108) * 0.44 * zoom; return { x: 58 + (W - 84) / 2, y: 34 + (H - 108) / 2, r: R }; }
-    if ((toL === 0 || toL === 1) && geo) { const R = Math.min(96, H * 0.26); return { x: W - R - 18, y: R + 22, r: R }; }
+    if ((toL === 0 || toL === 1) && geo && W >= 460) { const R = Math.min(W < 700 ? 62 : 104, H * 0.26); return { x: W - R - 18, y: R + 22, r: R }; }
     return null;
   };
   const xy = e => { const r = cv.getBoundingClientRect();
@@ -941,7 +1023,7 @@ const SEED_ANALYSIS = {
   cells: [{ id: 'regionMean', script:
     'let n = get(30.0);\nlet c = get(31.0);\nlet target = x;\nlet sum = 0.0;\nlet cnt = 0.0;\nlet r = 0.0;\n' +
     'while r < n {\n let region = ld(r * c + 3.0);\n if region >= target { if region <= target {\n' +
-    '  let a = ld(r * c + 6.0);\n  sum = sum + a;\n  cnt = cnt + 1.0;\n } }\n r = r + 1.0;\n}\n' +
+    '  let a = ld(r * c + 7.0);\n  sum = sum + a;\n  cnt = cnt + 1.0;\n } }\n r = r + 1.0;\n}\n' +
     'let result = 0.0;\nif cnt > 0.0 { result = sum / cnt; }\nresult' }],
   tree: { type: 'stack', children: [
     { type: 'label', text: '全球升溫:各區域平均距平(°C,1880–2025,由高到低)' },
@@ -1015,6 +1097,7 @@ const TEMP_EX = [
     compileUiCell = mod.compile_ui_cell_wasm;
     await initMorph();
     try { COAST = await (await fetch('/assets/coast.json')).json(); } catch (e) { console.warn('coast', e); }
+    await loadEarth();
     const booted = await bootTemp();          // 一進來就有一張真資料的圖
     if (VALUES) $('go').disabled = false;
     if (!booted) status('編譯器就緒 —— 拖一份 CSV 進來');
