@@ -243,6 +243,11 @@ async fn reservoirs_solid() -> impl IntoResponse {
 }
 
 /// The end-to-end page: type an intent, an AI grows a fenced app on the spot.
+/// The local-data workbench: the file never leaves the browser; only its schema is sent.
+async fn analyst() -> impl IntoResponse {
+    Html(include_str!("../../apps/analyst.html"))
+}
+
 async fn genapp() -> impl IntoResponse {
     Html(include_str!("../../apps/genapp.html"))
 }
@@ -389,6 +394,10 @@ struct GenReq {
     /// the app currently on screen — a follow-up usually means "change THIS", not "start over"
     #[serde(default)]
     prev_schema: Option<serde_json::Value>,
+    /// SCHEMA ONLY of the user's local dataset — column names/types/counts. Never any rows:
+    /// the data stays in their browser. The model writes the program; it never sees the data.
+    #[serde(default)]
+    data_schema: Option<serde_json::Value>,
 }
 
 /// The word library — composites the AI has defined, persisted so everyone gets them next time.
@@ -483,6 +492,34 @@ fn context_section(history: &[serde_json::Value], prev: &Option<serde_json::Valu
     out
 }
 
+/// Describe the user's LOCAL dataset to the model — schema only — plus the exact contract
+/// for reading it from inside a cell. The rows never left the user's machine.
+fn dataset_section(ds: &Option<serde_json::Value>) -> String {
+    let Some(ds) = ds else { return String::new() };
+    format!(r#"
+THE USER'S LOCAL DATASET — you can see ONLY this schema. The rows NEVER leave their machine and you
+will never see them. Write a program over it; do not invent data, do not ask for the data.
+{}
+
+HOW A CELL READS IT:
+- rows = get(30.0)   cols = get(31.0)
+- value at row r (0-based), column c (0-based):  ld(r * get(31.0) + c)
+- a TEXT column stores a CATEGORY INDEX (0 .. distinct-1), never the text itself. You never learn the
+  actual names — the host renders them as labels.
+- there is NO == in the DSL. Test equality with two guards:   if v >= k {{ if v <= k {{ ... }} }}
+- loop rows:   let r = 0.0; while r < n {{ ... r = r + 1.0; }}
+- keep loops O(rows); fuel is 200000 ops.
+
+GROUPED CHART (use this instead of inventing labels):
+  {{"type":"bar","groups":{{"col":<text column index>,"bind":"cellId"}}}}
+  The host draws one bar per category using the REAL local label, and calls your cell with
+  x = the category index. So write ONE cell that takes x (a category index) and returns that
+  group's number (mean/sum/count). Same for "pie".
+
+WHOLE-COLUMN STATS: a plain cell + {{"type":"value","label":"...","bind":"cellId"}}.
+"#, serde_json::to_string_pretty(ds).unwrap_or_default())
+}
+
 fn data_section() -> String {
     let mut out = String::from("\nREAL DATA SOURCES (host-fetched, allow-listed — the cell itself still has NO network):\n");
     for (id, desc, _url) in DATA_SOURCES.iter() {
@@ -552,7 +589,7 @@ async fn api_gen(Json(req): Json<GenReq>) -> Response {
     let mut repair = String::new();
     let mut last_err = String::from("unknown");
     for attempt in 1..=3u32 {
-        let prompt = format!("{GEN_SPEC}\n{}\n{wsec}\n{}\n{repair}\nUSER'S NEW MESSAGE: {intent}\n\nOutput the JSON now.", data_section(), ctx);
+        let prompt = format!("{GEN_SPEC}\n{}\n{}\n{wsec}\n{}\n{repair}\nUSER'S NEW MESSAGE: {intent}\n\nOutput the JSON now.", data_section(), dataset_section(&req.data_schema), ctx);
         let raw = match call_claude(&prompt).await {
             Ok(o) => o,
             Err(e) => {
@@ -700,6 +737,7 @@ async fn main() {
         .route("/reservoirs-net", get(reservoirs_net))
         .route("/reservoirs-solid", get(reservoirs_solid))
         .route("/genapp", get(genapp))
+        .route("/analyst", get(analyst))
         .route("/api/gen", post(api_gen))
         .route("/api/words", get(api_words))
         .route("/api/seed", get(api_seed))

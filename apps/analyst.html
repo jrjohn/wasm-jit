@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本機資料分析台 · AI 幫你分析它看不到的資料 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 1.12rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 84ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; } code { color: #a5d6ff; }
+  .panel { border: 1px solid #30363d; border-radius: 14px; background: #0f141a; padding: 1rem 1.15rem; }
+  .phead { font-size: .72rem; color: #6e7681; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 .7rem; }
+  .drop { border: 2px dashed #30363d; border-radius: 14px; padding: 1.6rem; text-align: center;
+          color: #8b949e; font-size: .85rem; cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop:hover, .drop.over { border-color: #58a6ff; background: #58a6ff0d; color: #c9d1d9; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; margin-top: 1rem; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .bar { display: flex; gap: .5rem; margin-top: 1rem; }
+  #intent { flex: 1; font: inherit; font-size: .9rem; padding: .6rem .8rem; border-radius: 10px;
+            border: 1px solid #30363d; background: #0b0f14; color: inherit; resize: vertical; min-height: 46px; }
+  #intent:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  #go { font: inherit; font-size: .9rem; font-weight: 600; padding: 0 1.3rem; border-radius: 10px;
+        border: 1px solid #58a6ff33; background: linear-gradient(180deg,#2a7bff,#1a63d8); color: #fff; cursor: pointer; }
+  #go:disabled { opacity: .5; cursor: wait; }
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+  .chip { font-size: .74rem; padding: .28rem .7rem; border-radius: 999px; border: 1px solid #30363d;
+          background: #161b22; color: #b9c2cc; cursor: pointer; }
+  .chip:hover { border-color: #58a6ff66; color: #e6edf3; }
+  .status { font-size: .8rem; color: #8b949e; margin: .8rem 0 0; min-height: 1.2em; }
+  .status.err { color: #f85149; } .status.ok { color: #7ee787; }
+  table.prev { border-collapse: collapse; font-size: .68rem; width: 100%; }
+  table.prev th { text-align: left; color: #d2a8ff; border-bottom: 1px solid #21262d; padding: .2rem .4rem; white-space: nowrap; }
+  table.prev td { color: #8b949e; padding: .15rem .4rem; white-space: nowrap; }
+  .ty { font-size: .6rem; color: #6e7681; }
+  .leak { border: 1px solid #3fb95055; border-radius: 10px; background: #0b1710; padding: .7rem .8rem; }
+  .leak h4 { margin: 0 0 .35rem; font-size: .74rem; color: #7ee787; font-weight: 600; }
+  .leak pre { margin: 0; font-size: .64rem; color: #a5d6ff; white-space: pre-wrap; word-break: break-all;
+              max-height: 190px; overflow: auto; }
+  .stay { border: 1px solid #f8514944; border-radius: 10px; background: #17100f; padding: .7rem .8rem; margin-top: .55rem; }
+  .stay h4 { margin: 0 0 .3rem; font-size: .74rem; color: #f0883e; font-weight: 600; }
+  .stay div { font-size: .72rem; color: #8b949e; }
+  .toggle { font-size: .72rem; color: #8b949e; display: inline-flex; gap: .35rem; align-items: center; cursor: pointer; margin-top: .5rem; }
+  /* widgets */
+  .w-stack { display: flex; flex-direction: column; gap: .7rem; }
+  .w-row { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .w-grid { display: grid; gap: .35rem .9rem; align-items: center; }
+  .w-label { font-size: .9rem; color: #c9d1d9; margin: 0; }
+  .w-stack > .w-label:first-child { font-size: 1.05rem; font-weight: 600; color: #e6edf3; }
+  .w-value { font-size: .85rem; color: #8b949e; display: inline-flex; align-items: baseline; gap: .35rem;
+             background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px; padding: .2rem .7rem; }
+  .w-value b { color: #79b8ff; font-variant-numeric: tabular-nums; font-size: .95rem; }
+  #stage canvas { max-width: 100%; height: auto; }
+  .cell { border: 1px solid #21262d; border-radius: 8px; margin-bottom: .5rem; overflow: hidden; }
+  .cell .ch { display: flex; justify-content: space-between; font-size: .72rem; padding: .35rem .6rem; background: #0b0f14; color: #d2a8ff; }
+  .cell pre { margin: 0; padding: .5rem .6rem; font-size: .68rem; color: #a5d6ff; white-space: pre; overflow-x: auto; line-height: 1.4; }
+  .fence { font-size: .72rem; color: #7ee787; margin-top: .5rem; }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>本機資料分析台 🔒 <span style="font-size:.8rem;color:#8b949e;font-weight:400">AI 幫你分析它看不到的資料</span></h1>
+  <p class="lede">把 CSV 拖進來——<b>檔案不上傳</b>,只留在這個瀏覽器分頁裡。送給 Claude 的<b>只有欄位名與型別</b>,
+    <b>一列資料都不送</b>。它寫出<b>受圍籬的 cell</b>,cell <b>在你的機器上</b>跑你的真資料。
+    cell 的 import table 裡<b>沒有網路</b>——想把資料傳出去,<b>編譯期就死</b>。
+    所以你<b>不需要信任</b>它寫的程式。</p>
+
+  <div class="panel">
+    <div class="drop" id="drop">
+      拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦
+      <div style="margin-top:.5rem"><span class="chip" id="sample">📄 沒有檔案?載入一份擬真薪資範例</span></div>
+      <input type="file" id="file" accept=".csv,text/csv" style="display:none">
+    </div>
+    <div id="loaded" style="display:none">
+      <div class="cols" style="margin-top:.9rem">
+        <div>
+          <p class="phead">▸ 你的資料(只在本機,僅顯示前 5 列)</p>
+          <div style="overflow:auto;max-height:210px"><table class="prev" id="prev"></table></div>
+          <label class="toggle"><input type="checkbox" id="anon"> 連欄位名都隱藏(送出 c0/c1/c2…)</label>
+        </div>
+        <div>
+          <p class="phead">▸ 送出去的,只有這些</p>
+          <div class="leak"><h4>↗ 離開你電腦的全部內容</h4><pre id="leak"></pre></div>
+          <div class="stay"><h4>⛔ 留在本機、一個 byte 都沒送</h4><div id="stay"></div></div>
+        </div>
+      </div>
+      <div class="bar">
+        <textarea id="intent" placeholder="想問什麼?例如:各部門平均薪資,長條圖"></textarea>
+        <button id="go" disabled>分析</button>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="status" id="status">載入編譯器…</div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <p class="phead">▸ 分析結果(活的,在你機器上算)</p>
+      <div id="stage"><span style="color:#6e7681;font-size:.8rem">還沒分析</span></div>
+    </div>
+    <div class="panel">
+      <p class="phead">▸ 證據:AI 寫的 CELL(受圍籬)</p>
+      <div id="evidence"><span style="color:#6e7681;font-size:.8rem">分析後這裡會顯示每支 cell 的原始碼 + import table</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function status(m, c) { const s = $('status'); s.textContent = m; s.className = 'status' + (c ? ' ' + c : ''); }
+
+let compileUiCell = null;
+let COLS = [], NROWS = 0, NCOLS = 0, VALUES = null, FILEINFO = { name: '', bytes: 0 };
+
+// ── CSV(全在本機)──────────────────────────────────────────────
+function parseCSV(text) {
+  const rows = []; let i = 0, field = '', row = [], inQ = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (inQ) {
+      if (ch === '"') { if (text[i + 1] === '"') { field += '"'; i += 2; continue; } inQ = false; i++; continue; }
+      field += ch; i++; continue;
+    }
+    if (ch === '"') { inQ = true; i++; continue; }
+    if (ch === ',') { row.push(field); field = ''; i++; continue; }
+    if (ch === '\r') { i++; continue; }
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+    field += ch; i++;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length && !(r.length === 1 && r[0].trim() === ''));
+}
+
+function ingest(text, name, bytes) {
+  const rows = parseCSV(text);
+  if (rows.length < 2) { status('這份 CSV 看起來沒有資料列', 'err'); return; }
+  const header = rows[0].map(h => h.trim());
+  const body = rows.slice(1);
+  NCOLS = header.length; NROWS = body.length;
+  const sample = body.slice(0, 300);
+  COLS = header.map((name, c) => {
+    const vals = sample.map(r => (r[c] ?? '').trim()).filter(v => v !== '');
+    const numeric = vals.length > 0 && vals.every(v => Number.isFinite(+v));
+    return { name, type: numeric ? 'number' : 'text', cats: [], catMap: new Map(), min: Infinity, max: -Infinity };
+  });
+  VALUES = new Float64Array(NROWS * NCOLS);
+  for (let r = 0; r < NROWS; r++) {
+    for (let c = 0; c < NCOLS; c++) {
+      const raw = (body[r][c] ?? '').trim();
+      const col = COLS[c];
+      let v;
+      if (col.type === 'number') { v = raw === '' ? 0 : +raw; if (v < col.min) col.min = v; if (v > col.max) col.max = v; }
+      else {
+        if (!col.catMap.has(raw)) { col.catMap.set(raw, col.cats.length); col.cats.push(raw); }
+        v = col.catMap.get(raw);
+      }
+      VALUES[r * NCOLS + c] = v;
+    }
+  }
+  FILEINFO = { name, bytes };
+  renderPreview(body);
+  renderLeak();
+  $('loaded').style.display = '';
+  $('drop').style.display = 'none';
+  if (compileUiCell) $('go').disabled = false;
+  status(`已載入 ${NROWS.toLocaleString()} 列 × ${NCOLS} 欄 —— 全部留在本機。問一句試試。`, 'ok');
+}
+
+function renderPreview(body) {
+  const head = '<tr>' + COLS.map(c => `<th>${c.name}<div class="ty">${c.type === 'number' ? '數值' : `文字 · ${c.cats.length} 類`}</div></th>`).join('') + '</tr>';
+  const rows = body.slice(0, 5).map(r => '<tr>' + r.map(v => `<td>${String(v).slice(0, 18)}</td>`).join('') + '</tr>').join('');
+  $('prev').innerHTML = head + rows;
+}
+
+// 送出去的 schema:欄位名/型別/筆數。沒有任何一列;文字欄只送「有幾類」,不送類別名稱。
+function buildSchema() {
+  const anon = $('anon').checked;
+  return {
+    rows: NROWS, cols: NCOLS,
+    columns: COLS.map((c, i) => ({
+      index: i, name: anon ? 'c' + i : c.name, type: c.type,
+      ...(c.type === 'number' ? { min: +c.min.toFixed(4), max: +c.max.toFixed(4) } : { distinct: c.cats.length }),
+    })),
+  };
+}
+function renderLeak() {
+  $('leak').textContent = JSON.stringify(buildSchema(), null, 1);
+  const kb = (FILEINFO.bytes / 1024).toFixed(1);
+  $('stay').innerHTML = `<b style="color:#c9d1d9">${FILEINFO.name}</b> · ${kb} KB · ` +
+    `<b style="color:#c9d1d9">${NROWS.toLocaleString()} 列</b>的實際內容,以及文字欄的<b style="color:#c9d1d9">所有類別名稱</b>。` +
+    `<br>對照:ChatGPT code interpreter / Cowork 這類做法,第一步就是把整份檔案送到伺服器。`;
+}
+$('anon').addEventListener?.('change', renderLeak);
+
+// ── 受圍籬 runtime(cell 只有這 6 個函式;資料在 ld() 後面)────────────
+async function manifestUi(schema) {
+  const slots = new Float64Array(32);
+  const imports = { env: {
+    sin: Math.sin, cos: Math.cos,
+    get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+    ld: i => { const k = i | 0; return (k >= 0 && k < VALUES.length) ? VALUES[k] : 0; },  // ← 你的資料
+    sd: () => {},                                                                          // 唯讀:不讓它改你的資料
+  } };
+  slots[30] = NROWS; slots[31] = NCOLS;
+  const runFns = {}, fuels = {}, outputs = {};
+  for (const c of (schema.cells || [])) {
+    const bytes = compileUiCell(c.script);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFns[c.id] = instance.exports.run; fuels[c.id] = instance.exports.fuel || null;
+  }
+  const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 200000; outputs[id] = f(x); };
+  const binds = [], charts = [];
+  const refresh = () => {
+    for (const b of binds) { if (b.arg !== undefined) run(b.id, b.arg); const v = outputs[b.id];
+      b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v); }
+    for (const ch of charts) drawChart(ch, ch.slices.map(s => {
+      if (s.arg !== undefined) { run(s.bind, s.arg); return { label: s.label, value: outputs[s.bind] || 0, color: s.color }; }
+      return { label: s.label, value: outputs[s.bind] || 0, color: s.color };
+    }));
+  };
+  const root = build(schema.tree, binds, charts);
+  for (const c of (schema.cells || [])) run(c.id, 0);
+  refresh();
+  return root;
+}
+
+function build(node, binds, charts) {
+  if (!node || !node.type) return document.createTextNode('');
+  const t = node.type;
+  if (t === 'stack' || t === 'row') {
+    const d = document.createElement('div'); d.className = t === 'row' ? 'w-row' : 'w-stack';
+    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts))); return d;
+  }
+  if (t === 'grid') {
+    const d = document.createElement('div'); d.className = 'w-grid';
+    d.style.gridTemplateColumns = `repeat(${Math.max(1, Math.min(12, +node.cols || 2))}, auto)`;
+    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts))); return d;
+  }
+  if (t === 'repeat') {
+    const n = Math.max(0, Math.min(300, +node.count || 0)); const frag = document.createDocumentFragment();
+    for (let i = 0; i < n; i++) {
+      const tpl = JSON.parse(JSON.stringify(node.template).replace(/\$i\b/g, String(i)));
+      for (const one of (Array.isArray(tpl) ? tpl : [tpl])) frag.appendChild(build(one, binds, charts));
+    }
+    return frag;
+  }
+  if (t === 'label') { const p = document.createElement('div'); p.className = 'w-label'; p.textContent = node.text || ''; return p; }
+  if (t === 'value') {
+    const w = document.createElement('span'); w.className = 'w-value';
+    if (node.label) { const l = document.createElement('span'); l.textContent = node.label; w.appendChild(l); }
+    const b = document.createElement('b'); b.textContent = '—'; w.appendChild(b);
+    binds.push({ id: node.bind, el: b, arg: node.arg === undefined ? undefined : +node.arg }); return w;
+  }
+  if (t === 'pie' || t === 'bar') {
+    let slices = [];
+    if (node.groups) {                       // ← 分組圖:標籤來自本機類別名,AI 從沒看過
+      const col = +node.groups.col || 0, bind = node.groups.bind;
+      const cats = (COLS[col] && COLS[col].cats) || [];
+      slices = cats.map((nm, i) => ({ label: nm, bind, arg: i,
+        color: `hsl(${Math.round(i / Math.max(1, cats.length) * 360)}, 72%, 60%)` }));
+    } else {
+      const sls = node.slices || [];
+      slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind,
+        color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
+    }
+    const LW = t === 'bar' ? Math.min(660, Math.max(300, slices.length * 30)) : 300;
+    const LH = t === 'bar' ? 260 : 240, dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cv = document.createElement('canvas');
+    cv.width = LW * dpr; cv.height = LH * dpr; cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
+    cv.getContext('2d').scale(dpr, dpr);
+    charts.push({ cv, kind: t, slices, LW, LH }); return cv;
+  }
+  const p = document.createElement('div'); p.className = 'w-label'; p.style.opacity = .5; p.textContent = '[' + t + ']'; return p;
+}
+
+function drawChart(ch, slices) {
+  const ctx = ch.cv.getContext('2d'), W = ch.LW, H = ch.LH;
+  ctx.clearRect(0, 0, W, H);
+  const total = slices.reduce((a, s) => a + Math.max(0, s.value), 0) || 1;
+  if (ch.kind === 'pie') {
+    const cx = W * 0.42, cy = H / 2, R = Math.min(W * 0.38, H * 0.44); let a = -Math.PI / 2;
+    for (const s of slices) {
+      const frac = Math.max(0, s.value) / total, a2 = a + frac * 2 * Math.PI;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a2); ctx.closePath();
+      ctx.fillStyle = s.color; ctx.fill(); ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+      if (frac > 0.04) { const m = (a + a2) / 2, lr = R * 0.6;
+        ctx.fillStyle = '#fff'; ctx.font = '600 11px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.label, cx + lr * Math.cos(m), cy + lr * Math.sin(m) - 6);
+        ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
+      a = a2;
+    }
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '11px ui-monospace, monospace';
+    let ly = H / 2 - slices.length * 8;
+    for (const s of slices) { ctx.fillStyle = s.color; ctx.fillRect(W * 0.84, ly - 5, 10, 10);
+      ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, W * 0.84 + 15, ly); ly += 18; }
+  } else {
+    const n = slices.length, crowded = n > 8;
+    const mL = 8, mB = crowded ? 74 : 22, plotW = W - mL - 8, plotH = H - 18 - mB, base = H - mB;
+    const max = Math.max(1, ...slices.map(s => s.value)), bw = plotW / n * 0.72;
+    ctx.font = '10px ui-monospace, monospace';
+    slices.forEach((s, i) => {
+      const cx = mL + (i + 0.5) * plotW / n, h = Math.max(0, s.value) / max * plotH;
+      ctx.fillStyle = s.color; ctx.fillRect(cx - bw / 2, base - h, bw, h);
+      if (n <= 14) { ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(fmt(s.value), cx, base - h - 13); }
+      ctx.fillStyle = '#c9d1d9';
+      if (crowded) { ctx.save(); ctx.translate(cx, base + 5); ctx.rotate(-Math.PI * 55 / 180);
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(s.label, 0, 0); ctx.restore(); }
+      else { ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(s.label, cx, base + 4); }
+    });
+  }
+}
+
+// ── 問一句 → 只送 schema → 本機跑 ───────────────────────────────
+const EXAMPLES = ['各部門平均薪資,長條圖', '薪資的平均、中位數、最高、最低',
+                  '各部門人數佔比,圓餅圖', '薪資高於平均 1.5 倍的有幾筆'];
+$('chips').innerHTML = EXAMPLES.map(e => `<span class="chip">${e}</span>`).join('');
+document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = EXAMPLES[i]; $('intent').focus(); });
+
+let lastSchema = null;
+async function analyze() {
+  const intent = $('intent').value.trim(); if (!intent) { status('問一句吧', 'err'); return; }
+  $('go').disabled = true;
+  const sent = buildSchema();
+  status('🔒 只把欄位 schema 送出去,資料留在本機…(Claude 寫 cell → 編譯即圍籬 → 自我修復)');
+  let data;
+  try {
+    const r = await fetch('/api/gen', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ intent, data_schema: sent, prev_schema: lastSchema }) });
+    data = await r.json();
+  } catch (e) { status('✗ 網路錯誤:' + e, 'err'); $('go').disabled = false; return; }
+  if (!data.ok) { status('✗ 失敗:' + (data.error || '?'), 'err'); $('go').disabled = false; return; }
+  lastSchema = data.schema;
+  try {
+    $('stage').innerHTML = ''; $('stage').appendChild(await manifestUi(data.schema));
+    $('evidence').innerHTML =
+      `<div style="font-size:.74rem;color:#8b949e;margin-bottom:.6rem"><b style="color:#c9d1d9">${data.schema.title || ''}</b> · 第 ${data.attempt} 次過關 · ${(data.cells || []).length} 支 cell</div>` +
+      (data.cells || []).map(c => `<div class="cell"><div class="ch"><span>${c.id}</span><span>${c.bytes} bytes wasm</span></div><pre>${c.script.replace(/</g, '&lt;')}</pre></div>`).join('') +
+      `<div class="fence">圍籬:每支 cell 只能 import <code>${(data.fence || []).join(', ')}</code> —— <b>沒有網路</b>。` +
+      `它讀得到你的資料(<code>ld</code>),但<b>沒有能力把資料送出去</b>;想 <code>fetch</code> 編譯期就死。` +
+      `這裡 <code>sd</code> 也被我關成 no-op,所以它<b>連改都改不了</b>你的資料。</div>`;
+    status('✓ 算完了 —— 全程在你的機器上', 'ok');
+  } catch (e) { status('✗ 執行錯誤:' + e, 'err'); console.error(e); }
+  $('go').disabled = false;
+}
+$('go').onclick = analyze;
+$('intent').addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') analyze(); });
+
+// ── 拖檔 / 選檔 / 範例 ───────────────────────────────────────────
+const drop = $('drop');
+drop.onclick = e => { if (e.target.id !== 'sample') $('file').click(); };
+$('file').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => ingest(t, f.name, f.size)); };
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => { const f = e.dataTransfer.files[0]; if (f) f.text().then(t => ingest(t, f.name, f.size)); });
+$('sample').onclick = e => {
+  e.stopPropagation();
+  const depts = ['研發', '業務', '行銷', '客服', '財務'], titles = ['工程師', '資深工程師', '主管', '專員'];
+  let s = 1234567; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  let csv = '員工編號,部門,職稱,年資,月薪\n';
+  for (let i = 1; i <= 240; i++) {
+    const d = (rnd() * depts.length) | 0, t = (rnd() * titles.length) | 0;
+    const yrs = Math.round(rnd() * 18);
+    const base = [78000, 62000, 55000, 48000, 58000][d] + t * 12000 + yrs * 1400 + Math.round((rnd() - 0.5) * 9000);
+    csv += `E${1000 + i},${depts[d]},${titles[t]},${yrs},${base}\n`;
+  }
+  ingest(csv, '薪資範例.csv(本機產生)', csv.length);
+};
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js'); await mod.default();
+    compileUiCell = mod.compile_ui_cell_wasm;
+    if (VALUES) $('go').disabled = false;
+    status('編譯器就緒 —— 拖一份 CSV 進來');
+  } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
+})();
+</script>
+</body>
+</html>
