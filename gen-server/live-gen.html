@@ -135,6 +135,8 @@ Generation is seconds; every interaction after is µs.
       <button id="view-toggle" style="display:none; margin-left:auto; font-size:.75rem; padding:.25rem .7rem"></button>
       <button id="world-save" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">💾 save world</button>
       <button id="world-load" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">🌀 worlds</button>
+      <span id="who" style="font-size:.7rem;opacity:.8"></span>
+      <div id="gbtn"></div>
     </div>
     <div id="worlds-menu" style="display:none; position:absolute; right:1rem; top:3rem; z-index:6;
       background:#161b22; border:1px solid #30363d; border-radius:8px; max-height:280px; overflow-y:auto;
@@ -155,6 +157,13 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
+// 憑證狀態刻意放在最前:每一個寫入呼叫都要用到它,擺在中段的話,
+// 日後任何一次搬動都可能讓某個 fetch 靜默地不帶身分出去。
+let ID_TOKEN = null, ME = null;
+function authHeaders(base) {
+  return ID_TOKEN ? { ...base, Authorization: 'Bearer ' + ID_TOKEN } : base;
+}
+
 import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl, compile_sound_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
@@ -501,7 +510,7 @@ const WIDGET_LIB = {};   // type -> widget_seed (in-memory cache of the library)
 function saveGrownWidget(type, seed) {
   if (WIDGET_LIB[type] === seed) return;
   WIDGET_LIB[type] = seed;
-  fetch('/api/widgets', { method: 'POST', headers: { 'content-type': 'application/json' },
+  fetch('/api/widgets', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type, widget_seed: seed }) }).catch(() => {});
 }
 function widgetEnv(wd) {
@@ -1385,7 +1394,7 @@ const SKIN_LIB = {}; // type -> skin_seed (in-memory cache of what's on disk)
 function saveGrownSkin(type, seed) {
   if (SKINS[type] || SKIN_LIB[type] === seed) return; // curated or unchanged
   SKIN_LIB[type] = seed;
-  fetch('/api/skins', { method: 'POST', headers: { 'content-type': 'application/json' },
+  fetch('/api/skins', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type, skin_seed: seed }) }).catch(() => {});
 }
 async function recallGrownSkin(ent) { // a novel type with no seed → look it up
@@ -3694,14 +3703,65 @@ function manifestSaved(bundle) {
   restoreChat(bundle.chat);
   say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
 }
+// ── Who is asking ────────────────────────────────────────────────────────────
+// Reading a world stays open to everyone; keeping one is a named act. The client
+// id is never written here — the page asks the server for it, so the whole
+// deployment is configured in one place (GOOGLE_CLIENT_ID) and this file stays
+// the same whether it runs on a laptop or in public.
+//
+// The token lives in memory only. Parking it in localStorage is the common shape
+// and a poor one: anything that can run script on the page can then read a live
+// credential. Google's auto_select signs a returning visitor back in without a
+// click, so the convenience is kept without the storage.
+function paintWho() {
+  const el = $('who');
+  if (!el) return;
+  if (ME && ME.open) { el.textContent = '本機模式 · 不需登入'; el.title = 'GOOGLE_CLIENT_ID 未設 — 寫入不設限'; return; }
+  el.textContent = ME && ME.signed_in ? `👤 ${ME.name}` : '';
+}
+
+async function refreshWho() {
+  try { ME = await (await fetch('/api/whoami', { headers: authHeaders({}) })).json(); }
+  catch (e) { ME = null; }
+  paintWho();
+  return ME;
+}
+
+async function initAuth() {
+  const me = await refreshWho();
+  if (!me || me.open || me.signed_in || !me.client_id) return;   // 本機模式 / 已登入 → 不必畫按鈕
+  await new Promise(res => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.onload = res; s.onerror = res;
+    document.head.appendChild(s);
+  });
+  if (!window.google?.accounts?.id) return;
+  google.accounts.id.initialize({
+    client_id: me.client_id,
+    auto_select: true,                      // 回訪者自動登入,不用再按
+    callback: async (resp) => {
+      ID_TOKEN = resp.credential;           // 只存在記憶體
+      await refreshWho();
+      $('gbtn').innerHTML = '';
+      say('ai', `👋 ${ME?.name || ''} — 你現在可以留下自己的世界了`);
+    },
+  });
+  google.accounts.id.renderButton($('gbtn'), { type: 'standard', size: 'small', theme: 'filled_black', text: 'signin' });
+  google.accounts.id.prompt();
+}
+initAuth();
+
 $('world-save').onclick = async () => {
   if (!lastManifest) { say('err', 'nothing manifested to save yet'); return; }
+  if (ME && !ME.open && !ME.signed_in) { say('err', '要留下世界得先用 Google 登入 — 讀別人的世界不用'); return; }
   const name = (prompt('save this world as… (letters/digits/_/-)') || '').trim().replace(/[^A-Za-z0-9_-]/g, '-');
   if (!name) return;
   const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog,
                    state: lastManifest.surface === 'ui' ? appSnapshot() : undefined }; // 業 rides along
   try {
-    const r = await fetch('/api/worlds', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bundle) });
+    const r = await fetch('/api/worlds', { method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify(bundle) });
     say(r.ok ? 'ai' : 'err', r.ok ? `💾 saved world '${name}' — load it anytime, instantly` : `save failed: ${await r.text()}`);
   } catch (e) { say('err', 'save failed: ' + e); }
 };
