@@ -7,6 +7,7 @@ description = "Server-side compute twin of apps/form.html: the loan cells (DSL) 
 [dependencies]
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tower-http = { version = "0.6", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # the native pure compiler (parser + codegen + the UI capability fence) — no wasm-bindgen.

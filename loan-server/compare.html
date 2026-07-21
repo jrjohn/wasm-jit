@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>一套詞彙,三種部署 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.8rem 1rem 3rem; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.12rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .82rem; color: #8b949e; margin: 0 0 1.3rem; max-width: 70ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; }
+  .inputs { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
+            border: 1px solid #30363d; border-radius: 12px; padding: .9rem 1.1rem;
+            background: #11161d; margin-bottom: 1.3rem; }
+  .inputs .f { display: flex; align-items: center; gap: .5rem; font-size: .85rem; }
+  .inputs label { color: #c9d1d9; }
+  .inputs input { font: inherit; font-size: .88rem; text-align: right; width: 120px;
+          padding: .35rem .6rem; border-radius: 8px; border: 1px solid #30363d;
+          background: #0d1117; color: inherit; font-variant-numeric: tabular-nums; }
+  .inputs input:focus { outline: none; border-color: #58a6ff; box-shadow: 0 0 0 3px #58a6ff2b; }
+  .inputs .same { margin-left: auto; font-size: .74rem; color: #7ee787; }
+  .inputs .same.diff { color: #f85149; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; align-items: start; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel { border: 1px solid #30363d; border-radius: 12px; background: #0f141a;
+           padding: 1.1rem 1.15rem; display: flex; flex-direction: column; gap: .55rem;
+           border-top: 3px solid var(--c); }
+  .v1 { --c: #f85149; } .v2 { --c: #e3a008; } .v3 { --c: #3fb950; }
+  .ptitle { font-size: .93rem; font-weight: 600; }
+  .chip { align-self: flex-start; font-size: .68rem; padding: .18rem .55rem; border-radius: 999px;
+          color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+          background: color-mix(in srgb, var(--c) 12%, transparent); }
+  .where { font-size: .72rem; color: #8b949e; min-height: 2.4em; }
+  .where b { color: #c9d1d9; font-weight: 600; }
+  .out { display: flex; flex-direction: column; gap: .3rem; margin: .3rem 0 .1rem; }
+  .orow { display: flex; justify-content: space-between; align-items: center; font-size: .82rem; }
+  .orow .k { color: #8b949e; }
+  .orow .v { font-variant-numeric: tabular-nums; color: #79b8ff; font-weight: 600;
+             background: #58a6ff14; border: 1px solid #58a6ff26; border-radius: 999px;
+             padding: .16rem .6rem; min-width: 88px; text-align: right; transition: background .2s; }
+  .orow .v.flash { background: #58a6ff38; }
+  .orow .v.err { color: #f85149; background: #f8514915; border-color: #f8514940; }
+  .wire { font-size: .68rem; color: #6e7681; border-top: 1px solid #21262d; padding-top: .5rem;
+          font-family: ui-monospace, monospace; word-break: break-all; }
+  .wire .lab { color: #8b949e; }
+  .wire .out-b { color: #7ee787; }
+  details { margin-top: .1rem; }
+  summary { cursor: pointer; font-size: .68rem; color: #6e7681; }
+  summary:hover { color: #9ecbff; }
+  pre { margin: .4rem 0 0; padding: .5rem .6rem; background: #010409; border: 1px solid #21262d;
+        border-radius: 8px; font-size: .66rem; color: #a5d6ff; overflow-x: auto; white-space: pre;
+        line-height: 1.35; }
+  a { color: #58a6ff; }
+  .foot { margin-top: 1.4rem; font-size: .76rem; color: #8b949e; border-top: 1px solid #21262d;
+          padding-top: 1rem; }
+  .foot b { color: #c9d1d9; }
+  code { color: #a5d6ff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>一套詞彙,三種部署 · one vocabulary, three deployments</h1>
+  <p class="lede">同一顆房貸攤還 cell、同一道能力圍籬(<code>sin cos get set ld sd</code>),用三種方式部署。
+    改上面的數字——三欄同時重算,而且<b>算出同一組數字</b>。差別只在:<b>公式跑在哪、什麼東西過了網路、別人能不能讀到它</b>。</p>
+
+  <div class="inputs">
+    <div class="f"><label>本金 Principal $</label><input id="p" type="number" value="300000" step="1000"></div>
+    <div class="f"><label>年利率 Rate %</label><input id="r" type="number" value="5" step="0.1"></div>
+    <div class="f"><label>年數 Years</label><input id="y" type="number" value="30" step="1"></div>
+    <div class="same" id="same">三欄一致 ✓</div>
+  </div>
+
+  <div class="grid">
+    <!-- variant 1 -->
+    <div class="panel v1">
+      <div class="ptitle">① 明碼 DSL</div>
+      <span class="chip">🔴 View-Source 秒懂</span>
+      <div class="where"><b>瀏覽器</b>編譯 + 執行。DSL 原始碼就攤在這一頁裡,用 <code>/pkg</code> 的編譯器現編成 wasm。</div>
+      <div class="out" id="v1-out"></div>
+      <div class="wire"><span class="lab">頁面內含 →</span> 3 段 DSL 原始碼 + 288KB 編譯器</div>
+      <details><summary>▸ 看這頁帶的原始碼</summary><pre id="v1-src">…</pre></details>
+    </div>
+
+    <!-- variant 2 -->
+    <div class="panel v2">
+      <div class="ptitle">② client wasm</div>
+      <span class="chip">🟠 要反編譯才讀得到</span>
+      <div class="where"><b>瀏覽器</b>執行,但只下載<b>編好的 .wasm bytes</b>——沒有 DSL、不用編譯器。可跑,但可反組譯。</div>
+      <div class="out" id="v2-out"></div>
+      <div class="wire"><span class="lab">下載一次 →</span> <span id="v2-bytes">…</span> ·
+        <a href="/api/wasm/monthly" download>取 monthly.wasm</a></div>
+      <details><summary>▸ 這頁怎麼跑它的</summary><pre>const b = await fetch('/api/wasm/monthly');
+const {instance} = await WebAssembly
+  .instantiate(await b.arrayBuffer(), fence);
+instance.exports.run(0);  // 圍籬同 ①,只是無源碼</pre></details>
+    </div>
+
+    <!-- variant 3 -->
+    <div class="panel v3">
+      <div class="ptitle">③ server 計算</div>
+      <span class="chip">🟢 client 拿不到公式</span>
+      <div class="where"><b>伺服器</b>執行。瀏覽器只送出意圖 <code>{p,r,y}</code>、收回數字。公式一個字都不下來。</div>
+      <div class="out" id="v3-out"></div>
+      <div class="wire"><span class="lab">每次 POST →</span> <span id="v3-req">…</span><br>
+        <span class="lab">收回 ←</span> <span class="out-b" id="v3-res">…</span></div>
+      <details><summary>▸ 這頁看得到的全部</summary><pre>fetch('/api/loan', {method:'POST',
+  body: JSON.stringify({p, r, y})})
+// 公式只在 server 二進位裡</pre></details>
+    </div>
+  </div>
+
+  <p class="foot">三欄的數字永遠相同,因為是<b>同一套詞彙、同一道圍籬</b>——差別只是把 cell 放在光譜的哪一格:
+    <b style="color:#f85149">明碼</b> → <b style="color:#e3a008">難讀</b> → <b style="color:#3fb950">真藏</b>。
+    而且三種都一樣安全:cell 想碰 <code>fetch</code>/檔案/socket,在<b>編譯期</b>就死——圍籬是「害不了你」,跟「看不看得到」無關。
+    <span id="v1-note"></span></p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const IDS = ['monthly', 'totalPaid', 'interest'];
+const LABELS = { monthly: '月付 Monthly $', totalPaid: '總繳 Total $', interest: '總利息 Interest $' };
+const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// the loan cells — embedded here ONLY for variant ①, whose whole point is that the source
+// travels to the browser. variants ② and ③ never see these strings.
+const DSL = {
+  monthly: "let P = get(0.0);\nlet r = get(1.0) / 1200.0;\nlet n = get(2.0) * 12.0;\nlet M = 0.0;\nif n >= 1.0 {\n if r < 0.0000001 { M = P / n; }\n if r >= 0.0000001 {\n  let pw = 1.0;\n  let i = 0.0;\n  while i < n { pw = pw * (1.0 + r); i = i + 1.0; }\n  M = P * r * pw / (pw - 1.0);\n }\n}\nset(3.0, M);\nM",
+  totalPaid: "get(3.0) * get(2.0) * 12.0",
+  interest: "get(3.0) * get(2.0) * 12.0 - get(0.0)",
+};
+
+// build the output rows for a panel
+for (const v of ['v1', 'v2', 'v3']) {
+  $(v + '-out').innerHTML = IDS.map(id =>
+    `<div class="orow"><span class="k">${LABELS[id]}</span><span class="v" id="${v}-${id}">—</span></div>`
+  ).join('');
+}
+$('v1-src').textContent = 'monthly:\n' + DSL.monthly + '\n\ntotalPaid: ' + DSL.totalPaid + '\ninterest:  ' + DSL.interest;
+
+// the capability fence, in JS — the SAME six host functions the server's wasmi linker offers.
+// variants ① and ② both run their wasm through exactly this; nothing else is reachable.
+function fencedHost() {
+  const slots = new Float64Array(32), coll = new Float64Array(4096);
+  const w = i => ((i | 0) % 4096 + 4096) % 4096;
+  const imports = { env: {
+    sin: Math.sin, cos: Math.cos,
+    get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+    ld: i => coll[w(i)], sd: (i, v) => { coll[w(i)] = v; },
+  }};
+  return { slots, imports };
+}
+
+// run the three cells locally, sharing one host (monthly writes slot 3; total/interest read it)
+async function runLocal(bytesFor, P, R, Y) {
+  const { slots, imports } = fencedHost();
+  slots[0] = P; slots[1] = R; slots[2] = Y;
+  const out = {};
+  for (const id of IDS) {
+    const bytes = await bytesFor(id);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    out[id] = instance.exports.run(0);
+  }
+  return out;
+}
+
+function render(v, out) {
+  for (const id of IDS) {
+    const el = $(v + '-' + id);
+    if (!el) continue;
+    el.classList.remove('err');
+    el.textContent = fmt(out[id]);
+    el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 200);
+  }
+  return out;
+}
+function fail(v, e) {
+  for (const id of IDS) { const el = $(v + '-' + id); if (el) { el.textContent = 'err'; el.classList.add('err'); } }
+  console.error(v, e);
+}
+
+// variant ① — compile the DSL in the browser via /pkg (loaded dynamically so a missing
+// bundle only disables this panel, not the others)
+let compileUiCell = null;
+async function bootCompiler() {
+  try {
+    const mod = await import('/pkg/wasm_jit.js');
+    await mod.default();
+    compileUiCell = mod.compile_ui_cell_wasm;
+  } catch (e) {
+    $('v1-note').innerHTML = '（① 需要 <code>/pkg</code> 編譯器;此處未載入到,故 ① 欄留白——不影響 ②③。）';
+    console.warn('no /pkg compiler', e);
+  }
+}
+
+// variant ② — fetch the precompiled bytes once, then it's a pure local run forever after
+const wasmCache = {};
+async function fetchBytes(id) {
+  if (!wasmCache[id]) {
+    wasmCache[id] = new Uint8Array(await (await fetch('/api/wasm/' + id)).arrayBuffer());
+  }
+  return wasmCache[id];
+}
+
+let last = { v1: null, v2: null, v3: null };
+let timer = null;
+function schedule() { clearTimeout(timer); timer = setTimeout(compute, 120); }
+['p', 'r', 'y'].forEach(id => $(id).addEventListener('input', schedule));
+
+async function compute() {
+  const P = +$('p').value || 0, R = +$('r').value || 0, Y = +$('y').value || 0;
+
+  // ① DSL compiled in-browser
+  if (compileUiCell) {
+    try { last.v1 = render('v1', await runLocal(id => compileUiCell(DSL[id]), P, R, Y)); }
+    catch (e) { fail('v1', e); }
+  }
+
+  // ② client wasm
+  try {
+    last.v2 = render('v2', await runLocal(fetchBytes, P, R, Y));
+    const total = (await Promise.all(IDS.map(fetchBytes))).reduce((a, b) => a + b.length, 0);
+    $('v2-bytes').textContent = `${total} bytes（3 顆 .wasm）`;
+  } catch (e) { fail('v2', e); }
+
+  // ③ server
+  try {
+    $('v3-req').textContent = JSON.stringify({ p: P, r: R, y: Y });
+    const d = await (await fetch('/api/loan', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ p: P, r: R, y: Y })
+    })).json();
+    last.v3 = render('v3', { monthly: d.monthly, totalPaid: d.total, interest: d.interest });
+    $('v3-res').textContent = JSON.stringify({ monthly: d.monthly, total: d.total, interest: d.interest });
+  } catch (e) { fail('v3', e); }
+
+  // do the three deployments agree? (they must — one vocabulary)
+  const vals = ['v1', 'v2', 'v3'].map(v => last[v]).filter(Boolean);
+  const agree = vals.length >= 2 && vals.every(o => IDS.every(id => Math.abs(o[id] - vals[0][id]) < 0.01));
+  const s = $('same');
+  s.textContent = agree ? '三欄一致 ✓' : '（重算中…）';
+  s.classList.toggle('diff', !agree);
+}
+
+(async () => { await bootCompiler(); compute(); })();
+</script>
+</body>
+</html>

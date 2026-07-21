@@ -17,15 +17,16 @@
 //! for a socket, the filesystem, or `fetch` could not have compiled and could not link.
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{header, StatusCode},
-    response::{Html, IntoResponse},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use tower_http::services::ServeDir;
 use wasm_jit::{codegen, parser, UI_IMPORTS, UI_PARAMS};
 use wasmi::{Caller, Engine, Linker, Module, Store};
 
@@ -74,6 +75,7 @@ fn fenced_linker(engine: &Engine) -> Linker<Host> {
 struct Cell {
     id: String,
     module: Module,
+    bytes: Vec<u8>,
     bytes_len: usize,
     imports: Vec<String>,
 }
@@ -107,7 +109,8 @@ fn compile_cell(engine: &Engine, id: &str, src: &str) -> Cell {
         imports.push(format!("{m}.{name}"));
     }
 
-    Cell { id: id.to_string(), module, bytes_len: bytes.len(), imports }
+    let bytes_len = bytes.len();
+    Cell { id: id.to_string(), module, bytes, bytes_len, imports }
 }
 
 struct AppState {
@@ -117,6 +120,18 @@ struct AppState {
     interest: Cell,
     /// the fence, as a plain list, for the client to display honestly
     fence: Vec<String>,
+}
+
+impl AppState {
+    /// look up a compiled cell by the id the browser asks for (variant-2: ship the .wasm).
+    fn cell(&self, id: &str) -> Option<&Cell> {
+        match id {
+            "monthly" => Some(&self.monthly),
+            "totalPaid" => Some(&self.total),
+            "interest" => Some(&self.interest),
+            _ => None,
+        }
+    }
 }
 
 /// Run one cell inside a shared store: instantiate it into `store` (so it sees the same
@@ -194,6 +209,29 @@ async fn index() -> impl IntoResponse {
     Html(include_str!("../index.html"))
 }
 
+/// The three-deployments comparison — variant 1 (DSL in the page), variant 2 (this page
+/// fetches precompiled .wasm and runs it locally), variant 3 (server compute), side by side.
+async fn compare() -> impl IntoResponse {
+    Html(include_str!("../compare.html"))
+}
+
+/// GET /api/wasm/{id} — variant 2's source: hand the browser the precompiled cell bytes.
+/// This is the "ship the .wasm to the client" deployment. The bytes run in the browser and
+/// carry no DSL, but they are downloadable and (see examples/reveal.rs) disassemble.
+async fn api_wasm(State(st): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    match st.cell(&id) {
+        Some(c) => (
+            [
+                (header::CONTENT_TYPE, "application/wasm"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            c.bytes.clone(),
+        )
+            .into_response(),
+        None => (StatusCode::NOT_FOUND, "no such cell").into_response(),
+    }
+}
+
 /// GET /api/source — prove the point in one call: this is every byte the client can pull,
 /// and grepping it for the amortization formula finds nothing.
 async fn api_source() -> impl IntoResponse {
@@ -247,14 +285,22 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(index))
+        .route("/compare", get(compare))
         .route("/api/loan", post(api_loan))
+        .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
+        // variant 1 needs the in-browser compiler; serve the wasm-bindgen bundle from ./pkg
+        // (run this binary from the repo root so the relative path resolves).
+        .nest_service("/pkg", ServeDir::new("pkg"))
         .with_state(state);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8787);
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     println!("  listening on http://{addr}");
+    println!("    /            server-side compute (variant 3: formula hidden)");
+    println!("    /compare     all three deployments side by side");
+    println!("    /api/wasm/monthly   the precompiled .wasm bytes (variant 2: ship the binary)");
     axum::serve(listener, app).await.unwrap();
 }
 
