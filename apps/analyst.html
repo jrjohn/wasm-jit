@@ -595,6 +595,7 @@ function makeMorphChart(labels, values, geo, ordered) {
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t*t*(3-2*t); };
   const pos = [], barBox = [];
   function drawGlobe(cx0, cy0, R, alpha, small) {
+    const mx = Math.max(...values.map(Math.abs)) || 1;
     gOv.x = cx0; gOv.y = cy0; gOv.r = R;
     ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
     ctx.globalAlpha = alpha; ctx.fillStyle = '#0a1220'; ctx.fill();
@@ -617,7 +618,6 @@ function makeMorphChart(labels, values, geo, ordered) {
       }
       ctx.globalAlpha = alpha;
     }
-    const mx = Math.max(...values.map(Math.abs)) || 1;
     for (let i = 0; i < N; i++) {
       if (!geo || !geo[i]) continue;
       if (RING) {                                    // 緯度帶 → 畫成一圈
@@ -631,8 +631,9 @@ function makeMorphChart(labels, values, geo, ordered) {
           if (!started) { ctx.moveTo(gx, gy); started = true; } else ctx.lineTo(gx, gy);
           if (k === 18) pos[i] = { x: gx, y: gy, r: 6 };
         }
-        ctx.strokeStyle = dvg(values[i]); ctx.lineWidth = i === sel ? 3.5 : (i === hoverI ? 2.5 : 1.5);
-        ctx.globalAlpha = alpha * (i === sel ? 1 : 0.75); ctx.stroke();
+        const wt = 1 + 4 * Math.abs(values[i]) / mx;      // 粗細 = |值|
+        ctx.strokeStyle = COLOR[i]; ctx.lineWidth = i === sel ? wt + 2 : (i === hoverI ? wt + 1 : wt);
+        ctx.globalAlpha = alpha * (i === sel ? 1 : 0.8); ctx.stroke();
       } else {                                       // 國家 → 畫成點
         const vis = lay({ ...base(i), 5: 7, 19: 3 });
         if (vis < 0) { pos[i] = null; continue; }
@@ -640,7 +641,7 @@ function makeMorphChart(labels, values, geo, ordered) {
         const rad = (small ? 1.6 : 2.5) + (small ? 2.4 : 4) * Math.abs(values[i]) / mx;
         ctx.globalAlpha = alpha * (0.35 + 0.65 * Math.min(1, vis));
         ctx.beginPath(); ctx.arc(gx, gy, i === sel ? rad + 2 : rad, 0, 6.2831853);
-        ctx.fillStyle = dvg(values[i]); ctx.fill();
+        ctx.fillStyle = COLOR[i]; ctx.fill();
         pos[i] = { x: gx, y: gy, r: rad };
         if (i === sel || i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
       }
@@ -655,9 +656,15 @@ function makeMorphChart(labels, values, geo, ordered) {
         ctx.fillStyle = (i === sel || i === hoverI) ? '#fff' : '#c9d1d9';
         ctx.fillText(`${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`, pos[i].x + pos[i].r + 3, pos[i].y);
       }
-    } else if (sel >= 0 && pos[sel]) {
-      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-      ctx.fillStyle = '#fff'; ctx.fillText(labels[sel], cx0, cy0 - R - 4);
+    } else {
+      const show = hoverI >= 0 ? hoverI : sel;         // 指到誰就標誰,沒指就標選中的
+      if (show >= 0 && pos[show]) {
+        ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`${labels[show]} ${values[show] > 0 ? '+' : ''}${fmt(values[show])}`, cx0, cy0 - R - 5);
+        ctx.beginPath(); ctx.arc(pos[show].x, pos[show].y, pos[show].r + 3, 0, 6.2831853);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+      }
     }
   }
   function crisp(L, alpha) {
@@ -685,7 +692,8 @@ function makeMorphChart(labels, values, geo, ordered) {
         const cx = lay({ ...base(i), 5: 5, 19: 1 }), cy = lay({ ...base(i), 5: 6, 19: 1 }),
               R = lay({ ...base(i), 5: 7, 19: 1 }), a0 = lay({ ...base(i), 5: 8, 19: 1 }), a1 = lay({ ...base(i), 5: 9, 19: 1 });
         ctx.fillStyle = COLOR[i]; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
-        ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+        if (N <= 24) { ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke(); }
+        if (i === sel || i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
         const frac = norm[i] / sum;
         if (frac > 0.05) { const m = (a0 + a1) / 2, lr = R * 0.62;
           ctx.fillStyle = '#fff'; ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -693,17 +701,18 @@ function makeMorphChart(labels, values, geo, ordered) {
           ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
       }
     }
-    if (L === 0 && geo) {                            // 長條圖右上角的連動小地球
+    if ((L === 0 || L === 1) && geo) {               // 長條/圓餅右上角的連動小地球
       const R = Math.min(96, H * 0.26);
       drawGlobe(W - R - 18, R + 22, R, alpha * 0.95, true);
       ctx.globalAlpha = alpha; ctx.fillStyle = '#6e7681'; ctx.font = '9px ui-monospace, monospace';
-      ctx.textAlign = 'center'; ctx.fillText('點長條→球轉過去 · 拖球可轉 · 點球選區', W - R - 18, R * 2 + 34);
+      ctx.textAlign = 'center';
+      ctx.fillText('顏色同左圖 · 粗細=|值| · 點左圖→球轉過去 · 拖球可轉 · 指到球上看名稱', W - R - 18, R * 2 + 34);
     }
     if (L === 3) {                                   // 🌍 正射投影的地球:座標由 layout cell 算
       const gcx = 58 + (W - 84) / 2, gcy = 34 + (H - 108) / 2, GR = (H - 108) * 0.44 * zoom;
       drawGlobe(gcx, gcy, GR, alpha, false);
       ctx.fillStyle = '#8b949e'; ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'center';
-      ctx.fillText('紅=偏暖 · 藍=偏冷 · 拖曳可轉、滾輪縮放、點選連動長條', gcx, H - 14);
+      ctx.fillText('顏色 = 對應的那根長條 · 大小/粗細 = |數值| · 拖曳可轉、滾輪縮放、點選連動', gcx, H - 14);
     }
     if (L === 2) {
       const pts = []; for (let i = 0; i < N; i++) pts.push([lay({ ...base(i), 5: 5, 19: 2 }), lay({ ...base(i), 5: 6, 19: 2 })]);
@@ -715,6 +724,17 @@ function makeMorphChart(labels, values, geo, ordered) {
         ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.save(); ctx.translate(q[0], H - 56); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
         ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.fillText(labels[i], 0, 0); ctx.restore(); });
+    }
+    // 目前指到/選到的那一項:直接把名字標在圖上(瓣太細、長條太密時,這是唯一看得到的方式)
+    const hi = hoverI >= 0 ? hoverI : sel;
+    if (hi >= 0 && (L === 0 || L === 1)) {
+      ctx.globalAlpha = alpha; ctx.font = '600 12px ui-monospace, monospace';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      const txt = `${labels[hi]}  ${values[hi] > 0 ? '+' : ''}${fmt(values[hi])}`;
+      const w = ctx.measureText(txt).width;
+      ctx.fillStyle = '#0b0f14dd'; ctx.fillRect(56, 8, w + 16, 22);
+      ctx.fillStyle = COLOR[hi]; ctx.fillRect(56, 8, 3, 22);
+      ctx.fillStyle = '#e6edf3'; ctx.fillText(txt, 66, 13);
     }
     ctx.restore();
   }
@@ -754,7 +774,7 @@ function makeMorphChart(labels, values, geo, ordered) {
   // ── 地球互動:拖曳轉、滾輪縮放、游標指出國名 ──
   const globeArea = () => {                          // 目前這個視角裡,地球在哪
     if (toL === 3) { const R = (H - 108) * 0.44 * zoom; return { x: 58 + (W - 84) / 2, y: 34 + (H - 108) / 2, r: R }; }
-    if (toL === 0 && geo) { const R = Math.min(96, H * 0.26); return { x: W - R - 18, y: R + 22, r: R }; }
+    if ((toL === 0 || toL === 1) && geo) { const R = Math.min(96, H * 0.26); return { x: W - R - 18, y: R + 22, r: R }; }
     return null;
   };
   const xy = e => { const r = cv.getBoundingClientRect();
@@ -762,6 +782,19 @@ function makeMorphChart(labels, values, geo, ordered) {
   const pick = (mx, my, tol) => { let b = -1, bd = tol * tol;
     for (let i = 0; i < N; i++) { const p = pos[i]; if (!p) continue;
       const d = (p.x - mx) ** 2 + (p.y - my) ** 2; if (d < bd) { bd = d; b = i; } } return b; };
+  function pieAt(mx, my) {
+    const ccx = 58 + (W - 84) / 2, ccy = 34 + (H - 108) / 2, RR = (H - 108) * 0.46;
+    const dx = mx - ccx, dy = my - ccy; if (Math.hypot(dx, dy) > RR) return -1;
+    let ang = Math.atan2(dy, dx) + Math.PI / 2; while (ang < 0) ang += 6.2831853; while (ang > 6.2831853) ang -= 6.2831853;
+    const frac = ang / 6.2831853 * sum; let acc = 0;
+    for (let i = 0; i < N; i++) { acc += norm[i]; if (frac <= acc) return i; }
+    return -1;
+  }
+  function barAt(mx, my) {
+    for (let i = 0; i < N; i++) { const b = barBox[i];
+      if (b && mx >= b.x - 2 && mx <= b.x + b.w + 2 && my >= b.y - 12 && my <= b.y + b.h) return i; }
+    return -1;
+  }
   function select(i) {
     if (i < 0) return; sel = i; autoSpin = false;
     if (geo && geo[i] && geo[i].lat < 900) spinT = geo[i].lon * 0.0174533;   // 球轉到它
@@ -774,9 +807,8 @@ function makeMorphChart(labels, values, geo, ordered) {
       drag = { x: e.clientX, y: e.clientY }; autoSpin = false; spinT = null;
       cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing';
     } else if (toL === 0) {                                              // 在長條上 → 選它,球轉過去
-      for (let i = 0; i < N; i++) { const b = barBox[i];
-        if (b && mx >= b.x - 3 && mx <= b.x + b.w + 3 && my >= b.y - 12 && my <= b.y + b.h) { select(i); break; } }
-    }
+      select(barAt(mx, my));
+    } else if (toL === 1) { select(pieAt(mx, my)); }                     // 在圓餅上 → 選那一瓣
   });
   cv.addEventListener('pointerup', e => {
     if (drag && moved < 4) { const [mx, my] = xy(e); select(pick(mx, my, 14)); }   // 球上點一下 = 選取
@@ -788,7 +820,10 @@ function makeMorphChart(labels, values, geo, ordered) {
       spin -= (e.clientX - drag.x) * 0.006; tilt = Math.max(-1.3, Math.min(1.3, tilt + (e.clientY - drag.y) * 0.005));
       drag = { x: e.clientX, y: e.clientY }; return; }
     const g = globeArea();
-    hoverI = (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) ? pick(mx, my, 12) : -1;
+    if (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) { hoverI = pick(mx, my, 12); }
+    else if (toL === 1) { hoverI = pieAt(mx, my); }          // 圓餅:滑到哪一瓣就是哪一國
+    else if (toL === 0) { hoverI = barAt(mx, my); }          // 長條同理
+    else hoverI = -1;
     cv.style.cursor = hoverI >= 0 ? 'pointer' : 'crosshair';
   });
   cv.addEventListener('pointerleave', () => { hoverI = -1; });
