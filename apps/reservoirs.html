@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台灣水庫 · 長條⇄圓餅⇄折線 · 同一批粒子換隊形 · wasm-jit</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0;
+         background: #0d1117; color: #e6edf3; line-height: 1.5; padding: 1.6rem 1rem 3rem; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 1.06rem; font-weight: 600; margin: 0 0 .25rem; }
+  .lede { font-size: .8rem; color: #8b949e; margin: 0 0 1rem; max-width: 74ch; }
+  .lede b { color: #c9d1d9; font-weight: 600; }
+  .stage { border: 1px solid #30363d; border-radius: 14px; background: #0b0f14;
+           padding: .5rem; box-shadow: 0 10px 40px #0006; }
+  canvas { display: block; width: 100%; max-width: 960px; margin: 0 auto; border-radius: 10px; }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+              margin: .9rem 0 .3rem; }
+  button { font: inherit; font-size: .82rem; padding: .42rem .9rem; border-radius: 999px;
+           border: 1px solid #30363d; background: #161b22; color: #c9d1d9; cursor: pointer;
+           transition: border-color .15s, background .15s, color .15s; }
+  button:hover { border-color: #58a6ff66; color: #e6edf3; }
+  button.on { background: #1f6feb33; border-color: #58a6ff; color: #cae2ff; }
+  .spacer { flex: 1; }
+  .toggle { font-size: .76rem; color: #8b949e; display: inline-flex; gap: .4rem; align-items: center;
+            cursor: pointer; user-select: none; }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; margin-top: .9rem; font-size: .74rem; }
+  .lg { display: inline-flex; align-items: center; gap: .35rem; color: #b9c2cc; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .lg b { color: #e6edf3; font-variant-numeric: tabular-nums; }
+  .foot { margin-top: 1.2rem; font-size: .74rem; color: #8b949e; border-top: 1px solid #21262d;
+          padding-top: .9rem; }
+  .foot b { color: #c9d1d9; } code { color: #a5d6ff; }
+  .tag { font-size: .66rem; color: #d29922; border: 1px solid #d2992244; background: #d299221a;
+         border-radius: 999px; padding: .1rem .5rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>台灣水庫 · 長條 ⇄ 圓餅 ⇄ 折線 <span class="tag">示意資料</span></h1>
+  <p class="lede">同一批粒子換隊形。每座水庫是一叢粒子;按下版面,粒子<b>分解 → 飛到定位 → 組成目標</b>。
+    每顆粒子的目標座標,由一支<b>受能力圍籬的 wasm-jit cell</b> 算出(<code>get set sin cos</code>,碰不到 <code>fetch</code>/資料外傳)。
+    同一座水庫的顏色貫穿三種圖——那就是「同一批人」。</p>
+
+  <div class="stage">
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="controls">
+    <button id="b-bar" class="on">長條 Bar</button>
+    <button id="b-pie">圓餅 Pie</button>
+    <button id="b-line">折線 Line</button>
+    <div class="spacer"></div>
+    <label class="toggle"><input type="checkbox" id="auto"> 自動輪播</label>
+  </div>
+
+  <div class="legend" id="legend"></div>
+
+  <p class="foot" id="foot">
+    載入中…
+  </p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// ── 示意資料:台灣主要水庫 + 蓄水率(0..1)。名稱為真,數值為示意,非即時。 ──
+const RES = [
+  { name: '石門',   v: 0.62 }, { name: '新山',   v: 0.55 },
+  { name: '寶山',   v: 0.70 }, { name: '寶二',   v: 0.48 },
+  { name: '永和山', v: 0.58 }, { name: '鯉魚潭', v: 0.44 },
+  { name: '德基',   v: 0.81 }, { name: '霧社',   v: 0.66 },
+  { name: '日月潭', v: 0.88 }, { name: '曾文',   v: 0.40 },
+  { name: '烏山頭', v: 0.52 }, { name: '南化',   v: 0.63 },
+];
+const N = RES.length;
+const K = 40;                    // 每座水庫的粒子數
+const P = N * K;                 // 總粒子數
+const CW = 960, CH = 560;        // 畫布邏輯尺寸(cell 也用這個)
+const COLORS = RES.map((_, i) => `hsl(${Math.round(i / N * 360)}, 70%, 62%)`);
+
+// ── 版面 cell:讀 (layout, 水庫值, i, N, axis, cum, sum, W, H, pu, pRect, pWedge) → 座標 ──
+// 這支 cell 就是「圖表的自性」——資料到幾何的映射。bar 填矩形、pie 用 sin/cos 填扇形、line 收成點。
+const CELL = `
+let layout = get(0.0);
+let val = get(1.0);
+let i = get(2.0);
+let N = get(3.0);
+let axis = get(4.0);
+let cum = get(5.0);
+let sum = get(6.0);
+let W = get(7.0);
+let H = get(8.0);
+let pu = get(9.0);
+let pRect = get(10.0);
+let pWedge = get(11.0);
+
+let mL = 64.0;
+let mR = 34.0;
+let mT = 46.0;
+let mB = 70.0;
+let plotW = W - mL - mR;
+let plotH = H - mT - mB;
+let baseline = H - mB;
+let colStep = plotW / N;
+let cx = mL + (i + 0.5) * colStep;
+
+let out = 0.0;
+
+// 長條:粒子填滿該欄的矩形
+if layout < 0.5 {
+  let barW = colStep * 0.60;
+  if axis < 0.5 { out = cx - barW / 2.0 + pu * barW; }
+  if axis >= 0.5 { out = baseline - pRect * (val * plotH); }
+}
+
+// 圓餅:粒子填滿該值的扇形(角度 ∝ 值 / 總和)
+if layout >= 0.5 { if layout < 1.5 {
+  let ccx = mL + plotW / 2.0;
+  let ccy = mT + plotH / 2.0;
+  let R = plotH * 0.46;
+  let a0 = cum / sum * 6.2831853 - 1.5707963;
+  let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
+  let ang = a0 + pu * (a1 - a0);
+  let r = pWedge * R;
+  if axis < 0.5 { out = ccx + r * cos(ang); }
+  if axis >= 0.5 { out = ccy + r * sin(ang); }
+}}
+
+// 折線:粒子收成頂點的小點
+if layout >= 1.5 {
+  if axis < 0.5 { out = cx + (pu - 0.5) * 7.0; }
+  if axis >= 0.5 { out = baseline - val * plotH + (pRect - 0.5) * 7.0; }
+}
+
+out
+`;
+
+// ── 受圍籬的 JS 宿主:cell 只能碰這 6 個函式(跟 server 的 wasmi linker 同一套) ──
+const slots = new Float64Array(32);
+const imports = { env: {
+  sin: Math.sin, cos: Math.cos,
+  get: i => slots[(i | 0) & 31], set: (i, v) => { slots[(i | 0) & 31] = v; },
+  ld: () => 0, sd: () => {},
+}};
+
+// 固定的粒子抖動表:pu 均勻、pRect 均勻(矩形)、pWedge=√rand(扇形等面積)
+const jit = new Float32Array(P * 3);
+(() => {
+  // 穩定偽隨機(不用 Math.random,方便重現)
+  let s = 1234567;
+  const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  for (let p = 0; p < P; p++) {
+    jit[p * 3] = rnd();
+    jit[p * 3 + 1] = rnd();
+    jit[p * 3 + 2] = Math.sqrt(rnd());
+  }
+})();
+
+// 累積值(圓餅起始角用)
+const sumV = RES.reduce((a, r) => a + r.v, 0);
+const cum = []; { let c = 0; for (const r of RES) { cum.push(c); c += r.v; } }
+
+// 三種版面的每顆粒子目標座標,用 cell 算一次
+const TG = [null, null, null];       // TG[layout][p] = {x, y}
+const VERT = [];                     // 折線頂點(給導引線)
+let runFn = null, fuelG = null;
+
+function coord(layout, p, axis) {
+  const i = Math.floor(p / K);
+  slots[0] = layout; slots[1] = RES[i].v; slots[2] = i; slots[3] = N; slots[4] = axis;
+  slots[5] = cum[i]; slots[6] = sumV; slots[7] = CW; slots[8] = CH;
+  slots[9] = jit[p * 3]; slots[10] = jit[p * 3 + 1]; slots[11] = jit[p * 3 + 2];
+  if (fuelG) fuelG.value = 200000;   // 每次呼叫給滿油(fuel 表計量)
+  return runFn(0);
+}
+
+function computeTargets() {
+  for (let L = 0; L < 3; L++) {
+    const arr = new Array(P);
+    for (let p = 0; p < P; p++) arr[p] = { x: coord(L, p, 0), y: coord(L, p, 1) };
+    TG[L] = arr;
+  }
+  // 折線頂點(pu=pRect=0.5 的中心)
+  for (let i = 0; i < N; i++) {
+    slots[0] = 2; slots[1] = RES[i].v; slots[2] = i; slots[3] = N; slots[5] = cum[i];
+    slots[6] = sumV; slots[7] = CW; slots[8] = CH; slots[9] = 0.5; slots[10] = 0.5; slots[11] = 0.5;
+    slots[4] = 0; if (fuelG) fuelG.value = 200000; const vx = runFn(0);
+    slots[4] = 1; if (fuelG) fuelG.value = 200000; const vy = runFn(0);
+    VERT[i] = { x: vx, y: vy };
+  }
+}
+
+// ── 動畫:分解 → 飛 → 組合 ──
+const DUR = 1100, STAGGER = 380;
+const stag = new Float32Array(P), curve = new Float32Array(P);
+for (let p = 0; p < P; p++) {
+  const h = (Math.sin(p * 12.9898) * 43758.5453) % 1;
+  stag[p] = Math.abs(h) * STAGGER;
+  curve[p] = ((Math.sin(p * 78.233) * 43758.5453) % 1);   // -1..1 弧線幅度
+}
+const ease = t => t * t * (3 - 2 * t);
+
+let cur = 0, tgt = 0, tStart = -1e9;
+const cv = $('cv'), ctx = cv.getContext('2d');
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+cv.width = CW * DPR; cv.height = CH * DPR; ctx.scale(DPR, DPR);
+
+// 版面權重(給導引線淡入淡出)
+function layoutWeight(now) {
+  const gt = ease(Math.min(1, Math.max(0, (now - tStart - STAGGER * 0.5) / DUR)));
+  const w = [0, 0, 0]; w[cur] += 1 - gt; w[tgt] += gt;
+  if (cur === tgt) { w[cur] = 1; }
+  return w;
+}
+
+function drawGuides(w) {
+  const mL = 64, mB = 70, baseline = CH - mB;
+  // 長條基線
+  if (w[0] > 0.02) { ctx.globalAlpha = 0.25 * w[0]; ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(mL, baseline); ctx.lineTo(CW - 34, baseline); ctx.stroke(); }
+  // 圓餅環
+  if (w[1] > 0.02) { const ccx = mL + (CW - mL - 34) / 2, ccy = 46 + (CH - 46 - mB) / 2, R = (CH - 46 - mB) * 0.46;
+    ctx.globalAlpha = 0.22 * w[1]; ctx.strokeStyle = '#30363d';
+    ctx.beginPath(); ctx.arc(ccx, ccy, R, 0, 6.2831853); ctx.stroke(); }
+  // 折線連線
+  if (w[2] > 0.02) { ctx.globalAlpha = 0.7 * w[2]; ctx.strokeStyle = '#58a6ff88'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); VERT.forEach((v, i) => i ? ctx.lineTo(v.x, v.y) : ctx.moveTo(v.x, v.y)); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+
+function frame(now) {
+  ctx.clearRect(0, 0, CW, CH);
+  const w = layoutWeight(now);
+  drawGuides(w);
+
+  let allDone = true;
+  ctx.globalCompositeOperation = 'lighter';
+  for (let p = 0; p < P; p++) {
+    const lt = Math.min(1, Math.max(0, (now - tStart - stag[p]) / DUR));
+    if (lt < 1) allDone = false;
+    const e = ease(lt);
+    const A = TG[cur][p], B = TG[tgt][p];
+    const dx = B.x - A.x, dy = B.y - A.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const bulge = curve[p] * Math.min(90, len * 0.28) * Math.sin(Math.PI * e);
+    const x = A.x + dx * e + (-dy / len) * bulge;
+    const y = A.y + dy * e + (dx / len) * bulge;
+    const i = (p / K) | 0;
+    ctx.fillStyle = COLORS[i];
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2831853); ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+
+  if (allDone && cur !== tgt) cur = tgt;
+  requestAnimationFrame(frame);
+}
+
+function goTo(layout) {
+  if (layout === tgt && layout === cur) return;
+  cur = (cur === tgt) ? cur : tgt;   // 若上一段還沒到,從目標接續
+  tgt = layout; tStart = performance.now();
+  ['bar', 'pie', 'line'].forEach((n, i) => $('b-' + n).classList.toggle('on', i === layout));
+}
+
+$('b-bar').onclick = () => goTo(0);
+$('b-pie').onclick = () => goTo(1);
+$('b-line').onclick = () => goTo(2);
+
+let autoTimer = null;
+$('auto').onchange = e => {
+  clearInterval(autoTimer);
+  if (e.target.checked) autoTimer = setInterval(() => goTo((tgt + 1) % 3), 2600);
+};
+
+// legend
+$('legend').innerHTML = RES.map((r, i) =>
+  `<span class="lg"><span class="sw" style="background:${COLORS[i]}"></span>${r.name} <b>${Math.round(r.v * 100)}%</b></span>`
+).join('');
+
+(async () => {
+  try {
+    const mod = await import('/pkg/wasm_jit.js');
+    await mod.default();
+    const bytes = mod.compile_ui_cell_wasm(CELL);
+    const { instance } = await WebAssembly.instantiate(bytes, imports);
+    runFn = instance.exports.run;
+    fuelG = instance.exports.fuel || null;
+    computeTargets();
+    $('foot').innerHTML = `版面幾何由一支 <b>${bytes.length}-byte 受圍籬 cell</b> 算出(${P} 顆粒子 × 3 版面,` +
+      `編一次、算一次,之後純粹播放)。圍籬 = <code>sin cos get set ld sd</code>——cell 讀得到水庫值,` +
+      `卻無法把它送去任何地方(想 <code>fetch</code> 編譯期就死)。<b>換圖 = 換那支算位置的函數</b>,` +
+      `粒子始終是同一批,只是重新落位。`;
+    requestAnimationFrame(frame);
+  } catch (err) {
+    $('foot').innerHTML = `<span style="color:#f85149">需要 /pkg 內的 wasm-jit 編譯器,此處未載入到:${err}</span>`;
+    console.error(err);
+  }
+})();
+</script>
+</body>
+</html>

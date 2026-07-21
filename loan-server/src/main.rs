@@ -215,6 +215,12 @@ async fn compare() -> impl IntoResponse {
     Html(include_str!("../compare.html"))
 }
 
+/// A second cell demo: Taiwan reservoirs as particles that morph bar⇄pie⇄line, each
+/// particle's target computed by a fenced UI cell compiled in the browser via /pkg.
+async fn reservoirs() -> impl IntoResponse {
+    Html(include_str!("../../apps/reservoirs.html"))
+}
+
 /// GET /api/wasm/{id} — variant 2's source: hand the browser the precompiled cell bytes.
 /// This is the "ship the .wasm to the client" deployment. The bytes run in the browser and
 /// carry no DSL, but they are downloadable and (see examples/reveal.rs) disassemble.
@@ -286,6 +292,7 @@ async fn main() {
     let app = Router::new()
         .route("/", get(index))
         .route("/compare", get(compare))
+        .route("/reservoirs", get(reservoirs))
         .route("/api/loan", post(api_loan))
         .route("/api/wasm/{id}", get(api_wasm))
         .route("/api/source", get(api_source))
