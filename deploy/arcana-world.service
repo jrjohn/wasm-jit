@@ -9,7 +9,11 @@ Type=simple
 User=arcana
 Group=arcana
 WorkingDirectory=/opt/arcana/app
-ExecStart=/opt/arcana/app/gen-server
+ExecStart=/opt/arcana/app/world-engine
+# /opt/arcana/bin/docker is a wrapper that routes through the sudoers policy.
+Environment=PATH=/opt/arcana/bin:/usr/local/bin:/usr/bin:/bin
+Environment=GEN_IMAGE=agent-task-node:latest
+Environment=CLAUDE_HOME_DIR=/opt/arcana/claude-home
 # GOOGLE_CLIENT_ID and CLAUDE_CODE_OAUTH_TOKEN live here, mode 0600, root-owned.
 # Without GOOGLE_CLIENT_ID the server runs in local mode and every write door is
 # open — on a public address that would be the whole point, undone. Setting it is
@@ -20,19 +24,31 @@ RestartSec=3
 
 # The engine binds loopback only; nginx is the sole way in from outside.
 # Confinement here is the same idea as the cell's: hand it exactly what it needs.
-NoNewPrivileges=yes
+# NoNewPrivileges is off ON PURPOSE — it blocks setuid, and setuid is how sudo
+# works. The choice is between:
+#   (a) NoNewPrivileges + membership of the docker group — no escalation via
+#       setuid, but the docker socket is root-equivalent anyway, or
+#   (b) no NoNewPrivileges + a sudoers policy allowing exactly two docker
+#       subcommands against exactly one container.
+# (b) leaves far less actually reachable, so (b) it is. See
+# /etc/sudoers.d/arcana-docker.
+# These are dropped ON PURPOSE: PrivateDevices, ProtectKernel*, ProtectControlGroups,
+# RestrictSUIDSGID, RestrictNamespaces and LockPersonality each IMPLY
+# NoNewPrivileges=yes, which disables setuid — and setuid is how sudo works, so
+# they silently broke the docker policy while an explicit NoNewPrivileges=no sat
+# right there looking effective.
+#
+# They are also the directives that matter least here. They mostly protect against
+# a PRIVILEGED service; this one runs as an unprivileged account that lacks those
+# capabilities anyway. The docker socket, by contrast, IS root. Trading kernel
+# hardening this account could not have used for a policy that allows exactly two
+# docker subcommands is the right way round.
+NoNewPrivileges=no
 PrivateTmp=yes
-PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-RestrictSUIDSGID=yes
-RestrictNamespaces=yes
-LockPersonality=yes
 # Everything visitors create — worlds, the ālaya ledger, grown skins and widgets.
-ReadWritePaths=/opt/arcana/app/worlds /opt/arcana/app/ledger /opt/arcana/app/skins-grown /opt/arcana/app/widgets-grown
+ReadWritePaths=/opt/arcana/app/worlds /opt/arcana/app/ledger /opt/arcana/app/skins-grown /opt/arcana/app/widgets-grown /opt/arcana/app/metrics
 
 [Install]
 WantedBy=multi-user.target

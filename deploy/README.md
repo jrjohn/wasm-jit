@@ -64,3 +64,26 @@ decision for whoever owns the account, not a deployment detail.
 The static site is untouched by all of this: `/`, `/apps/*` and every existing
 path keep their previous behaviour, because the engine only ever claimed a
 prefix nothing else was using.
+
+## The trap that cost the most time here
+
+`sudo` inside the unit failed with *"effective uid is not 0"* while
+`NoNewPrivileges=no` sat in the file looking effective. It was not: each of
+
+    PrivateDevices · ProtectKernelTunables · ProtectKernelModules
+    ProtectControlGroups · RestrictSUIDSGID · RestrictNamespaces · LockPersonality
+
+**implies `NoNewPrivileges=yes`**, and `NoNewPrivileges` disables setuid — which
+is how sudo elevates. So the hardening silently disabled the docker policy, and
+the symptom surfaced three layers away as `generator container unavailable`.
+
+Check what is actually in force, not what the file says:
+
+    systemctl show arcana-world -p NoNewPrivileges --value
+
+Those directives were dropped rather than the sudo policy, because they are the
+ones that matter least here: they mostly protect against a *privileged* service,
+and this one runs as an unprivileged account that lacks those capabilities
+anyway. The docker socket, by contrast, really is root — so a policy allowing
+exactly two docker subcommands is worth more than kernel hardening this account
+could never have used.
