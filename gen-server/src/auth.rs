@@ -151,3 +151,144 @@ pub async fn user_from(headers: &axum::http::HeaderMap) -> Result<User, String> 
         .ok_or("請先用 Google 登入(缺 Authorization: Bearer <id_token>)")?;
     verify(raw.trim()).await
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Staying signed in.
+//
+// The first version kept the Google ID token in a JavaScript variable and leaned
+// on `auto_select` to sign a returning visitor back in silently. That reasoning
+// was sound about storage and wrong about reality: auto_select is conditional on
+// third-party cookie policy, a dismissal cool-down, and there being exactly one
+// Google session — so in practice people came back to a login button every time.
+//
+// The fix is not to park the Google token in localStorage, which really would
+// hand a live credential to anything that can run script on the page. It is for
+// the server to mint its OWN session after verifying Google once, and hand it
+// back as an HttpOnly cookie: unreadable from JavaScript, carried automatically
+// on every request, and expiring on a schedule we choose rather than Google's.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SESSION_DAYS: u64 = 30;
+const COOKIE: &str = "arcana_session";
+
+/// The key this server signs its own sessions with. Generated on first use and
+/// kept beside the app; rotating it (or losing it) signs everybody out, which is
+/// the correct blast radius for a file like this.
+/// The key this server signs its own sessions with.
+///
+/// Cached in memory as well as on disk, and that is not an optimisation — the
+/// first version read the file, and on failure generated a fresh key and
+/// swallowed the write error with `let _ =`. The service account could not
+/// write into its root-owned working directory, so EVERY call minted a
+/// different key: cookies were signed with one and verified against another,
+/// and no session could ever be valid. Nothing errored; sign-in simply never
+/// stuck.
+///
+/// So: one key per process at most, and a loud complaint if it cannot be
+/// persisted, because "sessions silently reset on restart" should not be
+/// something a reader has to discover from behaviour.
+fn session_key() -> Vec<u8> {
+    static CACHE: Mutex<Option<Vec<u8>>> = Mutex::new(None);
+    if let Ok(g) = CACHE.lock() {
+        if let Some(k) = g.as_ref() {
+            return k.clone();
+        }
+    }
+    let path = std::env::var("SESSION_KEY_FILE").unwrap_or_else(|_| ".session-key".into());
+    let key = match std::fs::read(&path) {
+        Ok(k) if k.len() >= 32 => k,
+        _ => {
+            let seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let mut k = Vec::new();
+            let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ (seed as u64);
+            for _ in 0..6 {
+                h = h.wrapping_mul(0x100_0000_01b3) ^ (h >> 29);
+                k.extend_from_slice(&h.to_le_bytes());
+            }
+            if let Err(e) = std::fs::write(&path, &k) {
+                eprintln!(
+                    "[auth] WARNING: cannot persist the session key to {path}: {e}\n\
+                     [auth] sessions will work but every restart signs everyone out. \
+                     Point SESSION_KEY_FILE at a directory this service can write."
+                );
+            }
+            k
+        }
+    };
+    if let Ok(mut g) = CACHE.lock() {
+        *g = Some(key.clone());
+    }
+    key
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Session {
+    sub: String,
+    email: String,
+    name: String,
+    exp: u64,
+}
+
+/// Exchange a verified Google identity for our own session cookie.
+pub fn issue_cookie(u: &User) -> String {
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        + SESSION_DAYS * 86_400;
+    let claims = Session {
+        sub: u.sub.clone(), email: u.email.clone(), name: u.name.clone(), exp,
+    };
+    let token = jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(&session_key()),
+    )
+    .unwrap_or_default();
+    // HttpOnly: script cannot read it, so an injected script cannot steal it.
+    // Secure + SameSite=Lax: not sent over plain http, not sent on cross-site
+    // POSTs — the shape that makes a cookie a session rather than a liability.
+    format!(
+        "{COOKIE}={token}; Path=/; Max-Age={}; HttpOnly; Secure; SameSite=Lax",
+        SESSION_DAYS * 86_400
+    )
+}
+
+pub fn clear_cookie() -> String {
+    format!("{COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax")
+}
+
+fn session_from_cookies(raw: &str) -> Option<User> {
+    let token = raw
+        .split(';')
+        .filter_map(|kv| kv.trim().split_once('='))
+        .find(|(k, _)| *k == COOKIE)
+        .map(|(_, v)| v)?;
+    let mut val = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256);
+    val.set_required_spec_claims::<&str>(&[]);   // our own claims, not an OIDC token
+    val.validate_aud = false;
+    let data = jsonwebtoken::decode::<Session>(
+        token,
+        &jsonwebtoken::DecodingKey::from_secret(&session_key()),
+        &val,
+    )
+    .ok()?;
+    Some(User { sub: data.claims.sub, email: data.claims.email, name: data.claims.name })
+}
+
+/// Identity for a request: our own session cookie first (the common case for a
+/// returning visitor), then a Google bearer token (the moment of signing in).
+pub async fn user_from_any(headers: &axum::http::HeaderMap) -> Result<User, String> {
+    if is_open() {
+        return Ok(User { sub: "local".into(), email: "local@localhost".into(), name: "本機".into() });
+    }
+    if let Some(raw) = headers.get(axum::http::header::COOKIE).and_then(|v| v.to_str().ok()) {
+        if let Some(u) = session_from_cookies(raw) {
+            return Ok(u);
+        }
+    }
+    user_from(headers).await
+}

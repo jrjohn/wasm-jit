@@ -1033,7 +1033,7 @@ struct MindReq {
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
 /// validated BY COMPILING it against the entity ABI before the browser sees it.
 async fn mind(headers: axum::http::HeaderMap, Json(req): Json<MindReq>) -> impl IntoResponse {
-    let who = match auth::user_from(&headers).await {
+    let who = match auth::user_from_any(&headers).await {
         Ok(u) => metrics::user_key(&u.sub),
         Err(e) => {
             metrics::refused("mind", "anon", &e);
@@ -1180,7 +1180,7 @@ async fn widget_list() -> impl IntoResponse {
 /// may enter, identity only decides who is answerable for it.
 async fn widget_save(headers: axum::http::HeaderMap, Json(req): Json<WidgetSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
-    let who = match auth::user_from(&headers).await {
+    let who = match auth::user_from_any(&headers).await {
         Ok(u) => metrics::user_key(&u.sub),
         Err(e) => {
             metrics::refused("widget_save", "anon", &e);
@@ -1376,7 +1376,7 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     use axum::http::header::CONTENT_TYPE;
     let plain = [(CONTENT_TYPE, "text/plain")];
 
-    let user = match auth::user_from(&headers).await {
+    let user = match auth::user_from_any(&headers).await {
         Ok(u) => u,
         Err(e) => {
             metrics::refused("world_save", "anon", &e);
@@ -1431,12 +1431,47 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
 /// The numbers, readable by anyone. Nothing here identifies a person, and a
 /// public counter is a small honesty: whoever is asked to trust the fence can
 /// also see how often it has been tried.
+
+#[derive(Deserialize)]
+struct SessionReq { credential: String }
+
+/// Trade a freshly-verified Google credential for our own session cookie.
+/// Called once, at the moment of signing in; after that the cookie carries.
+async fn session_start(Json(req): Json<SessionReq>) -> impl IntoResponse {
+    match auth::verify(&req.credential).await {
+        Ok(u) => {
+            metrics::record("signin", &metrics::user_key(&u.sub), serde_json::json!({}));
+            (
+                StatusCode::OK,
+                [(axum::http::header::SET_COOKIE, auth::issue_cookie(&u))],
+                Json(serde_json::json!({"ok": true, "name": u.name})),
+            )
+        }
+        Err(e) => {
+            metrics::refused("session", "anon", &e);
+            (
+                StatusCode::UNAUTHORIZED,
+                [(axum::http::header::SET_COOKIE, auth::clear_cookie())],
+                Json(serde_json::json!({"ok": false, "error": e})),
+            )
+        }
+    }
+}
+
+async fn session_end() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(axum::http::header::SET_COOKIE, auth::clear_cookie())],
+        Json(serde_json::json!({"ok": true})),
+    )
+}
+
 async fn api_stats() -> impl IntoResponse {
     Json(metrics::stats(30))
 }
 
 async fn whoami(headers: axum::http::HeaderMap) -> impl IntoResponse {
-    match auth::user_from(&headers).await {
+    match auth::user_from_any(&headers).await {
         Ok(u) => {
             metrics::record("visit", &metrics::user_key(&u.sub), serde_json::json!({"signed_in": true}));
             Json(serde_json::json!({
@@ -1494,7 +1529,7 @@ fn skin_type_ok(ty: &str) -> bool {
 /// may enter, identity only decides who is answerable for it.
 async fn skin_save(headers: axum::http::HeaderMap, Json(req): Json<SkinSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
-    let who = match auth::user_from(&headers).await {
+    let who = match auth::user_from_any(&headers).await {
         Ok(u) => metrics::user_key(&u.sub),
         Err(e) => {
             metrics::refused("skin_save", "anon", &e);
@@ -1575,7 +1610,7 @@ async fn inhabitant_behavior(axum::extract::Path(ty): axum::extract::Path<String
 /// the spend attributable and revocable. Say so plainly rather than implying that
 /// requiring a login is the same thing as limiting cost.
 async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> impl IntoResponse {
-    let who = match auth::user_from(&headers).await {
+    let who = match auth::user_from_any(&headers).await {
         Ok(u) => metrics::user_key(&u.sub),
         Err(e) => {
             metrics::refused("generate", "anon", &e);
@@ -1702,7 +1737,7 @@ async fn send_ev(
 /// schema materialize instead of waiting out the whole generation. A ledger hit
 /// still replays instantly (a single `done` event, no LLM).
 async fn generate_stream(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> axum::response::Response {
-    let who = match auth::user_from(&headers).await {
+    let who = match auth::user_from_any(&headers).await {
         Ok(u) => metrics::user_key(&u.sub),
         Err(e) => {
             metrics::refused("generate_stream", "anon", &e);
@@ -1825,6 +1860,7 @@ async fn main() {
         .route("/api/widgets/{ty}", get(widget_get))
         .route("/api/worlds", get(world_list).post(world_save))
         .route("/api/whoami", get(whoami))
+        .route("/api/session", post(session_start).delete(session_end))
         .route("/api/stats", get(api_stats))
         .route("/api/worlds/{name}", get(world_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))

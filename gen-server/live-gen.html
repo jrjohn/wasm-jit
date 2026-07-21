@@ -2039,7 +2039,12 @@ function sizeStage() {
   // heading, the lede and the stage's own status line sit above it, so a square
   // of 78vh plus ~130px of header ran off the bottom of the screen. Measure the
   // gap that is actually left instead of guessing a fraction of the viewport.
-  const top = box.getBoundingClientRect().top;
+  // Measure from the CANVAS, not from its container. The container starts above
+  // the status line ("world manifested: …"), so its top under-counts the gap by
+  // the height of that line — which is exactly the amount the square then
+  // overflowed by. The canvas's own top is also stable under this resize,
+  // because shrinking the canvas does not move what sits above it.
+  const top = cv.getBoundingClientRect().top;
   const room = Math.max(300, window.innerHeight - top - 28);
   const side = Math.round(Math.max(320, Math.min(box.clientWidth || 900, room)));
   if (cv.width === side && cv.height === side) return;
@@ -2048,8 +2053,25 @@ function sizeStage() {
   try { if (typeof renderField === 'function' && fieldWorld) renderField(); } catch (e) {}
 }
 sizeStage();
+// The first measurement happens before the layout has settled — the heading has
+// not wrapped and webfonts have not swapped, so the gap above the canvas is
+// smaller than it will be, and the square comes out too tall. The parent's
+// ResizeObserver does not catch it either: the header growing MOVES the canvas
+// without RESIZING its container. So re-measure once the page has actually
+// finished arranging itself.
 new ResizeObserver(sizeStage).observe(cv.parentElement);
 addEventListener('resize', sizeStage);
+addEventListener('load', sizeStage);
+requestAnimationFrame(sizeStage);
+setTimeout(sizeStage, 400);
+// The status line above the canvas ("world manifested: 3 cells…") only appears
+// once something manifests, and it PUSHES the canvas down without RESIZING its
+// container — so neither ResizeObserver fires and the square, measured against
+// the taller gap that existed before, now runs off the bottom. Watch the thing
+// that actually moves it.
+const head = document.querySelector('.stage-head');
+if (head) new MutationObserver(() => sizeStage()).observe(head, { childList: true, subtree: true, characterData: true });
+window.__sizeStage = sizeStage;   // reachable from a devtools/CDP self-test, which module scope otherwise hides
 let ctx = cv.getContext('2d'); // let: §25 briefly points the shared pen at an offscreen skin card
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
@@ -3815,6 +3837,12 @@ async function initAuth() {
     auto_select: true,                      // 回訪者自動登入,不用再按
     callback: async (resp) => {
       ID_TOKEN = resp.credential;           // 只存在記憶體
+      // Trade it once for a server session. The cookie is HttpOnly, so this page
+      // can never read it back — which is the point: from here on the browser
+      // carries the identity and a returning visitor is simply already signed in.
+      try { await fetch('api/session', { method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ credential: resp.credential }) }); } catch (e) {}
       await refreshWho();
       $('gbtn').innerHTML = '';
       say('ai', `👋 ${ME?.name || ''} — 你現在可以留下自己的世界了`);
