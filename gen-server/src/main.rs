@@ -1358,6 +1358,28 @@ async fn feed_test() -> impl IntoResponse {
     Json(json!({ "n": 42, "s": "hello from the world", "nested": { "deep": 7 } }))
 }
 
+
+/// A save bundle is not a generation result, and the fence check was written for
+/// the latter. They hold the same content under different names —
+/// `{surface, schema|world|seed}` versus `{name, surface, payload, chat}` — so a
+/// bundle handed straight to `validate` fails with the validator insisting the
+/// surface "lacks" a key that bundle never spells that way. Every save of a
+/// draw3d scene died on exactly that, and nothing caught it because no test ever
+/// took a saved world back through the door it came out of.
+fn bundle_for_fence(body: &Value) -> Result<Value, String> {
+    let key = match body.get("surface").and_then(|s| s.as_str()) {
+        Some("ui") => "schema",
+        Some("field") => "world",
+        Some("draw") | Some("draw3d") | Some("shader") | Some("sound") => "seed",
+        Some(other) => return Err(format!("不認得的 surface:{other}")),
+        None => return Err("缺 surface".into()),
+    };
+    Ok(serde_json::json!({
+        "surface": body["surface"],
+        key: body.get("payload").cloned().unwrap_or(Value::Null),
+    }))
+}
+
 /// Save a world.
 ///
 /// Two doors were open here and both are now shut.
@@ -1390,7 +1412,11 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     }
 
     // The fence, before the filesystem.
-    if let Err(e) = validate(&body) {
+    let for_check = match bundle_for_fence(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, plain, e),
+    };
+    if let Err(e) = validate(&for_check) {
         // The fence turning something away is the invariant doing its work —
         // recorded as evidence, not swallowed as an error string.
         metrics::refused("world_save", &metrics::user_key(&user.sub), &e);
@@ -1887,6 +1913,37 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every surface must survive the round trip it actually takes: generated,
+    /// saved as a bundle, then handed back to the fence when someone saves it.
+    /// The draw3d row is the one that was broken in production — a scene that
+    /// compiled, manifested and ran could not be kept.
+    #[test]
+    fn a_saved_world_passes_the_same_fence_it_came_through() {
+        for (surface, key) in [
+            ("ui", "schema"), ("field", "world"), ("draw", "seed"),
+            ("draw3d", "seed"), ("shader", "seed"), ("sound", "seed"),
+        ] {
+            let payload = json!({"marker": surface});
+            let bundle = json!({"name": "w", "surface": surface, "payload": payload, "chat": []});
+            let reshaped = bundle_for_fence(&bundle)
+                .unwrap_or_else(|e| panic!("surface {surface} rejected outright: {e}"));
+            assert_eq!(reshaped["surface"], surface);
+            assert_eq!(
+                reshaped[key], json!({"marker": surface}),
+                "surface {surface}: the payload must arrive under \"{key}\", which is the \
+                 name validate() reads it by — this is the mismatch that made every \
+                 draw3d save fail"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_surface_is_refused_rather_than_waved_through() {
+        let bundle = json!({"name": "w", "surface": "wormhole", "payload": {}});
+        assert!(bundle_for_fence(&bundle).is_err());
+        assert!(bundle_for_fence(&json!({"name": "w", "payload": {}})).is_err());
+    }
     use super::*;
 
     #[test]
