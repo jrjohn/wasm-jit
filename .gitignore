@@ -5,3 +5,6 @@ worlds/
 gen-server/ledger/
 /ledger/
 .DS_Store
+
+# ① 訪客存下來的作品 — 使用者內容,不進版控
+apps/saved/

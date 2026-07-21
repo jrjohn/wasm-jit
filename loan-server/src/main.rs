@@ -563,6 +563,204 @@ async fn api_words() -> impl IntoResponse {
     Json(load_words())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ① An app that outlives the tab.  Until now every generated app died with the
+//    localStorage that held it: you could grow one by talking, but you could not
+//    keep it or hand it to anyone.  A creativity engine with no exit is an engine
+//    only its author ever starts.
+//
+//    What makes saving safe is the same thing that makes generating safe: every
+//    cell is compile-checked against the fence BEFORE it is written to disk, so a
+//    saved app is a provably fenced app.  Nothing is executed to save it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SAVED_DIR: &str = "apps/saved";
+
+/// Short, URL-safe, non-sequential id. Derived from the clock plus a content hash so
+/// two saves in the same nanosecond still differ, and ids are not guessable by counting.
+fn mint_id(content: &str) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in content.bytes().chain(nanos.to_le_bytes()) {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    let alphabet = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut id = String::new();
+    for _ in 0..8 {
+        id.push(alphabet[(h % 36) as usize] as char);
+        h /= 36;
+    }
+    id
+}
+
+/// Ids come back from URLs, so they are hostile input until proven otherwise —
+/// this is what keeps `{id}` from walking out of SAVED_DIR.
+fn valid_id(id: &str) -> bool {
+    id.len() >= 4 && id.len() <= 16 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+}
+
+#[derive(Deserialize)]
+struct SaveReq {
+    schema: serde_json::Value,
+    #[serde(default)]
+    title: String,
+}
+
+async fn api_save(Json(req): Json<SaveReq>) -> impl IntoResponse {
+    // Re-verify the fence at the door. The client cannot save what it could not compile,
+    // and we do not take its word for it — an app arriving here from anywhere is checked.
+    let mut errs: Vec<String> = Vec::new();
+    match req.schema["cells"].as_array() {
+        Some(cells) => {
+            for c in cells {
+                let id = c["id"].as_str().unwrap_or("?");
+                if let Err(e) = try_compile_ui(c["script"].as_str().unwrap_or("")) {
+                    errs.push(format!("cell '{id}': {e}"));
+                }
+            }
+        }
+        None => errs.push("缺 cells 陣列".into()),
+    }
+    if !errs.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"ok": false, "error": format!("圍籬檢查未過,未存檔:{}", errs.join("; "))})),
+        )
+            .into_response();
+    }
+
+    let title = {
+        let t = req.title.trim();
+        let t = if t.is_empty() { req.schema["title"].as_str().unwrap_or("未命名") } else { t };
+        t.chars().take(80).collect::<String>()
+    };
+    let body = req.schema.to_string();
+    let id = mint_id(&body);
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    if let Err(e) = std::fs::create_dir_all(SAVED_DIR) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e.to_string()}))).into_response();
+    }
+    let rec = json!({"id": id, "title": title, "created": created, "schema": req.schema});
+    if let Err(e) = std::fs::write(format!("{SAVED_DIR}/{id}.json"), rec.to_string()) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e.to_string()}))).into_response();
+    }
+    Json(json!({"ok": true, "id": id, "url": format!("/a/{id}"), "title": title})).into_response()
+}
+
+async fn api_app(Path(id): Path<String>) -> impl IntoResponse {
+    if !valid_id(&id) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "id 格式不合"}))).into_response();
+    }
+    match std::fs::read_to_string(format!("{SAVED_DIR}/{id}.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    {
+        Some(v) => Json(v).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!({"error": "找不到這個作品"}))).into_response(),
+    }
+}
+
+/// Everything anyone kept — the point of an exit is that other people can walk in.
+async fn api_gallery() -> impl IntoResponse {
+    let mut items: Vec<serde_json::Value> = std::fs::read_dir(SAVED_DIR)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let v: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(e.path()).ok()?).ok()?;
+            Some(json!({
+                "id": v["id"], "title": v["title"], "created": v["created"],
+                "nodes": v["schema"]["tree"]["children"].as_array().map(|a| a.len()).unwrap_or(0),
+            }))
+        })
+        .collect();
+    items.sort_by_key(|v| std::cmp::Reverse(v["created"].as_u64().unwrap_or(0)));
+    items.truncate(48);
+    Json(items)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ② A word anyone may contribute — and NOBODY has to review.
+//
+//    This is the one thing this architecture can do that a code-generating rival
+//    structurally cannot.  Their community components are arbitrary code, so every
+//    contribution needs a human to read it before it can be offered to anyone else.
+//    A word here is built only from fenced parts, so by §21 attenuation the word is
+//    fenced too: a contributor cannot smuggle in reach that its parts never had.
+//
+//    So the compile gate IS the review.  The vocabulary can grow at the speed of a
+//    crowd while the reach stays exactly where it was.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct WordReq {
+    word: serde_json::Value,
+    #[serde(default)]
+    by: String,
+}
+
+async fn api_word_add(Json(req): Json<WordReq>) -> impl IntoResponse {
+    let d = req.word;
+    let name = d["name"].as_str().unwrap_or("").trim().to_lowercase();
+    let name_ok = (2..=32).contains(&name.len())
+        && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    if !name_ok {
+        return (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": "詞名只能用小寫英數與底線,2–32 字"}))).into_response();
+    }
+    if !d["tree"].is_object() {
+        return (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": "缺 tree(這個詞畫出來長什麼樣)"}))).into_response();
+    }
+
+    let mut lib = load_words();
+    if lib.iter().any(|w| w["name"].as_str() == Some(name.as_str())) {
+        return (StatusCode::CONFLICT, Json(json!({"ok": false, "error": format!("詞庫裡已經有 '{name}' 了")}))).into_response();
+    }
+
+    // The gate. Every cell must compile inside the fence with its defaults baked in —
+    // exactly the check a model-defined word goes through, applied to a stranger's word.
+    let params = d["params"].as_array().cloned().unwrap_or_default();
+    let mut errs: Vec<String> = Vec::new();
+    if let Some(cs) = d["cells"].as_array() {
+        for c in cs {
+            let cid = c["id"].as_str().unwrap_or("?");
+            let baked = bake_defaults(c["script"].as_str().unwrap_or(""), &params);
+            if let Err(e) = try_compile_ui(&baked) {
+                errs.push(format!("cell '{cid}': {e}"));
+            }
+        }
+    }
+    if !errs.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({"ok": false, "error": format!("這個詞沒過圍籬,沒有收進詞庫:{}", errs.join("; ")),
+                        "fence": UI_IMPORTS.iter().map(|h| h.name).collect::<Vec<_>>()})),
+        )
+            .into_response();
+    }
+
+    let mut w = d.clone();
+    w["name"] = json!(name);
+    w["by"] = json!(req.by.trim().chars().take(40).collect::<String>());
+    w["added"] = json!(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|x| x.as_secs())
+        .unwrap_or(0));
+    lib.push(w);
+    if let Err(e) = save_words(&lib) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"ok": false, "error": e}))).into_response();
+    }
+    Json(json!({"ok": true, "name": name, "count": lib.len(), "words": lib})).into_response()
+}
+
 async fn call_claude(prompt: &str) -> Result<String, String> {
     let bin = std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "/opt/homebrew/bin/claude".into());
     let fut = tokio::process::Command::new(&bin)
@@ -751,8 +949,16 @@ async fn main() {
         .route("/reservoirs-solid", get(reservoirs_solid))
         .route("/genapp", get(genapp))
         .route("/analyst", get(analyst))
+        // ① a saved app has a URL of its own — the same page, told which app to load
+        .route("/a/{id}", get(genapp))
+        .route("/gallery", get(genapp))
+        .route("/api/save", post(api_save))
+        .route("/api/app/{id}", get(api_app))
+        .route("/api/gallery", get(api_gallery))
         .route("/api/gen", post(api_gen))
         .route("/api/words", get(api_words))
+        // ② anyone may add a word; the compile gate is the only reviewer there is
+        .route("/api/words", post(api_word_add))
         .route("/api/seed", get(api_seed))
         .route("/api/data", get(api_data_list))
         .route("/api/data/{id}", get(api_data))
