@@ -129,6 +129,7 @@ const fmt = n => (Math.round(n * 100) / 100).toLocaleString('en-US', { minimumFr
 function status(m, c) { const s = $('status'); s.textContent = m; s.className = 'status' + (c ? ' ' + c : ''); }
 
 let compileUiCell = null;
+let COAST = [];                       // 真實海岸線(Natural Earth 110m,簡化到 ~900 點)
 let COLS = [], NROWS = 0, NCOLS = 0, VALUES = null, FILEINFO = { name: '', bytes: 0 };
 
 // ── CSV(全在本機)──────────────────────────────────────────────
@@ -598,6 +599,24 @@ function makeMorphChart(labels, values, geo, ordered) {
     ctx.beginPath(); ctx.arc(cx0, cy0, R, 0, 6.2831853);
     ctx.globalAlpha = alpha; ctx.fillStyle = '#0a1220'; ctx.fill();
     ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
+    // ── 真實陸地輪廓:每個點都走同一支 layout cell 的正射投影 ──
+    if (COAST.length) {
+      ctx.strokeStyle = small ? '#2f6b8f' : '#397ea6';
+      ctx.lineWidth = small ? 0.7 : 1;
+      ctx.globalAlpha = alpha * (small ? 0.75 : 0.9);
+      const G = { 7: 1, 8: W, 9: H, 19: 3, 20: spin, 21: zoom, 22: tilt, 23: cx0, 24: cy0, 25: R };
+      for (const ring of COAST) {
+        ctx.beginPath(); let on = false;
+        for (let k = 0; k < ring.length; k++) {
+          const a = { ...G, 18: ring[k][0], 17: ring[k][1] };
+          if (lay({ ...a, 5: 7 }) < 0) { on = false; continue; }   // 背面不畫
+          const px = lay({ ...a, 5: 5 }), py = lay({ ...a, 5: 6 });
+          if (!on) { ctx.moveTo(px, py); on = true; } else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      ctx.globalAlpha = alpha;
+    }
     const mx = Math.max(...values.map(Math.abs)) || 1;
     for (let i = 0; i < N; i++) {
       if (!geo || !geo[i]) continue;
@@ -960,6 +979,7 @@ const TEMP_EX = [
     const mod = await import('/pkg/wasm_jit.js'); await mod.default();
     compileUiCell = mod.compile_ui_cell_wasm;
     await initMorph();
+    try { COAST = await (await fetch('/assets/coast.json')).json(); } catch (e) { console.warn('coast', e); }
     const booted = await bootTemp();          // 一進來就有一張真資料的圖
     if (VALUES) $('go').disabled = false;
     if (!booted) status('編譯器就緒 —— 拖一份 CSV 進來');
