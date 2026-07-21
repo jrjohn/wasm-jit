@@ -616,6 +616,9 @@ function makeMorphChart(labels, values, geo, ordered) {
   { let s = 987; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let p = 0; p < P; p++) { jit[p*4]=rnd(); jit[p*4+1]=rnd(); jit[p*4+2]=Math.sqrt(rnd()); jit[p*4+3]=rnd()*2-1; } }
   let spin = 0, zoom = 1, tilt = 0.30, autoSpin = true, hoverI = -1, sel = -1, spinT = null;
+  let lastAct = 0, lastCycle = 0, idling = false;      // 閒置 → 自轉 + 自動輪播視角
+  const IDLE_MS = 6000, CYCLE_MS = 5200;
+  const touch = () => { lastAct = performance.now(); idling = false; autoSpin = false; };
   const base = i => ({ 2: norm[i], 3: i, 4: N, 6: cum[i], 7: sum, 8: W, 9: H,
                        17: geo ? geo[i].lat : 0, 18: geo ? geo[i].lon : 0, 20: spin, 21: zoom, 22: tilt,
                        23: gOv.x, 24: gOv.y, 25: gOv.r });
@@ -732,11 +735,19 @@ function makeMorphChart(labels, values, geo, ordered) {
     ctx.globalAlpha = alpha;
     if (!small) {
       ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      const rank = values.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, 10).map(p => p[1]);
+      const top = RING ? 5 : 10;
+      const rank = values.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, top).map(p => p[1]);
+      const used = [];
       for (const i of new Set([...rank, hoverI, sel])) {
         if (i < 0 || !pos[i]) continue;
+        let ly = pos[i].y;
+        while (used.some(u => Math.abs(u - ly) < 13)) ly += 13;    // 疊到就往下讓
+        used.push(ly);
+        const txt = `${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`;
+        const tw = ctx.measureText(txt).width;
+        ctx.fillStyle = '#0b0f14bb'; ctx.fillRect(pos[i].x + pos[i].r + 1, ly - 6, tw + 6, 13);
         ctx.fillStyle = (i === sel || i === hoverI) ? '#fff' : '#c9d1d9';
-        ctx.fillText(`${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`, pos[i].x + pos[i].r + 3, pos[i].y);
+        ctx.fillText(txt, pos[i].x + pos[i].r + 4, ly);
       }
     } else {
       const show = hoverI >= 0 ? hoverI : sel;         // 指到誰就標誰,沒指就標選中的
@@ -808,6 +819,12 @@ function makeMorphChart(labels, values, geo, ordered) {
         ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.fillText(labels[i], 0, 0); ctx.restore(); });
     }
     // 目前指到/選到的那一項:直接把名字標在圖上(瓣太細、長條太密時,這是唯一看得到的方式)
+    if (idling) {
+      ctx.globalAlpha = alpha * 0.55; ctx.fillStyle = '#7ee787';
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+      ctx.fillText('◉ 自動展示中 — 碰一下就交還給你', W - 12, 10);
+      ctx.globalAlpha = alpha;
+    }
     const hi = hoverI >= 0 ? hoverI : sel;
     if (hi >= 0 && (L === 0 || L === 1)) {
       ctx.globalAlpha = alpha; ctx.font = '600 12px ui-monospace, monospace';
@@ -823,6 +840,15 @@ function makeMorphChart(labels, values, geo, ordered) {
   function frame(now) {
     if (!box.isConnected) return;
     ctx.clearRect(0, 0, W, H);
+    if (lastAct && now - lastAct > IDLE_MS) {         // 沒人碰 → 回到自動展示
+      if (!idling) { idling = true; lastCycle = now; sel = -1; hoverI = -1; }
+      autoSpin = true;
+      if (!animating && now - lastCycle > CYCLE_MS) {
+        lastCycle = now;
+        const cur = VIEWS.findIndex(v => v[1] === toL);
+        goView((cur + 1) % VIEWS.length);              // 三個視角自動輪播
+      }
+    }
     if (spinT !== null) {                             // 點了長條 → 球轉過去
       let d = spinT - spin; while (d > Math.PI) d -= 6.2831853; while (d < -Math.PI) d += 6.2831853;
       spin += d * 0.14; if (Math.abs(d) < 0.01) spinT = null;
@@ -846,12 +872,13 @@ function makeMorphChart(labels, values, geo, ordered) {
     }
     requestAnimationFrame(frame);
   }
-  btns.forEach((b, k) => b.onclick = () => {
+  function goView(k) {
     const L = VIEWS[k][1];
     if (L === toL && !animating) return;
     fromL = toL; toL = L; prog = 0; tStart = performance.now(); animating = true;
     btns.forEach((x, j) => x.style.borderColor = j === k ? '#58a6ff' : '#30363d');
-  });
+  }
+  btns.forEach((b, k) => b.onclick = () => { touch(); goView(k); });
   btns[0].style.borderColor = '#58a6ff';
   // ── 地球互動:拖曳轉、滾輪縮放、游標指出國名 ──
   const globeArea = () => {                          // 目前這個視角裡,地球在哪
@@ -884,6 +911,7 @@ function makeMorphChart(labels, values, geo, ordered) {
   let drag = null, moved = 0;
   cv.style.cursor = 'crosshair';
   cv.addEventListener('pointerdown', e => {
+    touch();
     const [mx, my] = xy(e), g = globeArea(); moved = 0;
     if (g && (mx - g.x) ** 2 + (my - g.y) ** 2 < (g.r + 10) ** 2) {      // 在球上 → 準備拖
       drag = { x: e.clientX, y: e.clientY }; autoSpin = false; spinT = null;
@@ -897,6 +925,7 @@ function makeMorphChart(labels, values, geo, ordered) {
     drag = null; cv.style.cursor = 'crosshair';
   });
   cv.addEventListener('pointermove', e => {
+    touch();
     const [mx, my] = xy(e);
     if (drag) { moved += Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y);
       spin -= (e.clientX - drag.x) * 0.006; tilt = Math.max(-1.3, Math.min(1.3, tilt + (e.clientY - drag.y) * 0.005));
@@ -908,11 +937,12 @@ function makeMorphChart(labels, values, geo, ordered) {
     else hoverI = -1;
     cv.style.cursor = hoverI >= 0 ? 'pointer' : 'crosshair';
   });
-  cv.addEventListener('pointerleave', () => { hoverI = -1; });
-  cv.addEventListener('wheel', e => { const g = globeArea(); if (!g) return;
+  cv.addEventListener('pointerleave', () => { hoverI = -1; lastAct = performance.now(); });
+  cv.addEventListener('wheel', e => { touch(); const g = globeArea(); if (!g) return;
     const [mx, my] = xy(e); if ((mx - g.x) ** 2 + (my - g.y) ** 2 > (g.r + 20) ** 2) return;
     e.preventDefault(); zoom = Math.max(0.6, Math.min(3.2, zoom * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
 
+  lastAct = performance.now();
   requestAnimationFrame(frame);
   return box;
 }
