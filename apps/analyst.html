@@ -70,6 +70,11 @@
     cell 的 import table 裡<b>沒有網路</b>——想把資料傳出去,<b>編譯期就死</b>。
     所以你<b>不需要信任</b>它寫的程式。</p>
 
+  <div class="panel" style="margin-bottom:1rem">
+    <p class="phead">▸ 分析結果(活的,在你機器上算 · 可切換三種視角)</p>
+    <div id="stage"><span style="color:#6e7681;font-size:.8rem">載入中…</span></div>
+  </div>
+
   <div class="panel">
     <div class="drop" id="drop">
       拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦
@@ -80,38 +85,33 @@
       <input type="file" id="file" accept=".csv,text/csv" style="display:none">
     </div>
     <div id="loaded" style="display:none">
-      <div class="cols" style="margin-top:.9rem">
-        <div>
-          <p class="phead">▸ 你的資料(只在本機,僅顯示前 5 列)</p>
-          <div style="overflow:auto;max-height:210px"><table class="prev" id="prev"></table></div>
-          <label class="toggle"><input type="checkbox" id="anon"> 連欄位名都隱藏(送出 c0/c1/c2…)</label>
-        </div>
-        <div>
-          <p class="phead">▸ 送出去的,只有這些</p>
-          <div class="leak"><h4>↗ 離開你電腦的全部內容</h4><pre id="leak"></pre></div>
-          <div class="stay"><h4>⛔ 留在本機、一個 byte 都沒送</h4><div id="stay"></div></div>
-        </div>
-      </div>
       <div class="bar">
-        <textarea id="intent" placeholder="想問什麼?例如:各部門平均薪資,長條圖"></textarea>
-        <button id="go" disabled>分析</button>
+        <textarea id="intent" placeholder="想怎麼改?例如:改成由高到低排名 / 只看北極區歷年變化 / 改成圓餅"></textarea>
+        <button id="go" disabled>送出</button>
       </div>
       <div class="chips" id="chips"></div>
       <div class="status" id="status">載入編譯器…</div>
+      <details style="margin-top:.9rem">
+        <summary style="cursor:pointer;font-size:.74rem;color:#6e7681">▸ 你的資料 &amp; 送出去的到底是什麼(點開看證據)</summary>
+        <div class="cols" style="margin-top:.6rem">
+          <div>
+            <p class="phead">▸ 你的資料(只在本機,前 5 列)</p>
+            <div style="overflow:auto;max-height:210px"><table class="prev" id="prev"></table></div>
+            <label class="toggle"><input type="checkbox" id="anon"> 連欄位名都隱藏(送出 c0/c1/c2…)</label>
+          </div>
+          <div>
+            <div class="leak"><h4>↗ 離開你電腦的全部內容</h4><pre id="leak"></pre></div>
+            <div class="stay"><h4>⛔ 留在本機、一個 byte 都沒送</h4><div id="stay"></div></div>
+          </div>
+        </div>
+      </details>
     </div>
   </div>
 
-  <div class="cols">
-    <div class="panel">
-      <p class="phead">▸ 分析結果(活的,在你機器上算)</p>
-      <div id="stage"><span style="color:#6e7681;font-size:.8rem">還沒分析</span></div>
-    </div>
-    <div class="panel">
-      <p class="phead">▸ 證據:AI 寫的 CELL(受圍籬)</p>
-      <div id="evidence"><span style="color:#6e7681;font-size:.8rem">分析後這裡會顯示每支 cell 的原始碼 + import table</span></div>
-    </div>
+  <div class="panel" style="margin-top:1rem">
+    <p class="phead">▸ 證據:AI 寫的 CELL(受圍籬)</p>
+    <div id="evidence"><span style="color:#6e7681;font-size:.8rem">分析後這裡會顯示每支 cell 的原始碼 + import table</span></div>
   </div>
-</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -231,8 +231,10 @@ async function manifestUi(schema) {
   for (const c of (schema.cells || [])) run(c.id, 0);
   refresh();
   for (const m of morphs) {                       // 值由受圍籬 cell 逐組算出,再交給變形引擎
-    const vals = m.cats.map((_, i) => { run(m.bind, i); return outputs[m.bind] || 0; });
-    m.ph.appendChild(makeMorphChart(m.cats, vals));
+    let pairs = m.cats.map((nm, i) => { run(m.bind, i); return { label: nm, value: outputs[m.bind] || 0 }; });
+    if (m.sort === 'desc') pairs.sort((a, b) => b.value - a.value);   // ← 只有 host 知道數值,排名得在這裡做
+    if (m.sort === 'asc') pairs.sort((a, b) => a.value - b.value);
+    m.ph.appendChild(makeMorphChart(pairs.map(p => p.label), pairs.map(p => p.value)));
   }
   return root;
 }
@@ -270,7 +272,7 @@ function build(node, binds, charts, morphs) {
       const col = +node.groups.col || 0, bind = node.groups.bind;
       const cats = (COLS[col] && COLS[col].cats) || [];
       const ph = document.createElement('div');
-      morphs.push({ ph, cats, bind });
+      morphs.push({ ph, cats, bind, sort: node.groups.sort || node.sort || 'none' });
       return ph;
     }
     {
@@ -349,10 +351,10 @@ let nextX = get(15.0);
 let nextY = get(16.0);
 let shapeL = get(19.0);
 
-let mL = 54.0;
-let mR = 24.0;
-let mT = 30.0;
-let mB = 62.0;
+let mL = 58.0;
+let mR = 26.0;
+let mT = 34.0;
+let mB = 74.0;
 let plotW = W - mL - mR;
 let plotH = H - mT - mB;
 let baseline = H - mB;
@@ -447,7 +449,7 @@ function makeMorphChart(labels, values) {
   const names = ['長條', '圓餅', '折線'];
   const btns = names.map((n, k) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
   box.appendChild(bar);
-  const W = Math.min(560, Math.max(330, N * 62)), H = 320, dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = Math.min(980, Math.max(420, N * 64)), H = 380, dpr = Math.min(2, window.devicePixelRatio || 1);
   const cv = document.createElement('canvas');
   cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
   const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
@@ -479,9 +481,9 @@ function makeMorphChart(labels, values) {
       ctx.textAlign = 'center'; ctx.font = '10px ui-monospace, monospace';
       for (let i = 0; i < N; i++) {
         const cx = lay({ ...base(i), 5: 5, 19: 0 }), top = lay({ ...base(i), 5: 6, 19: 0 }), hw = lay({ ...base(i), 5: 7, 19: 0 });
-        ctx.fillStyle = COLOR[i]; ctx.fillRect(cx - hw, top, hw * 2, (H - 62) - top);
+        ctx.fillStyle = COLOR[i]; ctx.fillRect(cx - hw, top, hw * 2, (H - 74) - top);
         ctx.fillStyle = '#c9d1d9'; ctx.textBaseline = 'bottom'; ctx.fillText(fmt(values[i]), cx, top - 4);
-        ctx.save(); ctx.translate(cx, H - 56); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
+        ctx.save(); ctx.translate(cx, H - 68); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
         ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.textBaseline = 'middle'; ctx.fillText(labels[i], 0, 0); ctx.restore();
       }
     }
@@ -599,6 +601,37 @@ $('sample').onclick = e => {
   ingest(csv, '薪資範例.csv(本機產生)', csv.length);
 };
 
+// 預烘的第一張圖:全球各區域平均距平(由高到低)。不叫 API,0 秒就在。
+const SEED_ANALYSIS = {
+  title: '全球升溫:各區域平均距平(°C,1880–2025)',
+  cells: [{ id: 'regionMean', script:
+    'let n = get(30.0);\nlet c = get(31.0);\nlet target = x;\nlet sum = 0.0;\nlet cnt = 0.0;\nlet r = 0.0;\n' +
+    'while r < n {\n let region = ld(r * c + 3.0);\n if region >= target { if region <= target {\n' +
+    '  let a = ld(r * c + 5.0);\n  sum = sum + a;\n  cnt = cnt + 1.0;\n } }\n r = r + 1.0;\n}\n' +
+    'let result = 0.0;\nif cnt > 0.0 { result = sum / cnt; }\nresult' }],
+  tree: { type: 'stack', children: [
+    { type: 'label', text: '全球升溫:各區域平均距平(°C,1880–2025,由高到低)' },
+    { type: 'bar', groups: { col: 3, bind: 'regionMean', sort: 'desc' } },
+  ] },
+};
+async function bootTemp() {
+  try {
+    const t = await (await fetch('/assets/global-temp.csv')).text();
+    ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
+    useTempExamples();
+    lastSchema = SEED_ANALYSIS;
+    $('stage').innerHTML = ''; $('stage').appendChild(await manifestUi(SEED_ANALYSIS));
+    $('evidence').innerHTML = '<div style="font-size:.74rem;color:#8b949e">這張是<b style="color:#c9d1d9">預烘的第一張圖</b>' +
+      '(沒有叫 API)。下面說一句話就能改它——排名、換視角、換區域、換期間。</div>';
+    status('👋 這是 NASA 真實資料的第一張圖 —— 下面說一句話就能改它', 'ok');
+    return true;
+  } catch (e) { console.warn(e); return false; }
+}
+function useTempExamples() {
+  $('chips').innerHTML = TEMP_EX.map(x => `<span class="chip">${x}</span>`).join('');
+  document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = TEMP_EX[i]; $('intent').focus(); });
+}
+
 $('sampleTemp').onclick = async e => {
   e.stopPropagation();
   status('抓取範例…(這份是真的 NASA GISTEMP 資料,由本機伺服器提供)');
@@ -610,7 +643,8 @@ $('sampleTemp').onclick = async e => {
   } catch (err) { status('✗ 取不到範例:' + err, 'err'); }
 };
 const TEMP_EX = [
-  '各緯度帶的平均升溫幅度,長條圖',
+  '改成由高到低排名',
+  '只看北極區(64-90N)歷年距平,折線圖',
   '北極區(64-90N)歷年距平,折線圖',
   '南北半球平均距平比較',
   '1880-1950 與 1976-2025 兩段的全球平均距平各是多少',
@@ -622,8 +656,9 @@ const TEMP_EX = [
     const mod = await import('/pkg/wasm_jit.js'); await mod.default();
     compileUiCell = mod.compile_ui_cell_wasm;
     await initMorph();
+    const booted = await bootTemp();          // 一進來就有一張真資料的圖
     if (VALUES) $('go').disabled = false;
-    status('編譯器就緒 —— 拖一份 CSV 進來');
+    if (!booted) status('編譯器就緒 —— 拖一份 CSV 進來');
   } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
 })();
 </script>

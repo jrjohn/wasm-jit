@@ -511,7 +511,9 @@ HOW A CELL READS IT:
 - keep loops O(rows); fuel is 200000 ops.
 
 GROUPED CHART (use this instead of inventing labels):
-  {{"type":"bar","groups":{{"col":<text column index>,"bind":"cellId"}}}}
+  {{"type":"bar","groups":{{"col":<text column index>,"bind":"cellId","sort":"desc"}}}}
+  "sort" is "desc" | "asc" | "none" — YOU cannot rank the groups yourself (you never see the values),
+  so when the user asks for a ranking/排名/由高到低, declare "sort":"desc" and the HOST sorts them.
   The host draws one bar per category using the REAL local label, and calls your cell with
   x = the category index. So write ONE cell that takes x (a category index) and returns that
   group's number (mean/sum/count). Same for "pie".
