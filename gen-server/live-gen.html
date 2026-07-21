@@ -908,7 +908,7 @@ function sampleF(c, x, y) {
 const FLOATS = new Set(['boat', 'raft', 'lotus', 'leaf', 'duck', 'swan']);
 function restY(e, sampleF) {
   const th = sampleF(0, e.x, e.y), wd = sampleF(1, e.x, e.y);
-  const floats = e.habitat === 'water' || FLOATS.has(e.type);
+  const floats = e.habitat === 'water' || FLOATS.has(e.type) || e._carriedFloat === true;
   return th + (floats ? wd : Math.min(wd, 3) * 0.6);
 }
 
@@ -1064,7 +1064,12 @@ window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === par
 window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line) } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, hx: e.hx ?? 1, hz: e.hz ?? 0, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y,
+        // The placement law made inspectable: what a being rides, and the height
+        // the host actually rests it at. A rider sitting lower than its carrier is
+        // the shape of the bug where a fisherman sinks into his own boat, and it
+        // should be answerable with a number rather than a squint at a screenshot.
+        on: e.on ?? null, restY: Math.round(restY(e, sampleF) * 1000) / 1000, hx: e.hx ?? 1, hz: e.hz ?? 0, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
         mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
@@ -1374,7 +1379,17 @@ function tickEntities(t, g) {
     for (const e of ENTITIES) {
       if (!e.on) continue;
       const carrier = ENTITIES.find(c => c.id === e.on);
-      if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
+      if (carrier) {
+        e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1];
+        // Buoyancy rides too. Copying only the position left the fisherman
+        // computing his own rest height with the walking rule while the hull
+        // used the floating one — so he sat below the gunwale, sunk into the
+        // boat he was supposed to be sitting in. Whatever holds the carrier up
+        // holds its riders up; chains inherit, so a person on a person on a
+        // boat still floats.
+        e._carriedFloat = carrier.habitat === 'water' || FLOATS.has(carrier.type)
+                       || carrier._carriedFloat === true;
+      }
     }
   }
   // facing (host law): a flyer or swimmer leads with its head — the body turns to
