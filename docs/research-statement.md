@@ -72,6 +72,20 @@ First-attempt validity and self-repair convergence under a fixed vocabulary vs. 
 
 Both studies ship as a **preregistered harness** — metrics, model matrix and sample sizes committed to the repo *before* data collection ([research/PREREGISTRATION.md](../research/PREREGISTRATION.md)). All code and findings open (MIT), written up publicly.
 
+## 4b. Why the question stops being hypothetical — opening the substrate
+
+Everything above could be read as a private demonstration: one author, one machine, artefacts nobody else can reach. That is changing, and the change is what turns Study 1 from an academic question into an operational one.
+
+**The exit.** A generated app used to die with the browser tab that held it. It now saves to a URL of its own — every cell recompiled against the fence *before* anything is written, so a stored artefact is a provably fenced artefact — and anyone with the link can open it, keep talking to it, and save their own revision without touching the original.
+
+**The vocabulary.** The word library was previously extended only by the model, on the author's machine. It is now open: a signed-in visitor may contribute a composite, and **the compile gate is the only reviewer there is.** A contributed word that reaches for a capability it was not granted is refused with the granted list attached — no human read it, and no human needed to. This is the practical face of the attenuation property: because a word is built only from fenced parts, the word is fenced too, so vocabulary can grow at the speed of a crowd while reach stays exactly where it was.
+
+That last sentence is the claim this architecture exists to make, and it is the one a code-generating platform structurally cannot make. Their community components are arbitrary code, so every contribution needs a human to read it before it can be offered to anyone else — which is why such libraries are either curated bottlenecks or unreviewed hazards. Here the bottleneck is a compiler, and it does not get tired.
+
+**Identity, and what it is and is not for.** Contribution is authenticated (Google Sign-In, tokens verified server-side against Google's published keys, audience-checked). Reads stay open to everyone. Identity is *not* what makes contribution safe — the fence already does that, and would still do it for an anonymous contributor. Identity is for attribution, for letting an author revise their own work and nobody else's, and for the quota that a model-backed tier will eventually need. It is worth being precise about this, because "we require login" is often offered as if it were a security property. It is not one. **The fence is what holds; the login only says who to thank.**
+
+**The honest consequence.** Once strangers' words really are composed into worlds that appear on other people's screens, "what can a *valid* artefact still do inside its grants" is no longer a thought experiment — it is the thing standing between an open vocabulary and a deceptive interface with someone else's name on it. That is precisely what Study 1 measures, and why it is the primary study rather than the interesting one.
+
 ## 5. Where this sits — related work, and the honest gap
 
 **No single ingredient here is new.**
