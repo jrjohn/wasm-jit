@@ -3076,7 +3076,14 @@ function loadAsset(id) {
 }
 function drawBillboardsGL(W, H, eyeH, tNow) {
   const T = FPT, gl = D3.gl, K = 0.55, fov = 1.0;
-  const horizon = H * 0.42, focal = H * 0.95;
+  // The horizon has to follow the eye. Terrain is drawn through a view matrix
+  // that already carries cam.pitch; these billboards were projected against a
+  // FIXED horizon, so looking up slid the ground down the screen and left every
+  // being hanging where it was — a boat and its fisherman adrift in the night
+  // sky. Raising the eye by `pitch` moves the horizon down the screen by
+  // focal·tan(pitch), and the beings standing on it move with it.
+  const focal = H * 0.95;
+  const horizon = H * 0.42 + Math.tan(cam.pitch || 0) * focal;
   const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
   const list = [];
   for (const e of ENTITIES) {
