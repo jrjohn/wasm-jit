@@ -10,6 +10,8 @@
 //! Generation is seconds-slow; manifestation is µs-fast. That asymmetry is
 //! the demo. Runs on :8646, fully separate from the other demos.
 
+mod auth;
+
 use axum::http::StatusCode;
 use axum::response::sse::Sse;
 use axum::response::IntoResponse;
@@ -1048,8 +1050,13 @@ async fn widget_list() -> impl IntoResponse {
     }
     Json(json!({ "widgets": names }))
 }
-async fn widget_save(Json(req): Json<WidgetSave>) -> impl IntoResponse {
+/// Contributing a part is now a named act — the compile gate still decides what
+/// may enter, identity only decides who is answerable for it.
+async fn widget_save(headers: axum::http::HeaderMap, Json(req): Json<WidgetSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
+    if let Err(e) = auth::user_from(&headers).await {
+        return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
+    }
     if !skin_type_ok(&req.ty) {
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad widget type".to_string());
     }
@@ -1220,17 +1227,76 @@ async fn feed_test() -> impl IntoResponse {
     Json(json!({ "n": 42, "s": "hello from the world", "nested": { "deep": 7 } }))
 }
 
-async fn world_save(Json(body): Json<Value>) -> impl IntoResponse {
+/// Save a world.
+///
+/// Two doors were open here and both are now shut.
+///
+/// **Identity.** Anyone who could reach this endpoint could write any JSON to
+/// disk under any name — including over someone else's world. A world now
+/// records its author, and only its author may overwrite it.
+///
+/// **The fence.** This wrote whatever it was handed, checking only the filename.
+/// Every other way a world enters this server runs `validate()` first, which
+/// compiles every seed inside it against the fence. This door skipped it — so a
+/// world could be stored that no generation would ever have been allowed to
+/// produce. It runs now, before anything touches disk: what cannot compile
+/// cannot be saved.
+async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
+    let plain = [(CONTENT_TYPE, "text/plain")];
+
+    let user = match auth::user_from(&headers).await {
+        Ok(u) => u,
+        Err(e) => return (StatusCode::UNAUTHORIZED, plain, e),
+    };
+
     let name = body.get("name").and_then(|n| n.as_str()).unwrap_or("");
     if !slug_ok(name) {
-        return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "name must be letters/digits/_/-".to_string());
+        return (StatusCode::BAD_REQUEST, plain, "name must be letters/digits/_/-".to_string());
     }
+
+    // The fence, before the filesystem.
+    if let Err(e) = validate(&body) {
+        return (StatusCode::UNPROCESSABLE_ENTITY, plain,
+            format!("這個世界沒過圍籬,沒有存檔:{e}"));
+    }
+
+    // Your own world is yours to revise; someone else's is not yours to overwrite.
+    let path = format!("worlds/{name}.json");
+    if let Ok(existing) = tokio::fs::read_to_string(&path).await {
+        let owner = serde_json::from_str::<Value>(&existing)
+            .ok()
+            .and_then(|v| v["by"]["sub"].as_str().map(String::from));
+        if let Some(owner) = owner {
+            if owner != user.sub {
+                return (StatusCode::FORBIDDEN, plain,
+                    format!("'{name}' 是別人的世界 — 換個名字,或複製一份改成你自己的"));
+            }
+        }
+    }
+
+    let mut rec = body.clone();
+    rec["by"] = serde_json::json!({"sub": user.sub, "name": user.name});
     let _ = tokio::fs::create_dir_all("worlds").await;
-    let pretty = serde_json::to_string_pretty(&body).unwrap_or_else(|_| body.to_string());
-    match tokio::fs::write(format!("worlds/{name}.json"), pretty).await {
-        Ok(()) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], format!("saved world '{name}'")),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, [(CONTENT_TYPE, "text/plain")], format!("save failed: {e}")),
+    let pretty = serde_json::to_string_pretty(&rec).unwrap_or_else(|_| rec.to_string());
+    match tokio::fs::write(&path, pretty).await {
+        Ok(()) => (StatusCode::OK, plain, format!("saved world '{name}' — by {}", user.name)),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, plain, format!("save failed: {e}")),
+    }
+}
+
+/// Who am I, as far as this server is concerned — the page asks before it offers
+/// a save button, so a visitor is never invited to do something that will fail.
+async fn whoami(headers: axum::http::HeaderMap) -> impl IntoResponse {
+    match auth::user_from(&headers).await {
+        Ok(u) => Json(serde_json::json!({
+            "signed_in": true, "sub": u.sub, "name": u.name, "email": u.email,
+            "open": auth::is_open(),
+        })),
+        Err(e) => Json(serde_json::json!({
+            "signed_in": false, "reason": e, "open": auth::is_open(),
+            "client_id": auth::client_id(),
+        })),
     }
 }
 
@@ -1267,8 +1333,13 @@ fn skin_type_ok(ty: &str) -> bool {
 /// Save a self-grown skin into the library (skins-grown/<type>.dsl) — a grown
 /// skin is a skin_seed string, so archival is nearly free: files are the ālaya
 /// (docs §20.1). Validated by compiling against the skin ABI before it lands.
-async fn skin_save(Json(req): Json<SkinSave>) -> impl IntoResponse {
+/// Contributing a part is now a named act — the compile gate still decides what
+/// may enter, identity only decides who is answerable for it.
+async fn skin_save(headers: axum::http::HeaderMap, Json(req): Json<SkinSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
+    if let Err(e) = auth::user_from(&headers).await {
+        return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
+    }
     if !skin_type_ok(&req.ty) {
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad skin type".to_string());
     }
@@ -1571,6 +1642,7 @@ async fn main() {
         .route("/api/widgets", get(widget_list).post(widget_save))
         .route("/api/widgets/{ty}", get(widget_get))
         .route("/api/worlds", get(world_list).post(world_save))
+        .route("/api/whoami", get(whoami))
         .route("/api/worlds/{name}", get(world_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
