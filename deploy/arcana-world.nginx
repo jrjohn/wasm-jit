@@ -1,0 +1,18 @@
+
+# ── The world engine — anyone may look, only a signed-in visitor may keep ──────
+# Served under /world/ because this vhost's /api/ already belongs to :8088.
+# live-gen.html asks for its API with RELATIVE paths, so the page works
+# unchanged at http://localhost:8646/ and at https://arcana.boo/world/.
+location = /world { return 301 /world/; }
+location ^~ /world/ {
+    proxy_pass http://127.0.0.1:8646/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # /api/generate/stream is Server-Sent Events: buffering would hold the whole
+    # generation back and deliver it as one lump at the end.
+    proxy_buffering off;
+    proxy_read_timeout 600s;
+}

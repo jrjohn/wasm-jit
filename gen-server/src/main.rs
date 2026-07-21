@@ -913,7 +913,10 @@ struct MindReq {
 
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
 /// validated BY COMPILING it against the entity ABI before the browser sees it.
-async fn mind(Json(req): Json<MindReq>) -> impl IntoResponse {
+async fn mind(headers: axum::http::HeaderMap, Json(req): Json<MindReq>) -> impl IntoResponse {
+    if let Err(e) = auth::user_from(&headers).await {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
+    }
     // Measured, not assumed: for this structured heartbeat sonnet-5 is ~2×
     // FASTER than haiku-4.5 (3.5–4s vs 6.5–8s) and better — so heartbeats use
     // sonnet. The container is the only thing warm-started; the inference floor
@@ -1407,7 +1410,15 @@ async fn inhabitant_behavior(axum::extract::Path(ty): axum::extract::Path<String
     }
 }
 
-async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
+/// Generation spends the operator's model quota, so it is the one door where an
+/// anonymous visitor is not merely unattributed but expensive. Identity does not
+/// cap the spend — that needs a quota, which does not exist yet — it only makes
+/// the spend attributable and revocable. Say so plainly rather than implying that
+/// requiring a login is the same thing as limiting cost.
+async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> impl IntoResponse {
+    if let Err(e) = auth::user_from(&headers).await {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
+    }
     let model = req
         .model
         .as_deref()
@@ -1527,10 +1538,13 @@ async fn send_ev(
 /// self-repair — but the reply streams token-by-token so the browser watches the
 /// schema materialize instead of waiting out the whole generation. A ledger hit
 /// still replays instantly (a single `done` event, no LLM).
-async fn generate_stream(Json(req): Json<GenReq>) -> impl IntoResponse {
+async fn generate_stream(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> axum::response::Response {
+    if let Err(e) = auth::user_from(&headers).await {
+        return (StatusCode::UNAUTHORIZED, e).into_response();
+    }
     let (tx, rx) = tokio::sync::mpsc::channel(256);
     tokio::spawn(async move { run_generation_stream(req, tx).await });
-    Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default())
+    Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default()).into_response()
 }
 
 async fn run_generation_stream(

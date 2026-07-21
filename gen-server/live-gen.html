@@ -483,7 +483,7 @@ function startFeeds() {
   const run = async () => {
     for (const f of defs) {
       try {
-        const r = await fetch('/api/feed?url=' + encodeURIComponent(f.url));
+        const r = await fetch('api/feed?url=' + encodeURIComponent(f.url));
         if (!r.ok) { $('stage-status').textContent = 'feed refused: ' + (await r.text()).slice(0, 90); continue; }
         const j = await r.json();
         for (const p of (f.plucks ?? [])) {
@@ -510,7 +510,7 @@ const WIDGET_LIB = {};   // type -> widget_seed (in-memory cache of the library)
 function saveGrownWidget(type, seed) {
   if (WIDGET_LIB[type] === seed) return;
   WIDGET_LIB[type] = seed;
-  fetch('/api/widgets', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
+  fetch('api/widgets', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type, widget_seed: seed }) }).catch(() => {});
 }
 function widgetEnv(wd) {
@@ -565,7 +565,7 @@ function makeCustomWidget(node) {
   else { // bare novel type: recall the grown widget by name
     (async () => {
       let seed = WIDGET_LIB[node.type];
-      if (!seed) { try { const r = await fetch(`/api/widgets/${node.type}`); if (r.ok) seed = await r.text(); } catch (e) {} }
+      if (!seed) { try { const r = await fetch(`api/widgets/${node.type}`); if (r.ok) seed = await r.text(); } catch (e) {} }
       if (seed) { WIDGET_LIB[node.type] = seed; arm(seed); }
       else $('stage-status').textContent = `unknown widget '${node.type}' and nothing grown by that name`;
     })();
@@ -1394,14 +1394,14 @@ const SKIN_LIB = {}; // type -> skin_seed (in-memory cache of what's on disk)
 function saveGrownSkin(type, seed) {
   if (SKINS[type] || SKIN_LIB[type] === seed) return; // curated or unchanged
   SKIN_LIB[type] = seed;
-  fetch('/api/skins', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
+  fetch('api/skins', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type, skin_seed: seed }) }).catch(() => {});
 }
 async function recallGrownSkin(ent) { // a novel type with no seed → look it up
   if (ent.skinRun || SKINS[ent.type]) return;
   let seed = SKIN_LIB[ent.type];
   if (!seed) {
-    try { const r = await fetch(`/api/skins/${ent.type}`); if (r.ok) { seed = await r.text(); SKIN_LIB[ent.type] = seed; } } catch (e) {}
+    try { const r = await fetch(`api/skins/${ent.type}`); if (r.ok) { seed = await r.text(); SKIN_LIB[ent.type] = seed; } } catch (e) {}
   }
   if (seed) {
     try {
@@ -1465,11 +1465,11 @@ function drawSkin(ent, px, py, s, t) {
 // The soul wakes a moment after the world starts; until then the body is still.
 async function loadPackagedSoul(ent, g) {
   try {
-    const mr = await fetch(`/api/inhabitants/${ent.type}`);
+    const mr = await fetch(`api/inhabitants/${ent.type}`);
     if (!mr.ok) return; // no package: stillness is the default of defaults
     const manifest = await mr.json();
     if (!manifest.behavior) return;
-    const wr = await fetch(`/api/inhabitants/${ent.type}/behavior.wasm`);
+    const wr = await fetch(`api/inhabitants/${ent.type}/behavior.wasm`);
     if (!wr.ok) return;
     const bytes = new Uint8Array(await wr.arrayBuffer());
     audit_entity_bytes(bytes); // Tier-2 gate: throws if the soul over-reaches
@@ -1899,7 +1899,7 @@ async function mindBeat(ent, words) {
     // network drop (server restart, a blip) so a being doesn't fall silent
     // over a transient — a server-returned error still surfaces normally.
     const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined });
-    const post = () => fetch('/api/mind', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    const post = () => fetch('api/mind', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
     let r;
     try { r = await post(); }
     catch (netErr) { await new Promise(res => setTimeout(res, 1500)); r = await post(); }
@@ -3285,7 +3285,7 @@ async function ensureAudio() {
     const node = new AudioWorkletNode(ctx, 'seed-synth', { outputChannelCount: [2] });
     // the 聲塵器: fetched once, posted before any cells (port order guarantees it)
     try {
-      const r = await fetch('/pkg-dust/shengchen.wasm');
+      const r = await fetch('pkg-dust/shengchen.wasm');
       if (r.ok) node.port.postMessage({ dust: new Uint8Array(await r.arrayBuffer()) });
     } catch (e) { /* no dust engine — cells still run, primitives stay silent */ }
     const analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
@@ -3573,7 +3573,7 @@ async function send() {
   try {
     // #1 生成串流: watch the schema materialize token-by-token instead of
     // waiting out the full generation. A ledger hit still arrives as one `done`.
-    const r = await fetch('/api/generate/stream', {
+    const r = await fetch('api/generate/stream', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
@@ -3628,7 +3628,7 @@ async function send() {
     // a stream hiccup must never lose the ask — fall back to the blocking path
     clearStream();
     try {
-      const r = await fetch('/api/generate', {
+      const r = await fetch('api/generate', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
       });
@@ -3721,7 +3721,7 @@ function paintWho() {
 }
 
 async function refreshWho() {
-  try { ME = await (await fetch('/api/whoami', { headers: authHeaders({}) })).json(); }
+  try { ME = await (await fetch('api/whoami', { headers: authHeaders({}) })).json(); }
   catch (e) { ME = null; }
   paintWho();
   return ME;
@@ -3760,7 +3760,7 @@ $('world-save').onclick = async () => {
   const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog,
                    state: lastManifest.surface === 'ui' ? appSnapshot() : undefined }; // 業 rides along
   try {
-    const r = await fetch('/api/worlds', { method: 'POST',
+    const r = await fetch('api/worlds', { method: 'POST',
       headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify(bundle) });
     say(r.ok ? 'ai' : 'err', r.ok ? `💾 saved world '${name}' — load it anytime, instantly` : `save failed: ${await r.text()}`);
   } catch (e) { say('err', 'save failed: ' + e); }
@@ -3769,14 +3769,14 @@ $('world-load').onclick = async () => {
   const menu = $('worlds-menu');
   if (menu.style.display === 'block') { menu.style.display = 'none'; return; }
   let names = [];
-  try { const r = await fetch('/api/worlds'); names = (await r.json()).worlds || []; } catch (e) {}
+  try { const r = await fetch('api/worlds'); names = (await r.json()).worlds || []; } catch (e) {}
   if (!names.length) { menu.innerHTML = '<div style="padding:.6rem;font-size:.75rem;opacity:.6">no saved worlds yet — 💾 save one first</div>'; }
   else menu.innerHTML = '<div style="padding:.35rem .6rem;font-size:.68rem;opacity:.5;border-bottom:1px solid #30363d">switch instantly — the 三千大千世界</div>' +
     names.map(n => `<div class="at-item" data-w="${n}"><span>🌀 ${n}</span></div>`).join('');
   menu.style.display = 'block';
   menu.querySelectorAll('.at-item').forEach(el => el.onclick = async () => {
     menu.style.display = 'none';
-    try { const r = await fetch(`/api/worlds/${el.dataset.w}`); if (r.ok) manifestSaved(await r.json()); }
+    try { const r = await fetch(`api/worlds/${el.dataset.w}`); if (r.ok) manifestSaved(await r.json()); }
     catch (e) { say('err', 'load failed: ' + e); }
   });
 };
