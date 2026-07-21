@@ -749,6 +749,7 @@ async fn main() {
         // variant 1 needs the in-browser compiler; serve the wasm-bindgen bundle from ./pkg
         // (run this binary from the repo root so the relative path resolves).
         .nest_service("/pkg", ServeDir::new("pkg"))
+        .nest_service("/assets", ServeDir::new("apps/assets"))
         .with_state(state);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8787);

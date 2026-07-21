@@ -73,7 +73,10 @@
   <div class="panel">
     <div class="drop" id="drop">
       拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦
-      <div style="margin-top:.5rem"><span class="chip" id="sample">📄 沒有檔案?載入一份擬真薪資範例</span></div>
+      <div style="margin-top:.5rem">
+        <span class="chip" id="sampleTemp" style="border-color:#3fb95066;color:#7ee787">🌡 全球氣溫 1880–2025(NASA 真實資料)</span>
+        <span class="chip" id="sample">📄 擬真薪資範例(合成)</span>
+      </div>
       <input type="file" id="file" accept=".csv,text/csv" style="display:none">
     </div>
     <div id="loaded" style="display:none">
@@ -215,7 +218,7 @@ async function manifestUi(schema) {
     runFns[c.id] = instance.exports.run; fuels[c.id] = instance.exports.fuel || null;
   }
   const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 200000; outputs[id] = f(x); };
-  const binds = [], charts = [];
+  const binds = [], charts = [], morphs = [];
   const refresh = () => {
     for (const b of binds) { if (b.arg !== undefined) run(b.id, b.arg); const v = outputs[b.id];
       b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v); }
@@ -224,29 +227,33 @@ async function manifestUi(schema) {
       return { label: s.label, value: outputs[s.bind] || 0, color: s.color };
     }));
   };
-  const root = build(schema.tree, binds, charts);
+  const root = build(schema.tree, binds, charts, morphs);
   for (const c of (schema.cells || [])) run(c.id, 0);
   refresh();
+  for (const m of morphs) {                       // 值由受圍籬 cell 逐組算出,再交給變形引擎
+    const vals = m.cats.map((_, i) => { run(m.bind, i); return outputs[m.bind] || 0; });
+    m.ph.appendChild(makeMorphChart(m.cats, vals));
+  }
   return root;
 }
 
-function build(node, binds, charts) {
+function build(node, binds, charts, morphs) {
   if (!node || !node.type) return document.createTextNode('');
   const t = node.type;
   if (t === 'stack' || t === 'row') {
     const d = document.createElement('div'); d.className = t === 'row' ? 'w-row' : 'w-stack';
-    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts))); return d;
+    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts, morphs))); return d;
   }
   if (t === 'grid') {
     const d = document.createElement('div'); d.className = 'w-grid';
     d.style.gridTemplateColumns = `repeat(${Math.max(1, Math.min(12, +node.cols || 2))}, auto)`;
-    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts))); return d;
+    (node.children || []).forEach(ch => d.appendChild(build(ch, binds, charts, morphs))); return d;
   }
   if (t === 'repeat') {
     const n = Math.max(0, Math.min(300, +node.count || 0)); const frag = document.createDocumentFragment();
     for (let i = 0; i < n; i++) {
       const tpl = JSON.parse(JSON.stringify(node.template).replace(/\$i\b/g, String(i)));
-      for (const one of (Array.isArray(tpl) ? tpl : [tpl])) frag.appendChild(build(one, binds, charts));
+      for (const one of (Array.isArray(tpl) ? tpl : [tpl])) frag.appendChild(build(one, binds, charts, morphs));
     }
     return frag;
   }
@@ -259,12 +266,14 @@ function build(node, binds, charts) {
   }
   if (t === 'pie' || t === 'bar') {
     let slices = [];
-    if (node.groups) {                       // ← 分組圖:標籤來自本機類別名,AI 從沒看過
+    if (node.groups) {                       // ← 分組圖:交給變形引擎(bar⇄pie⇄line 即時變形)
       const col = +node.groups.col || 0, bind = node.groups.bind;
       const cats = (COLS[col] && COLS[col].cats) || [];
-      slices = cats.map((nm, i) => ({ label: nm, bind, arg: i,
-        color: `hsl(${Math.round(i / Math.max(1, cats.length) * 360)}, 72%, 60%)` }));
-    } else {
+      const ph = document.createElement('div');
+      morphs.push({ ph, cats, bind });
+      return ph;
+    }
+    {
       const sls = node.slices || [];
       slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind,
         color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
@@ -314,6 +323,224 @@ function drawChart(ch, slices) {
       else { ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(s.label, cx, base + 4); }
     });
   }
+}
+
+
+// ── 變形引擎:同一份資料在 bar ⇄ pie ⇄ line 之間即時變形 ─────────────────
+// 這支 layout cell 是固定的(不是 AI 生的),同樣受圍籬:只有 sin/cos/get/set。
+// axis 0/1/2 = 粒子 x/y/凝聚度;axis 5..9 = 靜止時的實心圖元參數。
+const MORPH_CELL = `
+let fromL = get(0.0);
+let toL = get(1.0);
+let val = get(2.0);
+let i = get(3.0);
+let N = get(4.0);
+let axis = get(5.0);
+let cum = get(6.0);
+let sum = get(7.0);
+let W = get(8.0);
+let H = get(9.0);
+let pu = get(10.0);
+let pRect = get(11.0);
+let pWedge = get(12.0);
+let prog = get(13.0);
+let curveAmp = get(14.0);
+let nextX = get(15.0);
+let nextY = get(16.0);
+let shapeL = get(19.0);
+
+let mL = 54.0;
+let mR = 24.0;
+let mT = 30.0;
+let mB = 62.0;
+let plotW = W - mL - mR;
+let plotH = H - mT - mB;
+let baseline = H - mB;
+let colStep = plotW / N;
+let cx = mL + (i + 0.5) * colStep;
+let ccx = mL + plotW / 2.0;
+let ccy = mT + plotH / 2.0;
+let RR = plotH * 0.46;
+let barW = colStep * 0.70;
+let a0 = cum / sum * 6.2831853 - 1.5707963;
+let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
+let topY = baseline - val * plotH;
+
+let out = 0.0;
+
+if axis >= 4.5 {
+  if shapeL < 0.5 {
+    if axis < 5.5 { out = cx; }
+    if axis >= 5.5 { if axis < 6.5 { out = topY; } }
+    if axis >= 6.5 { out = barW / 2.0; }
+  }
+  if shapeL >= 0.5 { if shapeL < 1.5 {
+    if axis < 5.5 { out = ccx; }
+    if axis >= 5.5 { if axis < 6.5 { out = ccy; } }
+    if axis >= 6.5 { if axis < 7.5 { out = RR; } }
+    if axis >= 7.5 { if axis < 8.5 { out = a0; } }
+    if axis >= 8.5 { out = a1; }
+  } }
+  if shapeL >= 1.5 {
+    if axis < 5.5 { out = cx; }
+    if axis >= 5.5 { out = topY; }
+  }
+}
+
+if axis < 4.5 {
+  let bx = cx - barW / 2.0 + pu * barW;
+  let by = baseline - pRect * (val * plotH);
+  let ang = a0 + pu * (a1 - a0);
+  let rr = pWedge * RR;
+  let pex = ccx + rr * cos(ang);
+  let pey = ccy + rr * sin(ang);
+  let lnx = cx + pu * (nextX - cx) + (pRect - 0.5) * 5.0;
+  let lny = topY + pu * (nextY - topY) + (pRect - 0.5) * 5.0;
+  let fromX = bx;
+  let fromY = by;
+  if fromL >= 0.5 { if fromL < 1.5 { fromX = pex; fromY = pey; } }
+  if fromL >= 1.5 { fromX = lnx; fromY = lny; }
+  let toX = bx;
+  let toY = by;
+  if toL >= 0.5 { if toL < 1.5 { toX = pex; toY = pey; } }
+  if toL >= 1.5 { toX = lnx; toY = lny; }
+  let e = prog * prog * (3.0 - 2.0 * prog);
+  let dx = toX - fromX;
+  let dy = toY - fromY;
+  let bx2 = fromX + dx * e;
+  let by2 = fromY + dy * e;
+  let bulge = curveAmp * 0.26 * sin(3.1415927 * prog);
+  let coh = 1.0 - 0.92 * sin(3.1415927 * prog);
+  let scat = (1.0 - coh) * 42.0;
+  let sdir = pu * 6.2831853 + curveAmp * 3.0;
+  let fx = bx2 - dy * bulge + cos(sdir) * scat;
+  let fy = by2 + dx * bulge + sin(sdir) * scat;
+  if axis < 0.5 { out = fx; }
+  if axis >= 0.5 { if axis < 1.5 { out = fy; } }
+  if axis >= 1.5 { out = coh; }
+}
+out
+`;
+
+let layoutRun = null, layoutFuel = null, layoutSlots = null, MORPH_BYTES = 0;
+async function initMorph() {
+  layoutSlots = new Float64Array(32);
+  const imp = { env: { sin: Math.sin, cos: Math.cos,
+    get: i => layoutSlots[(i | 0) & 31], set: (i, v) => { layoutSlots[(i | 0) & 31] = v; },
+    ld: () => 0, sd: () => {} } };
+  const bytes = compileUiCell(MORPH_CELL);
+  const { instance } = await WebAssembly.instantiate(bytes, imp);
+  layoutRun = instance.exports.run; layoutFuel = instance.exports.fuel || null;
+  MORPH_BYTES = bytes.length;
+}
+function lay(args) {
+  for (const k in args) layoutSlots[k] = args[k];
+  if (layoutFuel) layoutFuel.value = 200000;
+  return layoutRun(0);
+}
+
+// labels 來自本機類別;values 由 AI 寫的受圍籬 cell 在本機算出
+function makeMorphChart(labels, values) {
+  const N = labels.length || 1;
+  const box = document.createElement('div');
+  const bar = document.createElement('div'); bar.className = 'chips'; bar.style.margin = '0 0 .5rem';
+  const names = ['長條', '圓餅', '折線'];
+  const btns = names.map((n, k) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
+  box.appendChild(bar);
+  const W = Math.min(560, Math.max(330, N * 62)), H = 320, dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cv = document.createElement('canvas');
+  cv.width = W * dpr; cv.height = H * dpr; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  const ctx = cv.getContext('2d'); ctx.scale(dpr, dpr);
+  box.appendChild(cv);
+  const note = document.createElement('div');
+  note.style.cssText = 'font-size:.66rem;color:#6e7681;margin-top:.35rem';
+  note.textContent = `同一份資料三種視角 · 值由受圍籬 cell 在本機算 · 版面由 ${MORPH_BYTES}-byte layout cell 算`;
+  box.appendChild(note);
+
+  const max = Math.max(1e-9, ...values.map(v => Math.max(0, v)));
+  const norm = values.map(v => Math.max(0, v) / max);
+  const sum = norm.reduce((a, b) => a + b, 0) || 1;
+  const cum = []; { let c = 0; for (const v of norm) { cum.push(c); c += v; } }
+  const COLOR = labels.map((_, i) => `hsl(${Math.round(i / N * 360)}, 72%, 60%)`);
+  const K = Math.max(14, Math.min(70, Math.round(760 / N)));
+  const P = N * K;
+  const jit = new Float32Array(P * 4);
+  { let s = 987; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    for (let p = 0; p < P; p++) { jit[p*4]=rnd(); jit[p*4+1]=rnd(); jit[p*4+2]=Math.sqrt(rnd()); jit[p*4+3]=rnd()*2-1; } }
+  const base = i => ({ 2: norm[i], 3: i, 4: N, 6: cum[i], 7: sum, 8: W, 9: H });
+  const nextXY = i => { const j = Math.min(i + 1, N - 1);
+    return { 15: lay({ ...base(j), 5: 5, 19: 2 }), 16: lay({ ...base(j), 5: 6, 19: 2 }) }; };
+
+  let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
+  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t*t*(3-2*t); };
+  function crisp(L, alpha) {
+    ctx.save(); ctx.globalAlpha = alpha;
+    if (L === 0) {
+      ctx.textAlign = 'center'; ctx.font = '10px ui-monospace, monospace';
+      for (let i = 0; i < N; i++) {
+        const cx = lay({ ...base(i), 5: 5, 19: 0 }), top = lay({ ...base(i), 5: 6, 19: 0 }), hw = lay({ ...base(i), 5: 7, 19: 0 });
+        ctx.fillStyle = COLOR[i]; ctx.fillRect(cx - hw, top, hw * 2, (H - 62) - top);
+        ctx.fillStyle = '#c9d1d9'; ctx.textBaseline = 'bottom'; ctx.fillText(fmt(values[i]), cx, top - 4);
+        ctx.save(); ctx.translate(cx, H - 56); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
+        ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.textBaseline = 'middle'; ctx.fillText(labels[i], 0, 0); ctx.restore();
+      }
+    }
+    if (L === 1) {
+      for (let i = 0; i < N; i++) {
+        const cx = lay({ ...base(i), 5: 5, 19: 1 }), cy = lay({ ...base(i), 5: 6, 19: 1 }),
+              R = lay({ ...base(i), 5: 7, 19: 1 }), a0 = lay({ ...base(i), 5: 8, 19: 1 }), a1 = lay({ ...base(i), 5: 9, 19: 1 });
+        ctx.fillStyle = COLOR[i]; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a0, a1); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+        const frac = norm[i] / sum;
+        if (frac > 0.05) { const m = (a0 + a1) / 2, lr = R * 0.62;
+          ctx.fillStyle = '#fff'; ctx.font = '600 10px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.fillText(labels[i], cx + lr * Math.cos(m), cy + lr * Math.sin(m) - 6);
+          ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
+      }
+    }
+    if (L === 2) {
+      const pts = []; for (let i = 0; i < N; i++) pts.push([lay({ ...base(i), 5: 5, 19: 2 }), lay({ ...base(i), 5: 6, 19: 2 })]);
+      ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
+      pts.forEach((q, i) => i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke();
+      ctx.font = '10px ui-monospace, monospace';
+      pts.forEach((q, i) => { ctx.beginPath(); ctx.arc(q[0], q[1], 4.5, 0, 6.2831853);
+        ctx.fillStyle = COLOR[i]; ctx.fill(); ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#c9d1d9'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.save(); ctx.translate(q[0], H - 56); ctx.rotate(N > 6 ? -Math.PI * 50 / 180 : 0);
+        ctx.textAlign = N > 6 ? 'right' : 'center'; ctx.fillText(labels[i], 0, 0); ctx.restore(); });
+    }
+    ctx.restore();
+  }
+  function frame(now) {
+    if (!box.isConnected) return;
+    ctx.clearRect(0, 0, W, H);
+    if (animating) { prog = Math.min(1, (now - tStart) / 1100); if (prog >= 1) { animating = false; fromL = toL; } }
+    if (!animating) { crisp(toL, 1); requestAnimationFrame(frame); return; }
+    const g = prog, srcA = 1 - smooth(0, .32, g), tgtA = smooth(.68, 1, g),
+          partA = smooth(0, .22, g) * (1 - smooth(.8, 1, g));
+    if (srcA > .01) crisp(fromL, srcA);
+    if (tgtA > .01) crisp(toL, tgtA);
+    if (partA > .01) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      for (let p = 0; p < P; p++) {
+        const i = (p / K) | 0;
+        const a = { ...base(i), ...nextXY(i), 0: fromL, 1: toL, 10: jit[p*4], 11: jit[p*4+1], 12: jit[p*4+2], 13: prog, 14: jit[p*4+3] };
+        const x = lay({ ...a, 5: 0 }), y = lay({ ...a, 5: 1 });
+        ctx.globalAlpha = partA * .9; ctx.fillStyle = COLOR[i];
+        ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2831853); ctx.fill();
+      }
+      ctx.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+  btns.forEach((b, k) => b.onclick = () => {
+    if (k === toL && !animating) return;
+    fromL = toL; toL = k; prog = 0; tStart = performance.now(); animating = true;
+    btns.forEach((x, j) => x.style.borderColor = j === k ? '#58a6ff' : '#30363d');
+  });
+  btns[0].style.borderColor = '#58a6ff';
+  requestAnimationFrame(frame);
+  return box;
 }
 
 // ── 問一句 → 只送 schema → 本機跑 ───────────────────────────────
@@ -372,10 +599,29 @@ $('sample').onclick = e => {
   ingest(csv, '薪資範例.csv(本機產生)', csv.length);
 };
 
+$('sampleTemp').onclick = async e => {
+  e.stopPropagation();
+  status('抓取範例…(這份是真的 NASA GISTEMP 資料,由本機伺服器提供)');
+  try {
+    const t = await (await fetch('/assets/global-temp.csv')).text();
+    ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
+    $('chips').innerHTML = TEMP_EX.map(x => `<span class="chip">${x}</span>`).join('');
+    document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = TEMP_EX[i]; $('intent').focus(); });
+  } catch (err) { status('✗ 取不到範例:' + err, 'err'); }
+};
+const TEMP_EX = [
+  '各緯度帶的平均升溫幅度,長條圖',
+  '北極區(64-90N)歷年距平,折線圖',
+  '南北半球平均距平比較',
+  '1880-1950 與 1976-2025 兩段的全球平均距平各是多少',
+  '各尺度的資料筆數佔比,圓餅圖',
+];
+
 (async () => {
   try {
     const mod = await import('/pkg/wasm_jit.js'); await mod.default();
     compileUiCell = mod.compile_ui_cell_wasm;
+    await initMorph();
     if (VALUES) $('go').disabled = false;
     status('編譯器就緒 —— 拖一份 CSV 進來');
   } catch (e) { status('✗ 需要 /pkg 編譯器:' + e, 'err'); }
