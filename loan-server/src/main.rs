@@ -518,7 +518,18 @@ GROUPED CHART (use this instead of inventing labels):
   x = the category index. So write ONE cell that takes x (a category index) and returns that
   group's number (mean/sum/count). Same for "pie".
 
-WHOLE-COLUMN STATS: a plain cell + {{"type":"value","label":"...","bind":"cellId"}}.
+DECLARATIVE STATS — PREFER THIS, it is the easy path and you should use it for anything routine.
+Do NOT hand-write a row loop for a plain mean/sum/count/max/min. Just declare it and the host
+synthesises + compiles the cell for you (same fence):
+  grouped:      {{"type":"bar","groups":{{"col":3,"agg":"mean","of":5,"sort":"desc"}}}}
+  whole column: {{"type":"value","label":"全球平均","agg":"mean","of":5}}
+  "agg" is "mean" | "sum" | "count" | "max" | "min"; "of" = the numeric column index;
+  optional "where": {{"col":0,"min":1990,"max":2025}} filters rows by a numeric column (e.g. a period);
+  "col" = the column to group by. No cell of your own is needed at all in these cases.
+ONLY write your own cell (with "cells" + "bind") when the statistic is genuinely custom
+(ratios, thresholds, two-period comparisons, weighted things) — then the loop contract above applies.
+
+WHOLE-COLUMN STATS (custom): a plain cell + {{"type":"value","label":"...","bind":"cellId"}}.
 "#, serde_json::to_string_pretty(ds).unwrap_or_default())
 }
 

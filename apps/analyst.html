@@ -58,6 +58,15 @@
   .cell { border: 1px solid #21262d; border-radius: 8px; margin-bottom: .5rem; overflow: hidden; }
   .cell .ch { display: flex; justify-content: space-between; font-size: .72rem; padding: .35rem .6rem; background: #0b0f14; color: #d2a8ff; }
   .cell pre { margin: 0; padding: .5rem .6rem; font-size: .68rem; color: #a5d6ff; white-space: pre; overflow-x: auto; line-height: 1.4; }
+  .rc { font-variant-numeric: tabular-nums; font-size: .68rem; }
+  .live { font-size: .72rem; color: #d29922; margin-bottom: .6rem; }
+  .live b { color: #f0883e; }
+  .dl { display: block; padding: 0 .2rem; border-radius: 3px; }
+  .dl.chg { background: #2ea04326; color: #7ee787; }
+  .gen { font-size: .68rem; color: #6e7681; margin: .15rem 0 .5rem; }
+  .fencebtn { font-size: .72rem; padding: .3rem .7rem; border-radius: 999px; border: 1px solid #f8514966;
+    background: #17100f; color: #f0883e; cursor: pointer; }
+  .fencebtn:hover { border-color: #f85149; }
   .fence { font-size: .72rem; color: #7ee787; margin-top: .5rem; }
   a { color: #58a6ff; }
 </style>
@@ -79,7 +88,8 @@
     <div class="drop" id="drop">
       拖一份 <b>CSV</b> 進來,或<u>點這裡選檔</u> —— 檔案不會離開這台電腦
       <div style="margin-top:.5rem">
-        <span class="chip" id="sampleTemp" style="border-color:#3fb95066;color:#7ee787">🌡 全球氣溫 1880–2025(NASA 真實資料)</span>
+        <span class="chip" id="sampleTemp" style="border-color:#3fb95066;color:#7ee787">🌡 緯度帶 1880–2025(NASA)</span>
+        <span class="chip" id="sampleCountry" style="border-color:#3fb95066;color:#7ee787">🌍 181 國 1950–2025(含經緯度)</span>
         <span class="chip" id="sample">📄 擬真薪資範例(合成)</span>
       </div>
       <input type="file" id="file" accept=".csv,text/csv" style="display:none">
@@ -201,8 +211,60 @@ function renderLeak() {
 }
 $('anon').addEventListener?.('change', renderLeak);
 
+// ── AI 介接:常見統計改成「宣告」,DSL 由 host 依模板生成(一樣受圍籬編譯)──
+//    模型只要寫 {"agg":"mean","of":5,"by":3},不必寫 row 迴圈、不必記 ld(r*cols+c)、
+//    不必用兩個 guard 模擬 ==。它出錯的機會因此少一大截。
+function aggCell(kind, ofCol, byCol, where) {
+  const OF = `${ofCol}.0`, BY = (byCol === null || byCol === undefined) ? null : `${byCol}.0`;
+  let t = 'let n = get(30.0);\nlet c = get(31.0);\nlet target = x;\n' +
+          'let s = 0.0;\nlet k = 0.0;\nlet best = 0.0;\nlet first = 1.0;\nlet r = 0.0;\n' +
+          'while r < n {\n';
+  let close = '';
+  if (where && where.col !== undefined) {              // 期間/範圍過濾,例如 {col:0,min:1990}
+    t += ' let w = ld(r * c + ' + (+where.col) + '.0);\n';
+    if (where.min !== undefined) { t += ' if w >= ' + (+where.min) + '.0 {\n'; close += ' }\n'; }
+    if (where.max !== undefined) { t += ' if w <= ' + (+where.max) + '.0 {\n'; close += ' }\n'; }
+  }
+  if (BY) { t += ' let g = ld(r * c + ' + BY + ');\n if g >= target { if g <= target {\n'; close += ' } }\n'; }
+  t += '  let v = ld(r * c + ' + OF + ');\n  s = s + v;\n  k = k + 1.0;\n' +
+       '  if first >= 0.5 { best = v; first = 0.0; }\n';
+  if (kind === 'max') t += '  if v > best { best = v; }\n';
+  if (kind === 'min') t += '  if v < best { best = v; }\n';
+  t += close;
+  t += ' r = r + 1.0;\n}\nlet out = 0.0;\n';
+  if (kind === 'mean') t += 'if k > 0.0 { out = s / k; }\n';
+  else if (kind === 'sum') t += 'out = s;\n';
+  else if (kind === 'count') t += 'out = k;\n';
+  else t += 'if k > 0.0 { out = best; }\n';
+  return t + 'out';
+}
+// 走一遍 tree:凡是宣告了 agg 的,就地合成一支 cell 並改綁它
+function expandAggregates(schema) {
+  const cells = [...(schema.cells || [])]; let auto = 0;
+  const walk = n => {
+    if (Array.isArray(n)) return n.map(walk);
+    if (!n || typeof n !== 'object') return n;
+    const o = {}; for (const k in n) o[k] = walk(n[k]);
+    const g = o.groups;
+    if (g && g.agg && !g.bind) {
+      const id = `_agg${++auto}`;
+      cells.push({ id, script: aggCell(g.agg, +g.of || 0, +g.col || 0, g.where) });
+      g.bind = id;
+    }
+    if (o.type === 'value' && o.agg && !o.bind) {
+      const id = `_agg${++auto}`;
+      cells.push({ id, script: aggCell(o.agg, +o.of || 0, null, o.where) });
+      o.bind = id;
+    }
+    return o;
+  };
+  const tree = walk(JSON.parse(JSON.stringify(schema.tree || {})));
+  return { ...schema, cells, tree };
+}
+
 // ── 受圍籬 runtime(cell 只有這 6 個函式;資料在 ld() 後面)────────────
 async function manifestUi(schema) {
+  schema = expandAggregates(schema);   // 宣告式統計 → 合成 cell(仍走同一道圍籬)
   const slots = new Float64Array(32);
   const imports = { env: {
     sin: Math.sin, cos: Math.cos,
@@ -217,7 +279,7 @@ async function manifestUi(schema) {
     const { instance } = await WebAssembly.instantiate(bytes, imports);
     runFns[c.id] = instance.exports.run; fuels[c.id] = instance.exports.fuel || null;
   }
-  const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 200000; outputs[id] = f(x); };
+  const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 60000000; outputs[id] = f(x); };
   const binds = [], charts = [], morphs = [];
   const refresh = () => {
     for (const b of binds) { if (b.arg !== undefined) run(b.id, b.arg); const v = outputs[b.id];
@@ -231,10 +293,13 @@ async function manifestUi(schema) {
   for (const c of (schema.cells || [])) run(c.id, 0);
   refresh();
   for (const m of morphs) {                       // 值由受圍籬 cell 逐組算出,再交給變形引擎
-    let pairs = m.cats.map((nm, i) => { run(m.bind, i); return { label: nm, value: outputs[m.bind] || 0 }; });
-    if (m.sort === 'desc') pairs.sort((a, b) => b.value - a.value);   // ← 只有 host 知道數值,排名得在這裡做
-    if (m.sort === 'asc') pairs.sort((a, b) => a.value - b.value);
-    m.ph.appendChild(makeMorphChart(pairs.map(p => p.label), pairs.map(p => p.value)));
+    const geo = m.ordered ? null : geoForCats(m.col, m.cats);   // 經緯度:本機算,AI 從沒看過
+    let rows = m.cats.map((nm, i) => { run(m.bind, m.args[i]);
+      return { label: nm, value: outputs[m.bind] || 0, geo: geo ? geo[i] : null }; });
+    if (m.sort === 'desc') rows.sort((a, b) => b.value - a.value);   // ← 只有 host 知道數值,排名得在這裡做
+    if (m.sort === 'asc') rows.sort((a, b) => a.value - b.value);
+    m.ph.appendChild(makeMorphChart(rows.map(r => r.label), rows.map(r => r.value),
+      geo ? rows.map(r => r.geo) : null, m.ordered));
   }
   return root;
 }
@@ -270,9 +335,13 @@ function build(node, binds, charts, morphs) {
     let slices = [];
     if (node.groups) {                       // ← 分組圖:交給變形引擎(bar⇄pie⇄line 即時變形)
       const col = +node.groups.col || 0, bind = node.groups.bind;
-      const cats = (COLS[col] && COLS[col].cats) || [];
+      const C = COLS[col]; let cats, args, ordered = false;
+      if (C && C.type === 'number') {                 // 數值欄分組(例如年份)→ 有序
+        const set = new Set(); for (let r = 0; r < NROWS; r++) set.add(VALUES[r * NCOLS + col]);
+        args = [...set].sort((a, b) => a - b); cats = args.map(v => String(v)); ordered = true;
+      } else { cats = (C && C.cats) || []; args = cats.map((_, i) => i); }
       const ph = document.createElement('div');
-      morphs.push({ ph, cats, bind, sort: node.groups.sort || node.sort || 'none' });
+      morphs.push({ ph, cats, args, bind, col, ordered, sort: node.groups.sort || node.sort || 'none' });
       return ph;
     }
     {
@@ -349,7 +418,12 @@ let prog = get(13.0);
 let curveAmp = get(14.0);
 let nextX = get(15.0);
 let nextY = get(16.0);
+let glat = get(17.0) * 0.0174533;
+let glon = get(18.0) * 0.0174533;
 let shapeL = get(19.0);
+let spin = get(20.0);
+let zoom = get(21.0);
+let tilt = get(22.0);
 
 let mL = 58.0;
 let mR = 26.0;
@@ -364,6 +438,14 @@ let ccx = mL + plotW / 2.0;
 let ccy = mT + plotH / 2.0;
 let RR = plotH * 0.46;
 let barW = colStep * 0.70;
+let gcx = mL + plotW / 2.0;
+let gcy = mT + plotH / 2.0;
+let GR = plotH * 0.44 * zoom;
+let dl = glon - spin;
+let lat0 = tilt;
+let cosc = sin(lat0) * sin(glat) + cos(lat0) * cos(glat) * cos(dl);
+let ggx = gcx + GR * cos(glat) * sin(dl);
+let ggy = gcy - GR * (cos(lat0) * sin(glat) - sin(lat0) * cos(glat) * cos(dl));
 let a0 = cum / sum * 6.2831853 - 1.5707963;
 let a1 = (cum + val) / sum * 6.2831853 - 1.5707963;
 let topY = baseline - val * plotH;
@@ -383,9 +465,14 @@ if axis >= 4.5 {
     if axis >= 7.5 { if axis < 8.5 { out = a0; } }
     if axis >= 8.5 { out = a1; }
   } }
-  if shapeL >= 1.5 {
+  if shapeL >= 1.5 { if shapeL < 2.5 {
     if axis < 5.5 { out = cx; }
     if axis >= 5.5 { out = topY; }
+  } }
+  if shapeL >= 2.5 {
+    if axis < 5.5 { out = ggx; }
+    if axis >= 5.5 { if axis < 6.5 { out = ggy; } }
+    if axis >= 6.5 { out = cosc; }
   }
 }
 
@@ -398,14 +485,18 @@ if axis < 4.5 {
   let pey = ccy + rr * sin(ang);
   let lnx = cx + pu * (nextX - cx) + (pRect - 0.5) * 5.0;
   let lny = topY + pu * (nextY - topY) + (pRect - 0.5) * 5.0;
+  let gpx = ggx + (pu - 0.5) * 7.0;
+  let gpy = ggy + (pRect - 0.5) * 7.0;
   let fromX = bx;
   let fromY = by;
   if fromL >= 0.5 { if fromL < 1.5 { fromX = pex; fromY = pey; } }
-  if fromL >= 1.5 { fromX = lnx; fromY = lny; }
+  if fromL >= 1.5 { if fromL < 2.5 { fromX = lnx; fromY = lny; } }
+  if fromL >= 2.5 { fromX = gpx; fromY = gpy; }
   let toX = bx;
   let toY = by;
   if toL >= 0.5 { if toL < 1.5 { toX = pex; toY = pey; } }
-  if toL >= 1.5 { toX = lnx; toY = lny; }
+  if toL >= 1.5 { if toL < 2.5 { toX = lnx; toY = lny; } }
+  if toL >= 2.5 { toX = gpx; toY = gpy; }
   let e = prog * prog * (3.0 - 2.0 * prog);
   let dx = toX - fromX;
   let dy = toY - fromY;
@@ -441,13 +532,30 @@ function lay(args) {
   return layoutRun(0);
 }
 
+function findGeoCols() {
+  const la = COLS.findIndex(c => /緯度|^lat/i.test(c.name));
+  const lo = COLS.findIndex(c => /經度|^lon|^lng/i.test(c.name));
+  return (la >= 0 && lo >= 0) ? { la, lo } : null;
+}
+function geoForCats(col, cats) {
+  const g = findGeoCols(); if (!g || !cats.length) return null;
+  const acc = cats.map(() => ({ a: 0, o: 0, n: 0 }));
+  for (let r = 0; r < NROWS; r++) {
+    const k = VALUES[r * NCOLS + col] | 0;
+    if (k >= 0 && k < acc.length) { acc[k].a += VALUES[r * NCOLS + g.la]; acc[k].o += VALUES[r * NCOLS + g.lo]; acc[k].n++; }
+  }
+  return acc.map(v => v.n ? { lat: v.a / v.n, lon: v.o / v.n } : { lat: 0, lon: 0 });
+}
+
 // labels 來自本機類別;values 由 AI 寫的受圍籬 cell 在本機算出
-function makeMorphChart(labels, values) {
+function makeMorphChart(labels, values, geo, ordered) {
   const N = labels.length || 1;
   const box = document.createElement('div');
   const bar = document.createElement('div'); bar.className = 'chips'; bar.style.margin = '0 0 .5rem';
-  const names = ['長條', '圓餅', '折線'];
-  const btns = names.map((n, k) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
+  // 視角依資料型態而定:類別 → 長條/圓餅(+有經緯度才有地球);有序(年份)→ 長條/折線
+  const VIEWS = ordered ? [['長條', 0], ['折線', 2]]
+                        : (geo ? [['長條', 0], ['圓餅', 1], ['🌍 地球', 3]] : [['長條', 0], ['圓餅', 1]]);
+  const btns = VIEWS.map(([n]) => { const b = document.createElement('span'); b.className = 'chip'; b.textContent = n; bar.appendChild(b); return b; });
   box.appendChild(bar);
   const W = Math.min(980, Math.max(420, N * 64)), H = 380, dpr = Math.min(2, window.devicePixelRatio || 1);
   const cv = document.createElement('canvas');
@@ -469,12 +577,18 @@ function makeMorphChart(labels, values) {
   const jit = new Float32Array(P * 4);
   { let s = 987; const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
     for (let p = 0; p < P; p++) { jit[p*4]=rnd(); jit[p*4+1]=rnd(); jit[p*4+2]=Math.sqrt(rnd()); jit[p*4+3]=rnd()*2-1; } }
-  const base = i => ({ 2: norm[i], 3: i, 4: N, 6: cum[i], 7: sum, 8: W, 9: H });
+  let spin = 0, zoom = 1, tilt = 0.30, autoSpin = true, hoverI = -1;
+  const base = i => ({ 2: norm[i], 3: i, 4: N, 6: cum[i], 7: sum, 8: W, 9: H,
+                       17: geo ? geo[i].lat : 0, 18: geo ? geo[i].lon : 0, 20: spin, 21: zoom, 22: tilt });
+  const dvg = v => { const m = Math.max(...values.map(Math.abs)) || 1, t = Math.max(-1, Math.min(1, v / m));
+    return t >= 0 ? `hsl(${Math.round(20 - 20 * t)}, 85%, ${Math.round(58 - 8 * t)}%)`
+                  : `hsl(${Math.round(205 + 25 * t)}, 80%, 62%)`; };
   const nextXY = i => { const j = Math.min(i + 1, N - 1);
     return { 15: lay({ ...base(j), 5: 5, 19: 2 }), 16: lay({ ...base(j), 5: 6, 19: 2 }) }; };
 
   let fromL = 0, toL = 0, prog = 1, tStart = -1e9, animating = false;
   const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t*t*(3-2*t); };
+  const pos = [];
   function crisp(L, alpha) {
     ctx.save(); ctx.globalAlpha = alpha;
     if (L === 0) {
@@ -500,6 +614,32 @@ function makeMorphChart(labels, values) {
           ctx.fillText(Math.round(frac * 100) + '%', cx + lr * Math.cos(m), cy + lr * Math.sin(m) + 7); }
       }
     }
+    if (L === 3) {                                   // 🌍 正射投影的地球:座標由 layout cell 算
+      const gcx = 58 + (W - 84) / 2, gcy = 34 + (H - 108) / 2, GR = (H - 108) * 0.44;
+      ctx.beginPath(); ctx.arc(gcx, gcy, GR, 0, 6.2831853);
+      ctx.fillStyle = '#0a1220'; ctx.fill(); ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1; ctx.stroke();
+      for (let i = 0; i < N; i++) {
+        const vis = lay({ ...base(i), 5: 7, 19: 3 });
+        if (vis < 0) continue;                       // 背面剔除
+        const gx = lay({ ...base(i), 5: 5, 19: 3 }), gy = lay({ ...base(i), 5: 6, 19: 3 });
+        ctx.globalAlpha = alpha * (0.35 + 0.65 * Math.min(1, vis));
+        const rad = 2.5 + 4 * Math.abs(values[i]) / (Math.max(...values.map(Math.abs)) || 1);
+        ctx.beginPath(); ctx.arc(gx, gy, rad, 0, 6.2831853);
+        ctx.fillStyle = dvg(values[i]); ctx.fill();
+        pos[i] = { x: gx, y: gy, r: rad };
+        if (i === hoverI) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      }
+      ctx.globalAlpha = alpha;                        // 標籤:前 10 大 + 游標指到的
+      ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      const rank = values.map((v, i) => [Math.abs(v), i]).sort((a, b) => b[0] - a[0]).slice(0, 10).map(p => p[1]);
+      for (const i of new Set([...rank, hoverI])) {
+        if (i < 0 || !pos[i]) continue;
+        ctx.fillStyle = i === hoverI ? '#fff' : '#c9d1d9';
+        ctx.fillText(`${labels[i]} ${values[i] > 0 ? '+' : ''}${fmt(values[i])}`, pos[i].x + pos[i].r + 3, pos[i].y);
+      }
+      ctx.fillStyle = '#8b949e'; ctx.textAlign = 'center';
+      ctx.fillText('紅=偏暖 · 藍=偏冷 · 點大小=|距平| · 拖曳可轉、滾輪縮放、游標指出國名', gcx, H - 14);
+    }
     if (L === 2) {
       const pts = []; for (let i = 0; i < N; i++) pts.push([lay({ ...base(i), 5: 5, 19: 2 }), lay({ ...base(i), 5: 6, 19: 2 })]);
       ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
@@ -516,6 +656,7 @@ function makeMorphChart(labels, values) {
   function frame(now) {
     if (!box.isConnected) return;
     ctx.clearRect(0, 0, W, H);
+    if (autoSpin) spin += 0.0035;                    // 地球自轉(拖曳後停,交給你轉)
     if (animating) { prog = Math.min(1, (now - tStart) / 1100); if (prog >= 1) { animating = false; fromL = toL; } }
     if (!animating) { crisp(toL, 1); requestAnimationFrame(frame); return; }
     const g = prog, srcA = 1 - smooth(0, .32, g), tgtA = smooth(.68, 1, g),
@@ -536,11 +677,32 @@ function makeMorphChart(labels, values) {
     requestAnimationFrame(frame);
   }
   btns.forEach((b, k) => b.onclick = () => {
-    if (k === toL && !animating) return;
-    fromL = toL; toL = k; prog = 0; tStart = performance.now(); animating = true;
+    const L = VIEWS[k][1];
+    if (L === toL && !animating) return;
+    fromL = toL; toL = L; prog = 0; tStart = performance.now(); animating = true;
     btns.forEach((x, j) => x.style.borderColor = j === k ? '#58a6ff' : '#30363d');
   });
   btns[0].style.borderColor = '#58a6ff';
+  // ── 地球互動:拖曳轉、滾輪縮放、游標指出國名 ──
+  let drag = null;
+  cv.style.cursor = 'grab';
+  cv.addEventListener('pointerdown', e => { if (toL !== 3) return; drag = { x: e.clientX, y: e.clientY };
+    autoSpin = false; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; });
+  cv.addEventListener('pointerup', e => { drag = null; cv.style.cursor = 'grab'; });
+  cv.addEventListener('pointermove', e => {
+    const r = cv.getBoundingClientRect(), mx = (e.clientX - r.left) * W / r.width, my = (e.clientY - r.top) * H / r.height;
+    if (drag) { spin -= (e.clientX - drag.x) * 0.006; tilt = Math.max(-1.3, Math.min(1.3, tilt + (e.clientY - drag.y) * 0.005));
+      drag = { x: e.clientX, y: e.clientY }; return; }
+    if (toL !== 3) { hoverI = -1; return; }
+    let best = -1, bd = 14 * 14;
+    for (let i = 0; i < N; i++) { const p = pos[i]; if (!p) continue;
+      const d = (p.x - mx) * (p.x - mx) + (p.y - my) * (p.y - my); if (d < bd) { bd = d; best = i; } }
+    hoverI = best;
+  });
+  cv.addEventListener('pointerleave', () => { hoverI = -1; });
+  cv.addEventListener('wheel', e => { if (toL !== 3) return; e.preventDefault();
+    zoom = Math.max(0.6, Math.min(3.2, zoom * (e.deltaY < 0 ? 1.12 : 0.89))); }, { passive: false });
+
   requestAnimationFrame(frame);
   return box;
 }
@@ -551,7 +713,56 @@ const EXAMPLES = ['各部門平均薪資,長條圖', '薪資的平均、中位�
 $('chips').innerHTML = EXAMPLES.map(e => `<span class="chip">${e}</span>`).join('');
 document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = EXAMPLES[i]; $('intent').focus(); });
 
-let lastSchema = null;
+let lastSchema = null, currentSchema = null, compileCount = 0, reTimer = null;
+
+async function showSchema(schema, meta) {          // 展開後再顯示,證據欄才看得到合成的 cell
+  const ex = expandAggregates(schema);
+  $('stage').innerHTML = '';
+  $('stage').appendChild(await manifestUi(ex));
+  renderEvidence(ex, meta);
+}
+async function renderStage(schema) {
+  $('stage').innerHTML = '';
+  $('stage').appendChild(await manifestUi(schema));
+}
+
+let prevCells = {};        // 上一代的 cell 原始碼,用來看「你那句話改了程式的哪幾行」
+function diffLines(oldSrc, newSrc) {
+  const oldSet = new Set((oldSrc || '').split('\n').map(l => l.trim()));
+  return newSrc.split('\n').map(l => ({ t: l, chg: oldSrc != null && !oldSet.has(l.trim()) }));
+}
+
+function renderEvidence(schema, meta) {
+  currentSchema = schema;
+  const cells = schema.cells || [];
+  $('evidence').innerHTML =
+    `<div style="font-size:.74rem;color:#8b949e;margin-bottom:.55rem"><b style="color:#c9d1d9">${schema.title || ''}</b>` +
+    ` · ${cells.length} 支 cell${meta ? ` · 第 ${meta.attempt} 次過關` : ''} · 本頁已編譯 <b style="color:#c9d1d9" id="ccount">${compileCount}</b> 次</div>` +
+    `<div class="live">⚡ <b>你剛才那句話,改的不是參數 —— 是程式本身。</b><br>` +
+    `下面<span style="color:#7ee787">綠色的行</span>就是這一代 cell 因你而改寫的地方;改完立刻重編成 wasm、熱抽換進正在跑的 App。</div>` +
+    cells.map((c, i) => {
+      const old = prevCells[c.id];
+      const d = diffLines(old, c.script);
+      const nch = d.filter(x => x.chg).length;
+      const tag = old == null ? '新生' : (nch ? `改寫 ${nch} 行` : '未變');
+      return `<div class="cell"><div class="ch"><span>${c.id}</span>` +
+        `<span class="rc">${tag}${c.bytes ? ` · ${c.bytes} bytes wasm` : ''}</span></div>` +
+        `<pre>${d.map(x => `<span class="dl${x.chg ? ' chg' : ''}">${(x.t || ' ').replace(/</g, '&lt;')}</span>`).join('')}</pre></div>`;
+    }).join('') +
+    `<div class="gen">🧪 想確認圍籬是真的?<button class="fencebtn" id="fencetest">按這裡:把 fetch 塞進一支 cell 試編譯</button>` +
+    `<span id="fenceout" style="margin-left:.5rem"></span></div>` +
+    `<div class="fence">圍籬:每支 cell 只能 import <code>${((meta && meta.fence) || ['env.sin','env.cos','env.get','env.set','env.ld','env.sd']).join(', ')}</code>` +
+    ` —— <b>沒有網路</b>。它讀得到你的資料(<code>ld</code>),但沒有能力送出去;這裡 <code>sd</code> 也是 no-op,連改都改不了。</div>`;
+  for (const c of cells) prevCells[c.id] = c.script;      // 記下這一代,供下一代 diff
+  const fb = $('fencetest');
+  if (fb) fb.onclick = () => {
+    const out = $('fenceout');
+    const evil = 'let a = ld(0.0);\nfetch(0.0);\na';
+    try { compileUiCell(evil); out.textContent = '⚠ 竟然編過了(不該發生)'; out.style.color = '#f85149'; }
+    catch (e) { out.innerHTML = `<b style="color:#7ee787">✓ 編譯期死了</b> <span style="color:#8b949e">${String(e.message || e).slice(0, 60)}</span>`; }
+  };
+}
+
 async function analyze() {
   const intent = $('intent').value.trim(); if (!intent) { status('問一句吧', 'err'); return; }
   $('go').disabled = true;
@@ -566,14 +777,9 @@ async function analyze() {
   if (!data.ok) { status('✗ 失敗:' + (data.error || '?'), 'err'); $('go').disabled = false; return; }
   lastSchema = data.schema;
   try {
-    $('stage').innerHTML = ''; $('stage').appendChild(await manifestUi(data.schema));
-    $('evidence').innerHTML =
-      `<div style="font-size:.74rem;color:#8b949e;margin-bottom:.6rem"><b style="color:#c9d1d9">${data.schema.title || ''}</b> · 第 ${data.attempt} 次過關 · ${(data.cells || []).length} 支 cell</div>` +
-      (data.cells || []).map(c => `<div class="cell"><div class="ch"><span>${c.id}</span><span>${c.bytes} bytes wasm</span></div><pre>${c.script.replace(/</g, '&lt;')}</pre></div>`).join('') +
-      `<div class="fence">圍籬:每支 cell 只能 import <code>${(data.fence || []).join(', ')}</code> —— <b>沒有網路</b>。` +
-      `它讀得到你的資料(<code>ld</code>),但<b>沒有能力把資料送出去</b>;想 <code>fetch</code> 編譯期就死。` +
-      `這裡 <code>sd</code> 也被我關成 no-op,所以它<b>連改都改不了</b>你的資料。</div>`;
-    status('✓ 算完了 —— 全程在你的機器上', 'ok');
+    compileCount += (data.cells || []).length;
+    await showSchema(data.schema, data);
+    status('✓ 算完了 —— 全程在你的機器上(右邊原始碼可直接改)', 'ok');
   } catch (e) { status('✗ 執行錯誤:' + e, 'err'); console.error(e); }
   $('go').disabled = false;
 }
@@ -619,10 +825,9 @@ async function bootTemp() {
     const t = await (await fetch('/assets/global-temp.csv')).text();
     ingest(t, 'global-temp.csv(NASA GISTEMP 1880–2025)', t.length);
     useTempExamples();
-    lastSchema = SEED_ANALYSIS;
-    $('stage').innerHTML = ''; $('stage').appendChild(await manifestUi(SEED_ANALYSIS));
-    $('evidence').innerHTML = '<div style="font-size:.74rem;color:#8b949e">這張是<b style="color:#c9d1d9">預烘的第一張圖</b>' +
-      '(沒有叫 API)。下面說一句話就能改它——排名、換視角、換區域、換期間。</div>';
+    lastSchema = JSON.parse(JSON.stringify(SEED_ANALYSIS));
+    compileCount += SEED_ANALYSIS.cells.length;
+    await showSchema(lastSchema, null);
     status('👋 這是 NASA 真實資料的第一張圖 —— 下面說一句話就能改它', 'ok');
     return true;
   } catch (e) { console.warn(e); return false; }
@@ -631,6 +836,31 @@ function useTempExamples() {
   $('chips').innerHTML = TEMP_EX.map(x => `<span class="chip">${x}</span>`).join('');
   document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = TEMP_EX[i]; $('intent').focus(); });
 }
+
+const COUNTRY_EX = [
+  '各國平均距平排名(由高到低)',
+  '用地球圖看各國平均距平',
+  '各氣候帶的平均距平比較',
+  '南北半球平均距平',
+  '各國 1990 年以後的平均距平,地球圖',
+];
+$('sampleCountry').onclick = async e => {
+  e.stopPropagation();
+  status('載入 181 國真實資料…');
+  try {
+    const t = await (await fetch('/assets/country-temp.csv')).text();
+    ingest(t, 'country-temp.csv(OWID/Berkeley Earth + 經緯度, 1950–2025)', t.length);
+    $('chips').innerHTML = COUNTRY_EX.map(x => `<span class="chip">${x}</span>`).join('');
+    document.querySelectorAll('#chips .chip').forEach((c, i) => c.onclick = () => { $('intent').value = COUNTRY_EX[i]; $('intent').focus(); });
+    // 直接給一張宣告式的地球圖(不叫 API)
+    const seed = { title: '各國平均氣溫距平(°C,1990 年後)',
+      tree: { type: 'stack', children: [
+        { type: 'label', text: '各國平均氣溫距平(°C,1990 年後 · 基準 1991–2020)· 可切長條/圓餅/地球' },
+        { type: 'bar', groups: { col: 1, agg: 'mean', of: 6, sort: 'desc', where: { col: 0, min: 1990 } } } ] } };
+    lastSchema = seed; await showSchema(seed, null);
+    status('👋 181 國真實資料 —— 切到 🌍 地球看看,可拖曳旋轉、滾輪縮放', 'ok');
+  } catch (err) { status('✗ 取不到:' + err, 'err'); }
+};
 
 $('sampleTemp').onclick = async e => {
   e.stopPropagation();
