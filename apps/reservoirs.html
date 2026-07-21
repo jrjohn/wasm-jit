@@ -208,55 +208,96 @@ const cv = $('cv'), ctx = cv.getContext('2d');
 const DPR = Math.min(2, window.devicePixelRatio || 1);
 cv.width = CW * DPR; cv.height = CH * DPR; ctx.scale(DPR, DPR);
 
-// 版面權重(給導引線淡入淡出)
-function layoutWeight(now) {
-  const gt = ease(Math.min(1, Math.max(0, (now - tStart - STAGGER * 0.5) / DUR)));
-  const w = [0, 0, 0]; w[cur] += 1 - gt; w[tgt] += gt;
-  if (cur === tgt) { w[cur] = 1; }
-  return w;
+// ── 靜止時畫「實心圖」;只有切換途中才碎成粒子 ──
+const M = { L: 64, R: 34, T: 46, B: 70 };
+const plotW = CW - M.L - M.R, plotH = CH - M.T - M.B, baseline = CH - M.B;
+const colStep = plotW / N, barW = colStep * 0.60;
+const cxOf = i => M.L + (i + 0.5) * colStep;
+const topY = i => baseline - RES[i].v * plotH;
+const ccx = M.L + plotW / 2, ccy = M.T + plotH / 2, PR = plotH * 0.46;
+const ang0 = i => cum[i] / sumV * 6.2831853 - 1.5707963;
+const ang1 = i => (cum[i] + RES[i].v) / sumV * 6.2831853 - 1.5707963;
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+function barTopRect(x, y, w, h, r) {
+  r = Math.min(r, w / 2, Math.max(0, h));
+  ctx.beginPath();
+  ctx.moveTo(x, y + h); ctx.lineTo(x, y + r); ctx.arcTo(x, y, x + r, y, r);
+  ctx.lineTo(x + w - r, y); ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h); ctx.closePath();
 }
 
-function drawGuides(w) {
-  const mL = 64, mB = 70, baseline = CH - mB;
-  // 長條基線
-  if (w[0] > 0.02) { ctx.globalAlpha = 0.25 * w[0]; ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(mL, baseline); ctx.lineTo(CW - 34, baseline); ctx.stroke(); }
-  // 圓餅環
-  if (w[1] > 0.02) { const ccx = mL + (CW - mL - 34) / 2, ccy = 46 + (CH - 46 - mB) / 2, R = (CH - 46 - mB) * 0.46;
-    ctx.globalAlpha = 0.22 * w[1]; ctx.strokeStyle = '#30363d';
-    ctx.beginPath(); ctx.arc(ccx, ccy, R, 0, 6.2831853); ctx.stroke(); }
-  // 折線連線
-  if (w[2] > 0.02) { ctx.globalAlpha = 0.7 * w[2]; ctx.strokeStyle = '#58a6ff88'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); VERT.forEach((v, i) => i ? ctx.lineTo(v.x, v.y) : ctx.moveTo(v.x, v.y)); ctx.stroke(); }
+function solidBar(a) {
+  ctx.globalAlpha = a * 0.3; ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(M.L, baseline); ctx.lineTo(CW - M.R, baseline); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.font = '11px ui-monospace, monospace';
+  for (let i = 0; i < N; i++) {
+    ctx.globalAlpha = a; ctx.fillStyle = COLORS[i];
+    barTopRect(cxOf(i) - barW / 2, topY(i), barW, RES[i].v * plotH, 4); ctx.fill();
+    ctx.globalAlpha = a * 0.85; ctx.fillStyle = '#c9d1d9';
+    ctx.fillText(Math.round(RES[i].v * 100) + '%', cxOf(i), topY(i) - 6);
+  }
   ctx.globalAlpha = 1;
 }
+
+function solidPie(a) {
+  for (let i = 0; i < N; i++) {
+    ctx.globalAlpha = a; ctx.fillStyle = COLORS[i];
+    ctx.beginPath(); ctx.moveTo(ccx, ccy); ctx.arc(ccx, ccy, PR, ang0(i), ang1(i)); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function solidLine(a) {
+  ctx.globalAlpha = a * 0.9; ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < N; i++) { const x = cxOf(i), y = topY(i); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+  ctx.stroke();
+  for (let i = 0; i < N; i++) {
+    ctx.globalAlpha = a; ctx.beginPath(); ctx.arc(cxOf(i), topY(i), 4.5, 0, 6.2831853);
+    ctx.fillStyle = COLORS[i]; ctx.fill(); ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+const SOLID = [solidBar, solidPie, solidLine];
 
 function frame(now) {
   ctx.clearRect(0, 0, CW, CH);
-  const w = layoutWeight(now);
-  drawGuides(w);
 
-  let allDone = true;
-  ctx.globalCompositeOperation = 'lighter';
-  for (let p = 0; p < P; p++) {
-    const lt = Math.min(1, Math.max(0, (now - tStart - stag[p]) / DUR));
-    if (lt < 1) allDone = false;
-    const e = ease(lt);
-    const A = TG[cur][p], B = TG[tgt][p];
-    const dx = B.x - A.x, dy = B.y - A.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const bulge = curve[p] * Math.min(90, len * 0.28) * Math.sin(Math.PI * e);
-    const x = A.x + dx * e + (-dy / len) * bulge;
-    const y = A.y + dy * e + (dx / len) * bulge;
-    const i = (p / K) | 0;
-    ctx.fillStyle = COLORS[i];
-    ctx.globalAlpha = 0.85;
-    ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2831853); ctx.fill();
+  if (cur === tgt) {                       // 靜止:只畫實心圖
+    SOLID[cur](1);
+    requestAnimationFrame(frame); return;
   }
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
 
-  if (allDone && cur !== tgt) cur = tgt;
+  // 切換中:實心源淡出 → 粒子飛越 → 實心目標淡入
+  const g = Math.min(1, (now - tStart) / (DUR + STAGGER));
+  const srcA = 1 - smooth(0.0, 0.30, g);
+  const tgtA = smooth(0.70, 1.0, g);
+  const partA = smooth(0.0, 0.20, g) * (1 - smooth(0.80, 1.0, g));
+  if (srcA > 0.01) SOLID[cur](srcA);
+  if (tgtA > 0.01) SOLID[tgt](tgtA);
+
+  if (partA > 0.01) {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let p = 0; p < P; p++) {
+      const lt = Math.min(1, Math.max(0, (now - tStart - stag[p]) / DUR));
+      const e = ease(lt);
+      const A = TG[cur][p], B = TG[tgt][p];
+      const dx = B.x - A.x, dy = B.y - A.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const bulge = curve[p] * Math.min(90, len * 0.28) * Math.sin(Math.PI * e);
+      const x = A.x + dx * e + (-dy / len) * bulge;
+      const y = A.y + dy * e + (dx / len) * bulge;
+      ctx.fillStyle = COLORS[(p / K) | 0];
+      ctx.globalAlpha = 0.85 * partA;
+      ctx.beginPath(); ctx.arc(x, y, 2.6, 0, 6.2831853); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+  }
+
+  if (g >= 1) cur = tgt;
   requestAnimationFrame(frame);
 }
 
@@ -291,10 +332,10 @@ $('legend').innerHTML = RES.map((r, i) =>
     runFn = instance.exports.run;
     fuelG = instance.exports.fuel || null;
     computeTargets();
-    $('foot').innerHTML = `版面幾何由一支 <b>${bytes.length}-byte 受圍籬 cell</b> 算出(${P} 顆粒子 × 3 版面,` +
-      `編一次、算一次,之後純粹播放)。圍籬 = <code>sin cos get set ld sd</code>——cell 讀得到水庫值,` +
-      `卻無法把它送去任何地方(想 <code>fetch</code> 編譯期就死)。<b>換圖 = 換那支算位置的函數</b>,` +
-      `粒子始終是同一批,只是重新落位。`;
+    $('foot').innerHTML = `靜止時是<b>實心圖</b>;一按切換,實心就<b>碎成 ${P} 顆粒子</b>飛越、再重組成目標。` +
+      `每顆粒子的飛行目標,由一支 <b>${bytes.length}-byte 受圍籬 cell</b> 算出(編一次、算一次)。` +
+      `圍籬 = <code>sin cos get set ld sd</code>:cell 讀得到水庫值,卻無法把它送去任何地方(想 <code>fetch</code> 編譯期就死)。` +
+      `同一座水庫的顏色貫穿三圖——那是同一批粒子換隊形,不是拆掉重蓋。`;
     requestAnimationFrame(frame);
   } catch (err) {
     $('foot').innerHTML = `<span style="color:#f85149">需要 /pkg 內的 wasm-jit 編譯器,此處未載入到:${err}</span>`;
