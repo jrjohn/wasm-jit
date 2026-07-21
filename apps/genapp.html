@@ -117,29 +117,33 @@ async function manifestUi(schema) {
   }
   const wiresFrom = {};
   for (const w of (schema.wires || [])) (wiresFrom[w.from] = wiresFrom[w.from] || []).push(w.to);
-  const binds = [];
+  const binds = [], charts = [];
   let budget = 0;
   const run = (id, x) => { const f = runFns[id]; if (!f) return; if (fuels[id]) fuels[id].value = 200000; outputs[id] = f(x); };
   const fire = (id, x) => { if (budget-- <= 0) return; run(id, x); for (const to of (wiresFrom[id] || [])) fire(to, outputs[id] || 0); };
-  const refresh = () => { for (const b of binds) { const v = outputs[b.id]; b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v); } };
+  const refresh = () => {
+    for (const b of binds) { const v = outputs[b.id]; b.el.textContent = (v == null || Number.isNaN(v)) ? '—' : fmt(v); }
+    for (const ch of charts) drawChart(ch, ch.slices.map(s => ({ label: s.label, value: outputs[s.bind] || 0, color: s.color })));
+  };
   const act = (cellId, x) => { budget = 128; fire(cellId, x); refresh(); };
 
-  const root = build(schema.tree, act, binds);
+  const root = build(schema.tree, act, binds, charts);
   budget = 512;
   for (const it of (schema.init || [])) fire(it.cell, +it.arg || 0);
-  // recompute every wired compute-cell once so bound values show up
-  const targets = new Set((schema.wires || []).map(w => w.to));
-  budget = 512; for (const t of targets) run(t, 0);
+  // run every DISPLAYED cell once so bound values AND chart slices populate
+  // (constant data cells like {"id":"usa","script":"320.0"} have no wires firing them)
+  const shown = new Set([...binds.map(b => b.id), ...charts.flatMap(c => c.slices.map(s => s.bind)), ...(schema.wires || []).map(w => w.to)]);
+  for (const id of shown) run(id, 0);
   refresh();
   return root;
 }
 
-function build(node, act, binds) {
+function build(node, act, binds, charts) {
   if (!node || !node.type) return document.createTextNode('');
   const t = node.type;
   if (t === 'stack' || t === 'row') {
     const d = document.createElement('div'); d.className = t === 'row' ? 'w-row' : 'w-stack';
-    (node.children || []).forEach(ch => d.appendChild(build(ch, act, binds))); return d;
+    (node.children || []).forEach(ch => d.appendChild(build(ch, act, binds, charts))); return d;
   }
   if (t === 'label') { const p = document.createElement('div'); p.className = 'w-label'; p.textContent = node.text || ''; return p; }
   if (t === 'value') {
@@ -163,7 +167,53 @@ function build(node, act, binds) {
     s.min = node.min ?? 0; s.max = node.max ?? 100; s.step = node.step ?? 1; s.value = node.min ?? 0;
     const cell = (node.on_input || {}).cell; s.addEventListener('input', () => act(cell, +s.value)); w.appendChild(s); return w;
   }
+  if (t === 'pie' || t === 'bar') {                 // NEW primitive: a chart the host draws from cell-bound slices
+    const LW = 300, LH = 240, dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cv = document.createElement('canvas');
+    cv.width = LW * dpr; cv.height = LH * dpr; cv.style.width = LW + 'px'; cv.style.height = LH + 'px';
+    cv.getContext('2d').scale(dpr, dpr);
+    const sls = (node.slices || []);
+    const slices = sls.map((s, i) => ({ label: s.label || ('#' + i), bind: s.bind, color: s.color || `hsl(${Math.round(i / Math.max(1, sls.length) * 360)}, 72%, 60%)` }));
+    charts.push({ cv, kind: t, slices, LW, LH });
+    return cv;
+  }
   const p = document.createElement('div'); p.className = 'w-label'; p.style.opacity = .5; p.textContent = '[' + t + ']'; return p;
+}
+
+// the host's chart primitive — a pie (文字內崁:label+% 落在每一瓣裡)or a bar, from slice values
+function drawChart(ch, slices) {
+  const ctx = ch.cv.getContext('2d'), W = ch.LW, H = ch.LH;
+  ctx.clearRect(0, 0, W, H);
+  const total = slices.reduce((a, s) => a + Math.max(0, s.value), 0) || 1;
+  if (ch.kind === 'pie') {
+    const cx = W * 0.42, cy = H / 2, R = Math.min(W * 0.38, H * 0.44);
+    let a = -Math.PI / 2;
+    for (const s of slices) {
+      const frac = Math.max(0, s.value) / total, a2 = a + frac * 2 * Math.PI;
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a2); ctx.closePath();
+      ctx.fillStyle = s.color; ctx.fill(); ctx.strokeStyle = '#0b0f14'; ctx.lineWidth = 2; ctx.stroke();
+      if (frac > 0.04) {
+        const m = (a + a2) / 2, lr = R * 0.6, lx = cx + lr * Math.cos(m), ly = cy + lr * Math.sin(m);
+        ctx.fillStyle = '#fff'; ctx.font = '600 11px ui-monospace, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(s.label, lx, ly - 6); ctx.fillText(Math.round(frac * 100) + '%', lx, ly + 7);
+      }
+      a = a2;
+    }
+    // legend on the right
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.font = '11px ui-monospace, monospace';
+    let ly = H / 2 - slices.length * 8;
+    for (const s of slices) { ctx.fillStyle = s.color; ctx.fillRect(W * 0.84, ly - 5, 10, 10); ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, W * 0.84 + 15, ly); ly += 18; }
+  } else {
+    const n = slices.length, mL = 8, mB = 22, plotW = W - mL - 8, plotH = H - 16 - mB, base = H - mB;
+    const max = Math.max(1, ...slices.map(s => s.value)), bw = plotW / n * 0.66;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.font = '10px ui-monospace, monospace';
+    slices.forEach((s, i) => {
+      const cx = mL + (i + 0.5) * plotW / n, h = Math.max(0, s.value) / max * plotH;
+      ctx.fillStyle = s.color; ctx.fillRect(cx - bw / 2, base - h, bw, h);
+      ctx.fillStyle = '#c9d1d9'; ctx.fillText(s.label, cx, base + 4);
+      ctx.fillText(fmt(s.value), cx, base - h - 13);
+    });
+  }
 }
 
 function renderEvidence(data, dt) {

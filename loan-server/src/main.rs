@@ -262,7 +262,9 @@ fn try_compile_ui(src: &str) -> Result<usize, String> {
 /// The spec handed to the model. It describes the fenced DSL + the schema shape so the
 /// model's whole job is to translate an intent into a declaration — it cannot express
 /// anything outside the fence (and if it tries, the compile below rejects it).
-const GEN_SPEC: &str = r#"You translate a user's intent into a tiny UI app expressed as a JSON schema for a capability-fenced runtime. The app's compute is done by "cells" in a tiny DSL.
+const GEN_SPEC: &str = r#"Respond IMMEDIATELY with ONLY the JSON described below — nothing else. Do NOT use any tools, do NOT search the web, do NOT ask clarifying questions, do NOT explain. If the app needs real-world data you don't have (statistics, prices, etc.), just invent small representative sample numbers. This is a code-generation task, answer in one shot.
+
+You translate a user's intent into a tiny UI app expressed as a JSON schema for a capability-fenced runtime. The app's compute is done by "cells" in a tiny DSL.
 
 DSL (each cell is a function `run(x) -> f64`; the LAST line is the returned number):
 - statements end with ; ; `let NAME = EXPR;`
@@ -291,8 +293,11 @@ NODES:
  {"type":"value","label":"...","bind":"cellId"}                  // shows cellId's latest return (2 decimals)
  {"type":"button","text":"...","on_click":{"cell":"id"}}         // runs cell with x=0
  {"type":"slider","min":0,"max":100,"step":1,"label":"...","on_input":{"cell":"id"}}
+ {"type":"pie","slices":[{"label":"美國","bind":"usa"},{"label":"中國","bind":"china"}]}   // pie chart; each slice's ANGLE = its bound cell's return value (percentages auto-computed & drawn inside each slice)
+ {"type":"bar","slices":[{"label":"...","bind":"cellId"}]}                                    // bar chart; each bar's HEIGHT = its bound cell's return value
 
 PATTERN: an input writes its value into a slot via `set(n, x)` then returns x; each compute cell reads slots via get(n); a value node binds to a compute cell; wire every input to every compute cell that depends on it.
+CHART PATTERN: for a pie/bar of fixed data, make ONE cell per slice returning that slice's raw number (e.g. {"id":"usa","script":"35.0"}), and bind each slice to its cell. Do NOT precompute percentages or bake labels like "35%" into text — the pie draws the shares and % itself. Use a real "pie"/"bar" node, never fake a chart with rows of labels.
 
 EXAMPLE (loan calculator):
 {"title":"房貸試算","cells":[{"id":"setP","script":"set(0.0, x);\nx"},{"id":"setR","script":"set(1.0, x);\nx"},{"id":"setY","script":"set(2.0, x);\nx"},{"id":"monthly","script":"let P = get(0.0);\nlet r = get(1.0) / 1200.0;\nlet n = get(2.0) * 12.0;\nlet M = 0.0;\nif n >= 1.0 {\n if r < 0.0000001 { M = P / n; }\n if r >= 0.0000001 {\n  let pw = 1.0;\n  let i = 0.0;\n  while i < n { pw = pw * (1.0 + r); i = i + 1.0; }\n  M = P * r * pw / (pw - 1.0);\n }\n}\nM"}],"wires":[{"from":"setP","to":"monthly"},{"from":"setR","to":"monthly"},{"from":"setY","to":"monthly"}],"init":[{"cell":"setP","arg":300000},{"cell":"setR","arg":5},{"cell":"setY","arg":30}],"tree":{"type":"stack","children":[{"type":"label","text":"房貸試算"},{"type":"row","children":[{"type":"label","text":"本金"},{"type":"input","placeholder":"300000","on_input":{"cell":"setP"}}]},{"type":"row","children":[{"type":"label","text":"利率%"},{"type":"input","placeholder":"5","on_input":{"cell":"setR"}}]},{"type":"row","children":[{"type":"label","text":"年數"},{"type":"input","placeholder":"30","on_input":{"cell":"setY"}}]},{"type":"row","children":[{"type":"label","text":"月付"},{"type":"value","bind":"monthly"}]}]}}
@@ -305,8 +310,13 @@ struct GenReq {
 
 async fn call_claude(prompt: &str) -> Result<String, String> {
     let bin = std::env::var("CLAUDE_BIN").unwrap_or_else(|_| "/opt/homebrew/bin/claude".into());
-    let fut = tokio::process::Command::new(&bin).arg("-p").arg(prompt).output();
-    let out = tokio::time::timeout(std::time::Duration::from_secs(120), fut)
+    let fut = tokio::process::Command::new(&bin)
+        .arg("-p")
+        .arg("--model")
+        .arg("claude-sonnet-5")
+        .arg(prompt)
+        .output();
+    let out = tokio::time::timeout(std::time::Duration::from_secs(180), fut)
         .await
         .map_err(|_| "claude 逾時(>120s)".to_string())?
         .map_err(|e| format!("claude 啟動失敗: {e}"))?;
