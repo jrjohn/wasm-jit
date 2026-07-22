@@ -1637,6 +1637,7 @@ struct SessionReq { credential: String }
 async fn session_start(Json(req): Json<SessionReq>) -> impl IntoResponse {
     match auth::verify(&req.credential).await {
         Ok(u) => {
+            metrics::note_identity(&u.sub, &u.email, &u.name); // the operator's private who-to-thank list
             metrics::record("signin", &metrics::user_key(&u.sub), serde_json::json!({}));
             (
                 StatusCode::OK,
@@ -1670,6 +1671,7 @@ async fn api_stats() -> impl IntoResponse {
 async fn whoami(headers: axum::http::HeaderMap) -> impl IntoResponse {
     match auth::user_from_any(&headers).await {
         Ok(u) => {
+            metrics::note_identity(&u.sub, &u.email, &u.name); // capture email on every signed-in load, going forward
             metrics::record("visit", &metrics::user_key(&u.sub), serde_json::json!({"signed_in": true}));
             Json(serde_json::json!({
             "signed_in": true, "sub": u.sub, "name": u.name, "email": u.email,

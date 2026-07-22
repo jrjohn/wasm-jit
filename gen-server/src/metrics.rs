@@ -18,10 +18,17 @@
 //! ## On identity
 //!
 //! People are counted by a **salted hash** of their Google subject id, so
-//! "how many distinct people" is answerable without this file holding anyone's
-//! identity. The salt lives beside the log and never leaves the host; lose it
-//! and the old rows become permanently anonymous, which is the correct
-//! direction for a file to fail in.
+//! "how many distinct people" is answerable without the event log or the public
+//! count holding anyone's identity. The salt lives beside the log and never leaves
+//! the host; lose it and the old rows become permanently anonymous, which is the
+//! correct direction for a file to fail in.
+//!
+//! The one exception, added by the operator's explicit choice: a SEPARATE private
+//! directory (`people-identity.json`) maps that same hash to the email/name behind
+//! it — a "who to thank" list for contact and, later, per-user quota. It is kept
+//! deliberately apart from the hash-only event log and roster, and is **never served
+//! by any endpoint** — it exists only on the host. The public numbers stay identity-
+//! free; the private directory is a contact list, not part of the falsifiable count.
 //!
 //! Be clear about what this does NOT make private: a world records its author's
 //! display name (that is the point of attribution), and the ālaya ledger stores
@@ -31,7 +38,7 @@
 //! privacy when the ledger sits next to it.
 
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
 
@@ -174,6 +181,61 @@ fn note_person(user: &str) {
 /// The durable all-time count of distinct people who have signed in — never decreases.
 pub fn people_all_time() -> usize {
     roster().lock().map(|s| s.len()).unwrap_or(0)
+}
+
+/// The operator's private "who to thank" directory — the same salted user_key the
+/// public count uses, mapped to the identity behind it (email, display name, the raw
+/// Google sub, first/last seen). DELIBERATELY separate from the event log and roster,
+/// which stay hash-only: those are the public, falsifiable count; this is a private
+/// contact list the operator chose to keep. It is never served by any endpoint — read
+/// it on the host, or not at all.
+fn identities() -> &'static Mutex<HashMap<String, Value>> {
+    static IDS: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new();
+    IDS.get_or_init(|| {
+        let map = std::fs::read_to_string(format!("{DIR}/people-identity.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<HashMap<String, Value>>(&s).ok())
+            .unwrap_or_default();
+        Mutex::new(map)
+    })
+}
+
+/// Record who a signed-in person is, keyed by the same salted user_key the count uses
+/// so the private directory and the public number line up. Called from the auth-bearing
+/// handlers, where the full identity is in hand. Cheap: it rewrites the file only when
+/// something actually changed — a new person, a changed email/name, or the first sighting
+/// of a new day — so after first contact it is at most one small write per person per day.
+pub fn note_identity(sub: &str, email: &str, name: &str) {
+    if sub.is_empty() {
+        return;
+    }
+    let key = user_key(sub);
+    let today = today();
+    if let Ok(mut m) = identities().lock() {
+        let changed = match m.get(&key) {
+            Some(v) => {
+                v["email"].as_str() != Some(email)
+                    || v["name"].as_str() != Some(name)
+                    || v["last_seen"].as_str() != Some(today.as_str())
+            }
+            None => true,
+        };
+        if !changed {
+            return;
+        }
+        let first = m
+            .get(&key)
+            .and_then(|v| v["first_seen"].as_str().map(String::from))
+            .unwrap_or_else(|| today.clone());
+        m.insert(
+            key,
+            json!({ "email": email, "name": name, "sub": sub, "first_seen": first, "last_seen": today }),
+        );
+        let _ = std::fs::create_dir_all(DIR);
+        if let Ok(s) = serde_json::to_string_pretty(&*m) {
+            let _ = std::fs::write(format!("{DIR}/people-identity.json"), s);
+        }
+    }
 }
 
 /// Append one event. Never fails a request: if the log cannot be written the
