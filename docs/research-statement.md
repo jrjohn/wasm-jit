@@ -95,6 +95,18 @@ A structural point worth stating plainly, because it is the precise edge of the 
 
 This is exactly why Study 1's "deceptive interface" category is the one axis that cannot be scored automatically and needs human adjudication: deception lives in the gap the fence structurally cannot close. Naming that gap is not a weakness of the claim — it is the boundary of what "safe by construction" can honestly assert. The fence guarantees that a generated artifact *cannot exfiltrate, cannot escalate, cannot touch what it was not given*; it does not guarantee that the artifact is *truthful about what it is doing*. The first is a property of the substrate and is provable; the second is a property of the content and is exactly what Study 1 exists to measure.
 
+## 4d. Recursive capability attenuation in a live multi-agent world
+
+The substrate's sharpest demonstration is not the data workbench above — it is a live, multi-tenant world (a public deployment) in which the generated artifacts are **agents**, and agents can generate **more agents**. This is where the properties claimed in §2 stop being static assertions and start running under the exact pressure that matters for agentic AI.
+
+Agentic systems are moving toward agents that spawn agents. The safety question that scales with them is: *can a spawned agent exceed the authority of the agent that spawned it — regardless of how capable, or how prompt-injected, the generating model is?* Here the answer is enforced by construction:
+
+- **Attenuation across generation.** A generated agent (a capability-fenced cell) may itself generate new agents; each child's granted capability set is checked *at compile time* to be a **subset of its parent's**, and a divided spawn budget bounds the tree. An agent trying to hand a child a capability it does not itself hold is refused before the child ever runs. This is the object-capability *no-amplification* property (Miller, 2006) realized to arbitrary depth with **LLM-generated** agents — not argued on paper but observable live.
+- **Richness ⊥ reach, at the multi-agent level.** These agents rewrite their own behaviour, carry persistent state that is **host-mediated and isolated per tenant** (an agent never holds a database handle — the host returns only its own scoped state), act without prompting, and converse with and generate peers — yet not one acquires a capability it was not granted.
+- **Composition without per-component review.** A shared vocabulary of parts is extended by contributors and admitted by the **compile gate alone**; because a part built only from fenced parts is itself fenced, safety survives composition with no human in the loop.
+
+Why this is the load-bearing case: as generation depth and agent count grow, the two things practitioners currently lean on — *review each generated agent*, and *the model probably will not misbehave* — both weaken precisely as the generator gets stronger or is prompt-injected. A structural bound the generator **cannot widen, at any depth**, does not. That is the guarantee this world exists to demonstrate, and it is falsifiable in a minute on the public deployment. (It is a research testbed, not a shipping product — the contribution is the demonstration that capability confinement *composes across LLM-driven recursive generation*, not a platform.)
+
 ## 5. Where this sits — related work, and the honest gap
 
 **No single ingredient here is new.**
