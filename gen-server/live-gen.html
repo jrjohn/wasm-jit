@@ -96,7 +96,7 @@
 </style>
 </head>
 <body>
-<h1>Live generation — chat with Claude (in Docker) → UI manifests instantly
+<h1>Live generation — chat with Claude → UI manifests instantly
   <span style="float:right;font-weight:400;font-size:.8rem"><span id="people-count" style="opacity:.72;margin-right:1rem"></span><a href="/" style="color:#58a6ff">← arcana.boo</a></span></h1>
 <p class="sub">
 The generator runs sandboxed in a container (no volumes, API egress only); the generated seed is validated by
@@ -1390,12 +1390,12 @@ function compileEntities(world, g) {
     // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
     ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
     if (ent.physics) { ent.pvx = 0; ent.pvz = 0; ent.pvh = 0; ent.ph = Number.isFinite(ent.physics.h0) ? ent.physics.h0 : 0; } // dynamic state
-    // A declared, non-trivial behavior wins (the creator meant it). But a bare "0.0"
-    // is the trivial "no behavior" default — treat it as absent, so the being comes
-    // alive with its nature rather than standing frozen. A being meant to be still
-    // that also has no legs (rooted/inert) stays still anyway — natureReflex returns
-    // null for it; a rider's amble is ignored because the carrier carries.
-    if (def.behavior && def.behavior.trim() !== '0.0') {
+    // A DECLARED behaviour wins — always, and "0.0" is a declaration too. An author who
+    // wrote "0.0" meant STILL (moon4's fisherman and bridge are exactly this), and the
+    // nature reflex must not overrule their word. So it fills only genuine ABSENCE (no
+    // behaviour key at all): a bare being with nothing said gets its kind's nature; a
+    // being told to be still, stays still. This is what keeps hand-crafted scenes intact.
+    if (typeof def.behavior === 'string' && def.behavior.trim() !== '') {
       ent.origin = 'scene (DSL)';  // provenance label, NOT identity — soul stays def.soul (memory key)
       const bytes = compile_entity_wasm(def.behavior);
       const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
@@ -1632,13 +1632,15 @@ function natureReflex(grants) {
   return "let p = get(0.0);\nlet gait = get(1.0);\nlet moving = sin(p * 0.5) > -0.55;\nlet m = 0.012 * moving;\nmv(sin(gait) * m, cos(gait * 0.7) * m);\nset(0.0, p + 0.05);\nset(1.0, gait + 0.06 * moving);\n0.0";
 }
 function giveNatureReflex(ent, g) {
-  // 本性的常動 belongs to 眾生 (a KNOWN mobile kind — it walks, flies, or swims BY
+  // 本性的常動 belongs to 眾生 (a KNOWN LIVING kind — it walks, flies, or swims BY
   // NATURE), never to 器 (a made thing). An unknown or freshly-coined type has no
   // innate disposition to move: it is a vessel until something gives it life, so it
-  // stays still. This is why a begotten pavilion does not wander off — only a
-  // recognised living kind ambles; a structure, a plant, a coined thing is rooted.
+  // stays still. This is why a begotten pavilion does not wander off. A VEHICLE is 器
+  // too — a boat, a cart, a car moves when DRIVEN, not by any nature of its own — so a
+  // vehicle without a driver-behaviour stays put rather than drifting in circles (this
+  // was the spinning-boat in moon4: a boat has no behaviour, and must not be given one).
   const kind = SPECIES_CAPS[ent.type];
-  if (!kind || !kind.includes('mv')) return;
+  if (!kind || !kind.includes('mv') || kind === CAP_DRIVE) return;
   const dsl = natureReflex(ent.grants);
   if (!dsl) return; // it has no legs — stillness is honest for it
   try {

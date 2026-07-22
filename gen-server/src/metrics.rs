@@ -30,12 +30,13 @@
 //! by any endpoint** — it exists only on the host. The public numbers stay identity-
 //! free; the private directory is a contact list, not part of the falsifiable count.
 //!
-//! Be clear about what this does NOT make private: a world records its author's
-//! display name (that is the point of attribution), and the ālaya ledger stores
-//! every ask verbatim, keyed by its cause. Prompts are retained — by the ledger,
-//! deliberately, because replaying a cause is a feature. This log keeps only the
-//! length and a hash, but it would be dishonest to present that as prompt
-//! privacy when the ledger sits next to it.
+//! Be clear about what this does NOT make private: the ālaya ledger stores every ask
+//! verbatim, keyed by its cause. Prompts are retained — by the ledger, deliberately,
+//! because replaying a cause is a feature. This log keeps only the length and a hash,
+//! but it would be dishonest to present that as prompt privacy when the ledger sits
+//! next to it. (A saved world does record its author in a `by` field for the ownership
+//! check, but that field is now stripped from every public read — see world_get — so a
+//! world's author is visible only to the operator, never to another visitor.)
 
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};

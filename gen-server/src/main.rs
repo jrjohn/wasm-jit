@@ -1696,7 +1696,22 @@ async fn world_get(axum::extract::Path(name): axum::extract::Path<String>) -> im
     match tokio::fs::read_to_string(format!("worlds/{name}.json")).await {
         Ok(s) => {
             metrics::record("load_world", "anon", serde_json::json!({"name": name}));
-            (StatusCode::OK, [(CONTENT_TYPE, "application/json")], s)
+            // Attribution is private. The author's identity (display name + raw Google
+            // sub) stays in the file for the ownership check and for the operator, but it
+            // is STRIPPED from the public response — anyone may load anyone's world and
+            // never learns who made it. Only the operator, reading the file on the host,
+            // sees `by`. If the JSON somehow won't parse, serve nothing rather than risk
+            // leaking the very field we are here to hide.
+            match serde_json::from_str::<Value>(&s) {
+                Ok(mut v) => {
+                    if let Some(o) = v.as_object_mut() {
+                        o.remove("by");
+                    }
+                    let body = serde_json::to_string(&v).unwrap_or_default();
+                    (StatusCode::OK, [(CONTENT_TYPE, "application/json")], body)
+                }
+                Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
+            }
         }
         Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
     }
