@@ -1,0 +1,260 @@
+<title>住民能力律 · The Being Capability Fence</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink:#0e1622; --ink2:#131f2e; --line:#26384d; --paper:#e9eef4;
+    --dim:#8ba0b8; --faint:#5b7089;
+    --jade:#5fb39a; --jade-soft:#5fb39a2b;
+    --verm:#d9704e; --verm-soft:#d9704e26;
+    --gold:#d8b46a;
+    --grant:var(--jade); --hide:#3a4c62;
+    --bg:var(--ink); --card:var(--ink2); --fg:var(--paper);
+    --serif:"Songti SC","Noto Serif CJK SC",Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --ink:#f3f0e8; --ink2:#fbfaf6; --line:#ddd6c6; --paper:#26313d;
+            --dim:#5c6b7a; --faint:#8a97a5; --hide:#c7cdbf;
+            --jade:#3f8f77; --verm:#c0562f; --gold:#a07d2e;
+            --bg:var(--ink); --card:var(--ink2); --fg:var(--paper); }
+  }
+  :root[data-theme="dark"] {
+    --ink:#0e1622; --ink2:#131f2e; --line:#26384d; --paper:#e9eef4; --dim:#8ba0b8;
+    --faint:#5b7089; --hide:#3a4c62; --jade:#5fb39a; --verm:#d9704e; --gold:#d8b46a;
+    --bg:var(--ink); --card:var(--ink2); --fg:var(--paper);
+  }
+  :root[data-theme="light"] {
+    --ink:#f3f0e8; --ink2:#fbfaf6; --line:#ddd6c6; --paper:#26313d; --dim:#5c6b7a;
+    --faint:#8a97a5; --hide:#c7cdbf; --jade:#3f8f77; --verm:#c0562f; --gold:#a07d2e;
+    --bg:var(--ink); --card:var(--ink2); --fg:var(--paper);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:var(--sans);
+         line-height:1.6; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1000px; margin:0 auto; padding:clamp(1.5rem,4vw,3.5rem) clamp(1.1rem,4vw,2rem) 5rem; }
+
+  header { border-bottom:1px solid var(--line); padding-bottom:1.6rem; margin-bottom:2.4rem; }
+  .eyebrow { font-family:var(--mono); font-size:.72rem; letter-spacing:.22em; text-transform:uppercase;
+             color:var(--jade); margin:0 0 .8rem; }
+  h1 { font-family:var(--serif); font-weight:600; font-size:clamp(1.9rem,5vw,2.9rem); line-height:1.12;
+       margin:0 0 .5rem; text-wrap:balance; letter-spacing:.01em; }
+  h1 .en { display:block; font-family:var(--sans); font-weight:400; font-size:.42em;
+           color:var(--dim); letter-spacing:.03em; margin-top:.5rem; }
+  .lede { color:var(--dim); font-size:1.02rem; max-width:60ch; margin:1.1rem 0 0; }
+  .lede b { color:var(--fg); font-weight:600; }
+
+  h2 { font-family:var(--serif); font-weight:600; font-size:1.5rem; margin:3.2rem 0 .3rem;
+       letter-spacing:.01em; }
+  h2 .en { font-family:var(--sans); font-weight:400; font-size:.62rem; letter-spacing:.16em;
+           text-transform:uppercase; color:var(--faint); display:block; margin-top:.35rem; }
+  .note { color:var(--dim); font-size:.92rem; max-width:64ch; margin:.7rem 0 1.4rem; }
+
+  /* legend */
+  .legend { display:flex; flex-wrap:wrap; gap:1.1rem 1.8rem; font-size:.82rem; color:var(--dim);
+            margin:1.2rem 0 1.6rem; align-items:center; }
+  .legend span { display:inline-flex; align-items:center; gap:.5rem; }
+  .dot { width:13px; height:13px; border-radius:50%; flex:none; }
+  .dot.g { background:var(--grant); box-shadow:0 0 0 3px var(--jade-soft); }
+  .dot.h { background:transparent; border:1.5px solid var(--hide); }
+  .dot.f { background:var(--verm); box-shadow:0 0 0 3px var(--verm-soft); }
+
+  /* matrix */
+  .scroll { overflow-x:auto; margin:0 -0.2rem; -webkit-overflow-scrolling:touch; }
+  table { border-collapse:collapse; width:100%; min-width:660px; font-size:.9rem; }
+  thead th { font-family:var(--mono); font-weight:500; font-size:.74rem; color:var(--dim);
+             text-align:center; padding:.55rem .35rem; border-bottom:1.5px solid var(--line);
+             vertical-align:bottom; }
+  thead th.rise { color:var(--verm); }
+  thead th.who { text-align:left; font-family:var(--serif); font-size:.92rem; color:var(--fg);
+                 padding-left:.2rem; min-width:140px; }
+  th .sub { display:block; font-family:var(--sans); font-weight:400; font-size:.62rem;
+            letter-spacing:.02em; color:var(--faint); text-transform:none; margin-top:.2rem; }
+  tbody td { text-align:center; padding:.5rem .35rem; border-bottom:1px solid var(--line); }
+  tbody td.who { text-align:left; padding-left:.2rem; }
+  tbody td.who .k { font-weight:600; color:var(--fg); }
+  tbody td.who .kinds { font-family:var(--mono); font-size:.7rem; color:var(--faint);
+                        display:block; margin-top:.15rem; line-height:1.35; }
+  .grp td { border-bottom:none; padding-top:1.3rem; padding-bottom:.1rem; }
+  .grp .who { font-family:var(--serif); font-size:.82rem; letter-spacing:.14em; text-transform:uppercase;
+              color:var(--jade); }
+  .cell .dot { margin:0 auto; }
+  tr.body-row:hover td { background:var(--jade-soft); }
+  tr.body-row:hover td.rise-on { background:var(--verm-soft); }
+
+  /* ranking */
+  ol.rank { list-style:none; counter-reset:r; padding:0; margin:1.4rem 0 0; }
+  ol.rank li { counter-increment:r; position:relative; padding:1.05rem 0 1.05rem 3.4rem;
+               border-top:1px solid var(--line); }
+  ol.rank li:last-child { border-bottom:1px solid var(--line); }
+  ol.rank li::before { content:counter(r); position:absolute; left:0; top:1rem;
+                       font-family:var(--serif); font-size:1.5rem; color:var(--faint); width:2.4rem;
+                       text-align:center; line-height:1; }
+  ol.rank .cap { font-family:var(--mono); font-weight:600; color:var(--fg); font-size:1rem; }
+  ol.rank .cap.flight { color:var(--verm); }
+  ol.rank .why { color:var(--dim); font-size:.92rem; margin-top:.25rem; max-width:66ch; }
+  ol.rank .why b { color:var(--fg); font-weight:600; }
+
+  .principle { background:var(--card); border:1px solid var(--line); border-left:3px solid var(--jade);
+               border-radius:12px; padding:1.3rem 1.5rem; margin:1.6rem 0 0; }
+  .principle p { margin:0; color:var(--dim); }
+  .principle b { color:var(--fg); }
+  .principle .zh { font-family:var(--serif); font-size:1.08rem; color:var(--fg); margin-bottom:.5rem; }
+
+  code { font-family:var(--mono); font-size:.86em; background:var(--jade-soft); color:var(--jade);
+         padding:.08em .4em; border-radius:5px; }
+  .principle code, ol.rank code { background:none; padding:0; }
+
+  footer { margin-top:3.5rem; padding-top:1.4rem; border-top:1px solid var(--line);
+           color:var(--faint); font-size:.8rem; font-family:var(--mono); }
+  footer b { color:var(--dim); font-weight:500; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">wasm-jit · host law</p>
+    <h1>住民能力律<span class="en">The being capability fence — what each nature may hold, and what stays hidden</span></h1>
+    <p class="lede">A capability a being cannot need, it should not hold. Every living thing in the world moves only by
+    <b>requesting</b> — the host integrates and bounds the request — and the set of requests it may make <b>is its
+    fence</b>. The default was to hand every being all eight, which is why a fisherman could fly: he held
+    <code>rise()</code> because nothing had taken it away. This is the corrected law — least privilege, granted by nature.</p>
+  </header>
+
+  <h2>The eight, and what they reach<span class="en">get·set · fr · other · mv · bind·unbind · rise</span></h2>
+  <p class="note">Ranked left-to-right by how much of the world they touch. The two on the left are private scratch
+  state with no reach at all; the one on the right is flight.</p>
+
+  <div class="legend">
+    <span><i class="dot g"></i> granted — the nature needs it</span>
+    <span><i class="dot h"></i> hidden — withheld by default</span>
+    <span><i class="dot f"></i> flight — granted only to what flies</span>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr>
+        <th class="who">nature · 物種</th>
+        <th>get·set<span class="sub">state</span></th>
+        <th>fr<span class="sub">sense land</span></th>
+        <th>other<span class="sub">sense beings</span></th>
+        <th>mv<span class="sub">walk</span></th>
+        <th>bind·unbind<span class="sub">ride</span></th>
+        <th class="rise">rise<span class="sub">fly</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="grp"><td class="who" colspan="7">rooted &amp; inert · 靜物</td></tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">structures</span><span class="kinds">temple bridge buddha pagoda wall gate rock</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot h"></i></td><td><i class="dot h"></i></td>
+        <td><i class="dot h"></i></td><td><i class="dot h"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">fixed &amp; swaying</span><span class="kinds">bell lantern flag · maple pine tree bamboo reed grass</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot h"></i></td><td><i class="dot h"></i></td>
+        <td><i class="dot h"></i></td><td><i class="dot h"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">physics objects</span><span class="kinds">ball stone log — the host rolls them</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot h"></i></td><td><i class="dot h"></i></td>
+        <td><i class="dot h"></i></td><td><i class="dot h"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+
+      <tr class="grp"><td class="who" colspan="7">on the water · 水上</td></tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">floating flora</span><span class="kinds">lotus leaf petal lily</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot g"></i></td><td><i class="dot h"></i></td>
+        <td><i class="dot h"></i></td><td><i class="dot h"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">swimmers</span><span class="kinds">fish koi carp duck frog — water is host-enforced</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot g"></i></td><td><i class="dot g"></i></td>
+        <td><i class="dot g"></i></td><td><i class="dot h"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">vehicles</span><span class="kinds">boat raft car cart — carry riders, don't board</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot g"></i></td><td><i class="dot h"></i></td>
+        <td><i class="dot g"></i></td><td><i class="dot h"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+
+      <tr class="grp"><td class="who" colspan="7">on the ground · 陸上</td></tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">people &amp; ground animals</span><span class="kinds">person fisherman monk child · cat dog deer ox</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot g"></i></td><td><i class="dot g"></i></td>
+        <td><i class="dot g"></i></td><td><i class="dot g"></i></td><td class="rise-on"><i class="dot h"></i></td>
+      </tr>
+
+      <tr class="grp"><td class="who" colspan="7">in the air · 空中</td></tr>
+      <tr class="body-row">
+        <td class="who"><span class="k">flyers</span><span class="kinds">bird crow sparrow butterfly dragonfly bat firefly</span></td>
+        <td class="cell"><i class="dot g"></i></td><td><i class="dot g"></i></td><td><i class="dot g"></i></td>
+        <td><i class="dot g"></i></td><td><i class="dot g"></i></td><td class="rise-on"><i class="dot f"></i></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="principle">
+    <p class="zh">凡能力，非其性所需者，不予。</p>
+    <p><b>A being holds only what its nature requires.</b> The fisherman walks and boards his boat, so he keeps
+    <code>mv</code>, <code>bind</code>, <code>fr</code>, <code>other</code> — but not <code>rise</code>, because a person does not fly.
+    Enforcement is not a runtime check that can be forgotten: a person's grants simply omit <code>rise</code>, and a
+    behavior that calls it <b>dies at compile</b>, before the being ever draws a frame. The unknown kind — one the AI
+    invents — falls back to <b>grounded</b>: it may walk, sense and board, but flight is withheld until a kind is
+    <em>known</em> to fly. The safe default for "I don't recognise this" is "it does not leave the ground".</p>
+  </div>
+
+  <h2>Which to hide first<span class="en">ranked by reach × how wrong its misuse looks</span></h2>
+  <p class="note">If capabilities were revealed one nature at a time, this is the order in which they should be
+  <em>withheld</em> — most-hidden first. It is the order in which their misuse is most visible and least appropriate.</p>
+
+  <ol class="rank">
+    <li>
+      <div><span class="cap flight">rise</span> — flight</div>
+      <p class="why"><b>Hide from everything but flyers.</b> This is the one that sent Galen's fisherman out through the
+      top of the world and out of sight. Its misuse is the most visible failure there is — a being simply
+      <em>disappears</em>. Granted only to birds and butterflies; a person, a fish, a boat can never hold it.</p>
+    </li>
+    <li>
+      <div><span class="cap">bind · unbind</span> — riding</div>
+      <p class="why"><b>Hide from what does not board.</b> Riding attaches one being to another and lets it inherit a
+      carrier's motion; misused it builds strange attachment graphs (a temple riding a fish). Kept for people who
+      step into boats; withheld from swimmers, flora and structures.</p>
+    </li>
+    <li>
+      <div><span class="cap">mv</span> — walking</div>
+      <p class="why"><b>Hide from the rooted and the inert.</b> A temple that could <code>mv</code> would walk off its
+      foundations; a maple would stroll. Their motion, where they have any, is skin animation or host physics — never
+      a step the cell requests.</p>
+    </li>
+    <li>
+      <div><span class="cap">fr · other</span> — sensing</div>
+      <p class="why"><b>Grant where a being acts on what it senses; withhold from pure scenery.</b> A schooling fish
+      needs <code>other</code> to follow its neighbours; a swaying reed needs neither. Sensing carries no reach on its
+      own, so it is hidden last among the world-touching capabilities — but décor that only sways is given none.</p>
+    </li>
+    <li>
+      <div><span class="cap">get · set</span> — private state</div>
+      <p class="why"><b>Never hidden.</b> Thirty-two private slots of scratch memory: an animation phase, a timer, a
+      remembered target. They touch nothing outside the being, so they carry no reach and belong to every nature,
+      down to the stillest stone.</p>
+    </li>
+  </ol>
+
+  <footer>
+    <b>host law</b> · gen-server/live-gen.html — SPECIES_CAPS, capsFor(), grants ∩ ceiling &nbsp;·&nbsp;
+    <b>enforced at</b> compile: a call to an ungranted capability is refused before the being runs &nbsp;·&nbsp;
+    <b>attenuation</b> a begotten child stays ⊆ its parent AND ⊆ its own kind's ceiling (§21)
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var r = document.documentElement;
+    try {
+      var t = localStorage.getItem('theme');
+      if (t) r.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>

@@ -1194,6 +1194,62 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
 // grants must be ⊆ its parent's (docs §21 — monotonically non-increasing).
 const ENTITY_CAPS = ['get', 'set', 'fr', 'mv', 'unbind', 'bind', 'rise', 'other'];
 
+// ── Capabilities by nature (least privilege) ─────────────────────────────────
+// A capability a being cannot need, it should not hold. The default was the
+// opposite — every being got all eight — which is why a fisherman could fly: he
+// held rise() because nothing had taken it away. Here each kind declares its
+// CEILING: the most it may ever be granted. What a soul actually gets is the
+// ceiling ∩ what it asked for, and a begotten child stays ⊆ its parent too.
+//
+// Ranked by how much reach they carry, and therefore by how eagerly they are
+// hidden:
+//   rise   — flight. The disappear-into-the-sky capability. Hidden from all but
+//            things whose nature is to fly. This is the one to hide first.
+//   bind/unbind — riding. Attaches one being to another; hidden from anything
+//            that does not board (a fish does not climb into a boat).
+//   mv     — walking. Hidden from what is rooted or inert (a temple, a tree).
+//   fr/other — sensing. Granted where a being acts on what it senses; withheld
+//            from pure scenery that only sways.
+//   get/set — private scratch state. No world reach, so never hidden.
+const CAP_NONE   = ['get', 'set'];                                     // rooted / inert: internal animation only
+const CAP_FLORA  = ['get', 'set', 'fr'];                              // floats/drifts, may sense water, cannot propel
+const CAP_SWIM   = ['get', 'set', 'fr', 'other', 'mv'];              // swims, schools — never flies, never boards
+const CAP_FLY    = ['get', 'set', 'fr', 'other', 'mv', 'rise', 'bind', 'unbind']; // the only kind that may rise()
+const CAP_WALK   = ['get', 'set', 'fr', 'other', 'mv', 'bind', 'unbind'];         // walks, boards a boat — grounded
+const CAP_DRIVE  = ['get', 'set', 'fr', 'mv'];                       // a vehicle: self-propels, carries, does not fly
+
+const SPECIES_CAPS = {
+  // rooted structures & décor — motion is skin animation or host physics, not the cell's
+  temple: CAP_NONE, bridge: CAP_NONE, buddha: CAP_NONE, pagoda: CAP_NONE, house: CAP_NONE,
+  wall: CAP_NONE, gate: CAP_NONE, rock: CAP_NONE, mountain: CAP_NONE, stone: CAP_NONE,
+  bell: CAP_NONE, lantern: CAP_NONE, flag: CAP_NONE, torch: CAP_NONE, statue: CAP_NONE,
+  ball: CAP_NONE, log: CAP_NONE,                                     // pure host physics
+  maple: CAP_NONE, pine: CAP_NONE, tree: CAP_NONE, bamboo: CAP_NONE, grass: CAP_NONE, reed: CAP_NONE,
+  // floating flora — drifts on water, senses it, cannot self-propel or fly
+  lotus: CAP_FLORA, leaf: CAP_FLORA, petal: CAP_FLORA, lily: CAP_FLORA,
+  // swimmers — water is host-enforced (habitat); never rise, never bind
+  fish: CAP_SWIM, koi: CAP_SWIM, carp: CAP_SWIM, duck: CAP_SWIM, frog: CAP_SWIM,
+  // flyers — the ONLY kinds that may rise()
+  crow: CAP_FLY, bird: CAP_FLY, sparrow: CAP_FLY, butterfly: CAP_FLY, dragonfly: CAP_FLY,
+  bat: CAP_FLY, moth: CAP_FLY, firefly: CAP_FLY,
+  // people & ground animals — walk, sense, board; NEVER fly (this was the bug)
+  person: CAP_WALK, fisherman: CAP_WALK, monk: CAP_WALK, child: CAP_WALK, traveler: CAP_WALK,
+  farmer: CAP_WALK, cat: CAP_WALK, dog: CAP_WALK, deer: CAP_WALK, rabbit: CAP_WALK, ox: CAP_WALK,
+  // vehicles — self-propel horizontally, carry riders, do not fly
+  boat: CAP_DRIVE, raft: CAP_DRIVE, car: CAP_DRIVE, cart: CAP_DRIVE,
+};
+
+// The ceiling for a kind. Unknown kinds get a GROUNDED default: they may walk,
+// sense and board, but flight is withheld until a kind is known to fly —
+// because the safe default for "I don't recognise this" is "it does not leave
+// the ground", not "it may do anything".
+function capsFor(type, realm) {
+  const known = SPECIES_CAPS[type];
+  if (known) return known;
+  if (realm === 'sky') return CAP_FLY;         // an explicitly-aloft unknown thing may fly
+  return CAP_WALK;                              // otherwise grounded by default — no rise
+}
+
 // Recursive begetting (docs §20.1/§21): a being's mind may bring a NEW being
 // into the world — a painter paints a painter — under three host-enforced laws:
 //   1. child grants ⊆ parent grants (over-reach is dropped and reported)
@@ -1206,9 +1262,13 @@ function begetChild(parent, spec, g) {
   if ((parent.birthQuota ?? 0) <= 0) { say('err', `${parent.id} has no births left (birth budget spent)`); return; }
   const parentGrants = parent.grants ?? ENTITY_CAPS.slice();
   const want = Array.isArray(spec.grants) ? spec.grants : parentGrants;
-  const grants = want.filter(c => ENTITY_CAPS.includes(c) && parentGrants.includes(c));  // ⊆ parent
-  const overreach = want.filter(c => !parentGrants.includes(c));                          // what it may NOT pass down
   const type = (typeof spec.type === 'string' && spec.type) ? spec.type : 'being';
+  // Two bounds compose: a child stays ⊆ its parent (attenuation, §21) AND ⊆ its
+  // own kind's ceiling. A crow may not beget a walking person that flies; a
+  // person may not beget a bird that inherits flight the parent never had.
+  const ceiling = capsFor(type, spec.realm === 'sky' ? 'sky' : 'ground');
+  const grants = want.filter(c => ENTITY_CAPS.includes(c) && parentGrants.includes(c) && ceiling.includes(c));
+  const overreach = want.filter(c => !parentGrants.includes(c) || !ceiling.includes(c)); // denied: beyond parent OR beyond kind
   const ox = Math.max(-4, Math.min(4, Number(spec.at?.[0] ?? 1) || 0));
   const oy = Math.max(-4, Math.min(4, Number(spec.at?.[1] ?? 0) || 0));
   const child = {
@@ -1280,7 +1340,14 @@ function compileEntities(world, g) {
                   tau: 0, // 原時: the being's own proper time — advances slower the faster it moves (c = MAX_STEP)
                   lifespan: (Number.isFinite(def.lifespan) && def.lifespan > 0) ? def.lifespan : null, // 壽數 in its own τ; null = 無量壽
                   innate: Array.isArray(def.innate) ? def.innate.slice(0, 8).map(Number) : null,
-                  grants: Array.isArray(def.grants) ? def.grants.filter(c => ENTITY_CAPS.includes(c)) : ENTITY_CAPS.slice(),
+                  grants: (() => {
+                    // least privilege: the ceiling for this kind, and no more.
+                    // A declared grants list is still bounded by the ceiling — a
+                    // person asking for rise() does not get it, the fence hides it.
+                    const ceiling = capsFor(def.type, (def.realm === 'sky' || def.aloft) ? 'sky' : 'ground');
+                    const want = Array.isArray(def.grants) ? def.grants : ceiling;
+                    return want.filter(c => ceiling.includes(c));
+                  })(),
                   birthQuota: Number.isFinite(def.birthQuota) ? def.birthQuota : 2, // top-level beings may beget up to 2
                   mind: def.mind ?? null,
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
