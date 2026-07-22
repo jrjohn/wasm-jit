@@ -985,7 +985,8 @@ Reply with ONE JSON object only (no prose outside it):
  "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
-   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
+   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.
+   ITS LOOK — the shared vocabulary of things: name a `type` already in the WORLD VOCABULARY (listed in your perception below) and the host DRAWS IT FOR YOU — no skin_seed needed. A pavilion, a lotus, a lantern, a pine: just say the word and it appears, fully formed, for almost nothing. To bring something the vocabulary LACKS, include a skin_seed ONCE — it is drawn now AND joins the shared vocabulary under that type-name (名言種子, 共業), so you and every other being may summon it by name forever after. This is how a world grows rich: not by each being re-drawing from scratch every scarce beat, but by making a thing once and lending its name to all. Prefer naming a word that exists; coin a new one only when you mean to add to the common tongue.>
  "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2), rect(x,y,w,h) [FILLED rectangle], tri(x1,y1,x2,y2,x3,y3) [FILLED triangle]. px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
  "attrs":{"name":"Ink","mood":"content"},   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>
  "remember":"<OPTIONAL — one short line (≤80 chars) worth keeping. It joins your journal and returns to you in every future perception. Choose rarely and fold well: the journal holds only 12 lines and the oldest falls away, so keep the ESSENCE of a moment, not its transcript (e.g. 'first snow tonight; the line stayed slack'). Remembering is pure data about yourself — it never widens what you can touch.>}
@@ -1121,6 +1122,23 @@ WORDS spoken to you: {w}"));
                 ));
             }
         }
+    }
+
+    // The world's shared vocabulary of things (名言種子, 共業) — every look any being
+    // has ever grown, kept in the grown-skin library. A being may beget any of these
+    // by NAME ALONE (the host draws it) and need only supply a skin_seed to coin a
+    // NEW one, which then joins this list for all. Listed here so the mind REUSES the
+    // vocabulary rather than re-drawing from scratch each scarce beat — the difference
+    // between a world that stays sparse and one that grows rich. Memory is private
+    // (阿賴耶, per owner+soul); vocabulary is public (共業) — a name, once coined, is
+    // everyone's. Reading the library each beat means words other beings coined show
+    // up here too: the common tongue, made visible.
+    let vocab = read_vocabulary().await;
+    if !vocab.is_empty() {
+        prompt.push_str(&format!(
+            "\n\nWORLD VOCABULARY (造物詞庫 — the things this world already knows how to make; beget any by NAME ALONE and the host draws it, no skin_seed needed. To add a new word, beget once with a skin_seed and it joins this list for all): {}",
+            vocab.join(", ")
+        ));
     }
 
     let t0 = Instant::now();
@@ -1742,6 +1760,23 @@ async fn skin_get(axum::extract::Path(ty): axum::extract::Path<String>) -> impl 
         Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], s),
         Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
     }
+}
+
+/// The world's shared vocabulary of things — the names in the grown-skin library,
+/// each a look some being once coined and every being may now beget by name (名言
+/// 種子, 共業). Sorted, ASCII-safe by construction (the write gate enforces it).
+/// Read fresh each beat so a word another being just coined shows up too.
+async fn read_vocabulary() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(mut rd) = tokio::fs::read_dir("skins-grown").await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            if let Some(n) = e.file_name().to_str().and_then(|n| n.strip_suffix(".dsl")) {
+                names.push(n.to_string());
+            }
+        }
+    }
+    names.sort();
+    names
 }
 
 /// List the names in the grown-skin library.

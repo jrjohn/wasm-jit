@@ -1221,6 +1221,7 @@ const CAP_DRIVE  = ['get', 'set', 'fr', 'mv'];                       // a vehicl
 const SPECIES_CAPS = {
   // rooted structures & décor — motion is skin animation or host physics, not the cell's
   temple: CAP_NONE, bridge: CAP_NONE, buddha: CAP_NONE, pagoda: CAP_NONE, house: CAP_NONE,
+  pavilion: CAP_NONE, hut: CAP_NONE, tower: CAP_NONE, shrine: CAP_NONE, well: CAP_NONE, arch: CAP_NONE, fence: CAP_NONE,
   wall: CAP_NONE, gate: CAP_NONE, rock: CAP_NONE, mountain: CAP_NONE, stone: CAP_NONE,
   bell: CAP_NONE, lantern: CAP_NONE, flag: CAP_NONE, torch: CAP_NONE, statue: CAP_NONE,
   ball: CAP_NONE, log: CAP_NONE,                                     // pure host physics
@@ -1621,12 +1622,23 @@ function drawSkin(ent, px, py, s, t) {
 // mind is quiet the world still breathes. Compiled through the same entity fence.
 function natureReflex(grants) {
   if (!grants || !grants.includes('mv')) return null; // rooted/inert: stillness is its nature
-  if (grants.includes('rise')) // a flyer wheels and bobs
+  if (grants.includes('rise')) // a flyer wheels and bobs — it cannot stop midair, so it glides on
     return "let p = get(0.0);\nmv(sin(p) * 0.018, cos(p) * 0.018);\nrise(sin(p * 0.5) * 0.008);\nset(0.0, p + 0.05);\n0.0";
-  // a walker or swimmer ambles — two frequencies so the path meanders, not circles
-  return "let p = get(0.0);\nmv(sin(p) * 0.011, cos(p * 0.7) * 0.011);\nset(0.0, p + 0.03);\n0.0";
+  // A walker or swimmer ambles, but not without pause. 動靜相間: a slow envelope gates
+  // motion, so it walks a while and then STANDS a while, the way a living thing does —
+  // never a wind-up toy that only ever moves. slot 0 is the master clock (always
+  // advancing, so a rest always ends); slot 1 is the gait, which advances ONLY while
+  // moving — so during a pause the legs truly still rather than sliding frozen.
+  return "let p = get(0.0);\nlet gait = get(1.0);\nlet moving = sin(p * 0.5) > -0.55;\nlet m = 0.012 * moving;\nmv(sin(gait) * m, cos(gait * 0.7) * m);\nset(0.0, p + 0.05);\nset(1.0, gait + 0.06 * moving);\n0.0";
 }
 function giveNatureReflex(ent, g) {
+  // 本性的常動 belongs to 眾生 (a KNOWN mobile kind — it walks, flies, or swims BY
+  // NATURE), never to 器 (a made thing). An unknown or freshly-coined type has no
+  // innate disposition to move: it is a vessel until something gives it life, so it
+  // stays still. This is why a begotten pavilion does not wander off — only a
+  // recognised living kind ambles; a structure, a plant, a coined thing is rooted.
+  const kind = SPECIES_CAPS[ent.type];
+  if (!kind || !kind.includes('mv')) return;
   const dsl = natureReflex(ent.grants);
   if (!dsl) return; // it has no legs — stillness is honest for it
   try {
