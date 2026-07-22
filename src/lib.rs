@@ -176,6 +176,30 @@ pub fn intersect_grants(want: &[String], parent: &[String]) -> Vec<String> {
 }
 
 #[cfg(test)]
+mod named_slot_tests {
+    use super::*;
+    // Slots may be referenced by NAME, not only by a magic number. The codegen emits
+    // ANY expression as the slot index (get/set take a value, not a literal), so a
+    // let-bound alias — `let region = 30.0; get(region)` — compiles to exactly
+    // `get(30.0)`. This is what lets a generated cell declare its slots by name at the
+    // top and never scatter raw indices, cutting the mis-numbering that magic numbers
+    // invite (the contract now instructs this). This test locks the capability so a
+    // future codegen change that quietly required a literal index would fail loudly.
+    #[test]
+    fn slots_can_be_named_via_let_aliases() {
+        let src = "let region = 30.0;\nlet count = 1.0;\nset(region, get(region) + 2.0);\nset(count, get(count) + 1.0);\nget(region) / get(count)";
+        let prog = parser::parse(src).expect("named-slot cell should parse");
+        codegen::compile_with_opts(
+            &prog,
+            &ENTITY_PARAMS,
+            &ENTITY_IMPORTS,
+            codegen::CompileOpts { fuel: Some(100_000), memory_pages: None },
+        )
+        .expect("named-slot cell should compile — get/set must accept a let-bound index");
+    }
+}
+
+#[cfg(test)]
 mod beget_tests {
     use super::*;
     #[test]

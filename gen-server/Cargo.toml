@@ -13,6 +13,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # published keys. The browser hands us the token, so the signature is the only
 # part of it we may believe.
 jsonwebtoken = "9"
+# the being storehouse (阿賴耶) — PG + pg_jieba, scoped per (owner, soul).
+# localhost NoTls; the crs stack's engine reused at the being's level.
+tokio-postgres = "0.7"
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

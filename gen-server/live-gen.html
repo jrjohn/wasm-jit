@@ -6,11 +6,20 @@
 <title>Live generation — chat → sandboxed UI</title>
 <style>
   :root { color-scheme: dark; }
-  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: 1100px;
-         margin: 1.2rem auto; padding: 0 1rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; max-width: none;
+         margin: 1.2rem auto; padding: 0 1.4rem; line-height: 1.45; background: #0d1117; color: #e6edf3; }
+  /* The world is drawn as a square (renderField takes min(w,h) and centres it), so a
+     wide canvas is mostly black bars. Keep the canvas square and let it take the
+     column — then the field IS the picture, at whatever size the screen allows. */
+  /* No width/height here on purpose. `width:100%` stretched the canvas to the
+     column and `height:auto` then derived the height from the square backing
+     store — so a correctly-computed 697px square was displayed at 1470px tall,
+     the CSS quietly undoing the JS. Only one of the two may own the size, and
+     it has to be the one that can measure the room left. */
+  #cv { display: block; margin: 0 auto; }
   h1 { font-size: 1.02rem; }
   .sub { font-size: .8rem; opacity: .72; }
-  .cols { display: grid; grid-template-columns: 340px 1fr; gap: 1rem; align-items: start; }
+  .cols { display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 1.1rem; align-items: start; }
   @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
   .chat { border: 1px solid #30363d; border-radius: 8px; display: flex; flex-direction: column; height: 560px; }
   .msgs { flex: 1; overflow-y: auto; padding: .6rem; display: flex; flex-direction: column; gap: .5rem; }
@@ -87,8 +96,8 @@
 </style>
 </head>
 <body>
-<h1>Live generation — chat with Claude (in Docker) → UI manifests instantly
-  <span style="float:right;font-weight:400;font-size:.8rem"><a href="http://127.0.0.1:8645" style="color:#58a6ff">other demos →</a></span></h1>
+<h1>Live generation — chat with Claude → UI manifests instantly
+  <span style="float:right;font-weight:400;font-size:.8rem"><span id="people-count" style="opacity:.72;margin-right:1rem"></span><a href="/" style="color:#58a6ff">← arcana.boo</a></span></h1>
 <p class="sub">
 The generator runs sandboxed in a container (no volumes, API egress only); the generated seed is validated by
 <b>natively compiling it on the server</b> (with self-repair retries), then manifested here as <b>fuel-metered,
@@ -135,6 +144,8 @@ Generation is seconds; every interaction after is µs.
       <button id="view-toggle" style="display:none; margin-left:auto; font-size:.75rem; padding:.25rem .7rem"></button>
       <button id="world-save" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">💾 save world</button>
       <button id="world-load" style="font-size:.72rem; padding:.25rem .6rem; background:#21262d">🌀 worlds</button>
+      <span id="who" style="font-size:.7rem;opacity:.8"></span>
+      <div id="gbtn"></div>
     </div>
     <div id="worlds-menu" style="display:none; position:absolute; right:1rem; top:3rem; z-index:6;
       background:#161b22; border:1px solid #30363d; border-radius:8px; max-height:280px; overflow-y:auto;
@@ -155,6 +166,13 @@ Generation is seconds; every interaction after is µs.
 </div>
 
 <script type="module">
+// 憑證狀態刻意放在最前:每一個寫入呼叫都要用到它,擺在中段的話,
+// 日後任何一次搬動都可能讓某個 fetch 靜默地不帶身分出去。
+let ID_TOKEN = null, ME = null;
+function authHeaders(base) {
+  return ID_TOKEN ? { ...base, Authorization: 'Bearer ' + ID_TOKEN } : base;
+}
+
 import init, { compile_ui_cell_wasm, compile_draw_wasm, compile_field_cell_wasm, compile_entity_wasm, audit_entity_bytes, compile_skin_wasm, compile_entity_wasm_grants, audit_entity_bytes_grants, compile_widget_wasm, compile_draw3d_wasm, transpile_to_glsl, compile_sound_wasm } from './pkg/wasm_jit.js';
 import initSkins, * as skinsPkg from './pkg-skins/skins.js';
 await init();
@@ -162,6 +180,44 @@ await initSkins();
 
 const $ = id => document.getElementById(id);
 const msgs = $('msgs');
+
+// ── i18n ──────────────────────────────────────────────────────────────────────
+// The chat panel speaks the visitor's language: a Chinese browser gets Chinese chrome
+// and Chinese-speaking beings; anything else gets English. Detection is the browser's
+// own navigator.language — 'zh…' → zh, else en. English is what the HTML already says,
+// so localizeChrome only swaps when the browser is Chinese; the same LANG is handed to
+// the mind (see mindBeat) so a being answers in the reader's own tongue.
+const LANG = (navigator.language || navigator.userLanguage || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+const T = (en, zh) => (LANG === 'zh' ? zh : en);
+function localizeChrome() {
+  if (LANG !== 'zh') return; // en is the authored default — nothing to swap
+  const h1 = document.querySelector('h1');
+  if (h1 && h1.firstChild) h1.firstChild.nodeValue = '即時生成 — 與 Claude 對話 → 介面即刻顯現\n  ';
+  const sub = document.querySelector('.sub');
+  if (sub) sub.textContent = '生成器在容器內沙箱執行(無掛載、僅 API 出口);生成的種子會先在伺服器上原生編譯驗證(附自我修復重試),再以受燃料計量、能力沙箱化的 WASM cell 顯現於此 —— 你看著程式被寫出,卻從不需要信任它。生成以秒計;之後每一次互動都是微秒。';
+  const intro = document.querySelector('.msg.ai');
+  if (intro) intro.textContent = [
+    '跟我要一個介面。試試:',
+    '- 溫度換算器',
+    '- 含百分比滑桿的小費計算機',
+    '- 台灣水庫水位長條圖',
+    '- 月營收折線圖 + 市佔率圓餅圖',
+    '- 由滑桿驅動的儀表',
+    '- 把滑桿範圍改成 0–100(在現有介面上迭代)',
+    '- 畫一顆微笑的太陽(切換到繪圖表面)',
+    '- 一座山(一個活的世界在場上升起)',
+    '- 下一場雨(……接著,讓它下雨)',
+    '- 讓我走進這個世界(第一人稱 —— 走進雨中)',
+    '- 孤舟蓑笠翁 獨釣寒江雪(雪、一艘船、一位漁翁)',
+    '- @weng 冷嗎?(對有心的住民說話 —— 它自己的 Claude 回答)',
+  ].join('\n');
+  const p = $('prompt'); if (p) p.placeholder = '描述一個介面……(Enter 送出,@ 對住民說話)';
+  const send = $('send'); if (send) send.textContent = '送出';
+  const ws = $('world-save'); if (ws) ws.textContent = '💾 存檔世界';
+  const wl = $('world-load'); if (wl) wl.textContent = '🌀 世界';
+  const ss = $('stage-status'); if (ss && /nothing manifested/.test(ss.textContent)) ss.textContent = '尚未顯現任何東西';
+  const ml = document.querySelector('.chatbar .hint'); if (ml) ml.textContent = '模型';
+}
 let chatLog = [];  // the conversation, saved with the world
 function say(cls, text) {
   const d = document.createElement('div');
@@ -474,7 +530,7 @@ function startFeeds() {
   const run = async () => {
     for (const f of defs) {
       try {
-        const r = await fetch('/api/feed?url=' + encodeURIComponent(f.url));
+        const r = await fetch('api/feed?url=' + encodeURIComponent(f.url));
         if (!r.ok) { $('stage-status').textContent = 'feed refused: ' + (await r.text()).slice(0, 90); continue; }
         const j = await r.json();
         for (const p of (f.plucks ?? [])) {
@@ -501,7 +557,7 @@ const WIDGET_LIB = {};   // type -> widget_seed (in-memory cache of the library)
 function saveGrownWidget(type, seed) {
   if (WIDGET_LIB[type] === seed) return;
   WIDGET_LIB[type] = seed;
-  fetch('/api/widgets', { method: 'POST', headers: { 'content-type': 'application/json' },
+  fetch('api/widgets', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type, widget_seed: seed }) }).catch(() => {});
 }
 function widgetEnv(wd) {
@@ -556,7 +612,7 @@ function makeCustomWidget(node) {
   else { // bare novel type: recall the grown widget by name
     (async () => {
       let seed = WIDGET_LIB[node.type];
-      if (!seed) { try { const r = await fetch(`/api/widgets/${node.type}`); if (r.ok) seed = await r.text(); } catch (e) {} }
+      if (!seed) { try { const r = await fetch(`api/widgets/${node.type}`); if (r.ok) seed = await r.text(); } catch (e) {} }
       if (seed) { WIDGET_LIB[node.type] = seed; arm(seed); }
       else $('stage-status').textContent = `unknown widget '${node.type}' and nothing grown by that name`;
     })();
@@ -875,6 +931,25 @@ function sampleF(c, x, y) {
   return a * (1 - tx) * (1 - ty) + b * tx * (1 - ty) + d * (1 - tx) * ty + e * tx * ty;
 }
 
+// World law, not seed discipline: what a being rests ON.
+//
+// The old rule lifted everything by 0.6 x min(depth, 3). That is right for
+// someone wading through a puddle and it drowns a boat, because a river deeper
+// than about five units puts the water's surface well above where the rule
+// placed the hull — the boat and the fisherman riding it sank as the water got
+// deeper, which is exactly backwards.
+//
+// A floating being rests at the water's actual surface: terrain + full depth.
+// A walking one still gets the damped lift, so shallow water does not make it
+// bob. Riders inherit their carrier's position, so fixing the hull lifts the
+// fisherman with it — nobody has to declare that a boat floats.
+const FLOATS = new Set(['boat', 'raft', 'lotus', 'leaf', 'duck', 'swan']);
+function restY(e, sampleF) {
+  const th = sampleF(0, e.x, e.y), wd = sampleF(1, e.x, e.y);
+  const floats = e.habitat === 'water' || FLOATS.has(e.type) || e._carriedFloat === true;
+  return th + (floats ? wd : Math.min(wd, 3) * 0.6);
+}
+
 function updateCam(dt) {
   const g = fieldWorld.grid;
   cam.yaw += (FKEYS.right - FKEYS.left) * 1.8 * dt;
@@ -972,7 +1047,7 @@ function renderFieldFP() {
     const off = xc / zc;
     if (Math.abs(off) > fov * 0.7) continue;
     const sx = (off / fov + 0.5) * W;
-    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K2;
+    const groundY = restY(e, sampleF) * K2;
     // altitude lifts a being off the ground toward the sky (the vertical realm)
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K2;
     const sy = horizon + ((eye - surfaceY) * focal) / zc;
@@ -996,7 +1071,7 @@ function setFieldView(view) {
   const btn = $('view-toggle');
   if (btn) {
     btn.style.display = fieldWorld ? 'inline-block' : 'none';
-    btn.textContent = view === 'fp' ? '🗺 top view' : '⛰ walk into it (first person)';
+    btn.textContent = view === 'fp' ? T('🗺 top view', '🗺 俯視') : T('⛰ walk into it (first person)', '⛰ 走進去(第一人稱)');
   }
   if (fieldWorld && view === 'fp') {
     // Only reset the camera on a FRESH entry (top→fp / first walk-in). Re-
@@ -1021,13 +1096,18 @@ window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from ou
 window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
 window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null) cam.pz = pz; if (yaw != null) cam.yaw = yaw; }; // e2e/compose: place the first-person camera
 window.__setPitch = p => { cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, p)); cam.pitchT = cam.pitch; }; // e2e: aim the eye up/down (抬頭)
-window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
+window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = clampAlt(a); e.realm = e.alt > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
-window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line) } : null; };
+window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? null, origin: e.origin ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line), dormant: e.dormant ? { soul: e.dormant.soul, from_world: e.dormant.from_world } : null, recollected: !!e.recollected } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
-      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y, hx: e.hx ?? 1, hz: e.hz ?? 0, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
+      entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y,
+        // The placement law made inspectable: what a being rides, and the height
+        // the host actually rests it at. A rider sitting lower than its carrier is
+        // the shape of the bug where a fisherman sinks into his own boat, and it
+        // should be answerable with a number rather than a squint at a screenshot.
+        on: e.on ?? null, restY: Math.round(restY(e, sampleF) * 1000) / 1000, hx: e.hx ?? 1, hz: e.hz ?? 0, tau: e.tau ?? 0, alt: e.alt ?? 0, realm: e.realm ?? 'ground', soul: e.soul ?? 'none',
         mind: e.mindState ? { beats: e.mindState.beats, lastThought: e.mindState.lastThought, busy: e.mindState.busy } : null })) }
   : null;
 
@@ -1097,6 +1177,11 @@ function terrainColor(h, w, v, s = 0) {
 // ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
 let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
 const MAX_STEP = 0.5;    // host law: nobody teleports — this is also the world's light speed c
+const ALT_MAX = 1;       // host law: the sky has a ceiling. rise() already clamped to [0,1]; the
+                         // spawn altitude and the physics height did NOT, so a being handed a big
+                         // `altitude` (an AI reading "jump" as altitude:20) or launched by physics
+                         // left the world through the top and could not be seen. One law, every path.
+const clampAlt = a => Math.min(Math.max(a || 0, 0), ALT_MAX);
 const BIND_REACH = 2.5;  // host law: you can only board what you can reach (§19 bind)
 let lastEntT = null;     // previous world-tick timestamp, for proper-time (原時) accumulation
 
@@ -1129,7 +1214,7 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
       ent.on = target.id; ent.offset = [0, 0]; ent.freed = false; // become one with it; the carrier now carries
       return 1;
     },
-    rise: dz => { ent.alt = Math.min(Math.max((ent.alt ?? 0) + dz, 0), 1); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
+    rise: dz => { ent.alt = clampAlt((ent.alt ?? 0) + dz); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
     other: (i, k) => { // real-time sense of other beings: (i,0)=dist to i-th nearest, (i,1)=dx, (i,2)=dy
       i |= 0; k |= 0;
       const list = [];
@@ -1147,6 +1232,63 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
 // grants must be ⊆ its parent's (docs §21 — monotonically non-increasing).
 const ENTITY_CAPS = ['get', 'set', 'fr', 'mv', 'unbind', 'bind', 'rise', 'other'];
 
+// ── Capabilities by nature (least privilege) ─────────────────────────────────
+// A capability a being cannot need, it should not hold. The default was the
+// opposite — every being got all eight — which is why a fisherman could fly: he
+// held rise() because nothing had taken it away. Here each kind declares its
+// CEILING: the most it may ever be granted. What a soul actually gets is the
+// ceiling ∩ what it asked for, and a begotten child stays ⊆ its parent too.
+//
+// Ranked by how much reach they carry, and therefore by how eagerly they are
+// hidden:
+//   rise   — flight. The disappear-into-the-sky capability. Hidden from all but
+//            things whose nature is to fly. This is the one to hide first.
+//   bind/unbind — riding. Attaches one being to another; hidden from anything
+//            that does not board (a fish does not climb into a boat).
+//   mv     — walking. Hidden from what is rooted or inert (a temple, a tree).
+//   fr/other — sensing. Granted where a being acts on what it senses; withheld
+//            from pure scenery that only sways.
+//   get/set — private scratch state. No world reach, so never hidden.
+const CAP_NONE   = ['get', 'set'];                                     // rooted / inert: internal animation only
+const CAP_FLORA  = ['get', 'set', 'fr'];                              // floats/drifts, may sense water, cannot propel
+const CAP_SWIM   = ['get', 'set', 'fr', 'other', 'mv'];              // swims, schools — never flies, never boards
+const CAP_FLY    = ['get', 'set', 'fr', 'other', 'mv', 'rise', 'bind', 'unbind']; // the only kind that may rise()
+const CAP_WALK   = ['get', 'set', 'fr', 'other', 'mv', 'bind', 'unbind'];         // walks, boards a boat — grounded
+const CAP_DRIVE  = ['get', 'set', 'fr', 'mv'];                       // a vehicle: self-propels, carries, does not fly
+
+const SPECIES_CAPS = {
+  // rooted structures & décor — motion is skin animation or host physics, not the cell's
+  temple: CAP_NONE, bridge: CAP_NONE, buddha: CAP_NONE, pagoda: CAP_NONE, house: CAP_NONE,
+  pavilion: CAP_NONE, hut: CAP_NONE, tower: CAP_NONE, shrine: CAP_NONE, well: CAP_NONE, arch: CAP_NONE, fence: CAP_NONE,
+  wall: CAP_NONE, gate: CAP_NONE, rock: CAP_NONE, mountain: CAP_NONE, stone: CAP_NONE,
+  bell: CAP_NONE, lantern: CAP_NONE, flag: CAP_NONE, torch: CAP_NONE, statue: CAP_NONE,
+  ball: CAP_NONE, log: CAP_NONE,                                     // pure host physics
+  maple: CAP_NONE, pine: CAP_NONE, tree: CAP_NONE, bamboo: CAP_NONE, grass: CAP_NONE, reed: CAP_NONE,
+  // floating flora — drifts on water, senses it, cannot self-propel or fly
+  lotus: CAP_FLORA, leaf: CAP_FLORA, petal: CAP_FLORA, lily: CAP_FLORA,
+  // swimmers — water is host-enforced (habitat); never rise, never bind
+  fish: CAP_SWIM, koi: CAP_SWIM, carp: CAP_SWIM, duck: CAP_SWIM, frog: CAP_SWIM,
+  // flyers — the ONLY kinds that may rise()
+  crow: CAP_FLY, bird: CAP_FLY, sparrow: CAP_FLY, butterfly: CAP_FLY, dragonfly: CAP_FLY,
+  bat: CAP_FLY, moth: CAP_FLY, firefly: CAP_FLY,
+  // people & ground animals — walk, sense, board; NEVER fly (this was the bug)
+  person: CAP_WALK, fisherman: CAP_WALK, monk: CAP_WALK, child: CAP_WALK, traveler: CAP_WALK,
+  farmer: CAP_WALK, cat: CAP_WALK, dog: CAP_WALK, deer: CAP_WALK, rabbit: CAP_WALK, ox: CAP_WALK,
+  // vehicles — self-propel horizontally, carry riders, do not fly
+  boat: CAP_DRIVE, raft: CAP_DRIVE, car: CAP_DRIVE, cart: CAP_DRIVE,
+};
+
+// The ceiling for a kind. Unknown kinds get a GROUNDED default: they may walk,
+// sense and board, but flight is withheld until a kind is known to fly —
+// because the safe default for "I don't recognise this" is "it does not leave
+// the ground", not "it may do anything".
+function capsFor(type, realm) {
+  const known = SPECIES_CAPS[type];
+  if (known) return known;
+  if (realm === 'sky') return CAP_FLY;         // an explicitly-aloft unknown thing may fly
+  return CAP_WALK;                              // otherwise grounded by default — no rise
+}
+
 // Recursive begetting (docs §20.1/§21): a being's mind may bring a NEW being
 // into the world — a painter paints a painter — under three host-enforced laws:
 //   1. child grants ⊆ parent grants (over-reach is dropped and reported)
@@ -1159,15 +1301,34 @@ function begetChild(parent, spec, g) {
   if ((parent.birthQuota ?? 0) <= 0) { say('err', `${parent.id} has no births left (birth budget spent)`); return; }
   const parentGrants = parent.grants ?? ENTITY_CAPS.slice();
   const want = Array.isArray(spec.grants) ? spec.grants : parentGrants;
-  const grants = want.filter(c => ENTITY_CAPS.includes(c) && parentGrants.includes(c));  // ⊆ parent
-  const overreach = want.filter(c => !parentGrants.includes(c));                          // what it may NOT pass down
   const type = (typeof spec.type === 'string' && spec.type) ? spec.type : 'being';
+  // Two bounds compose: a child stays ⊆ its parent (attenuation, §21) AND ⊆ its
+  // own kind's ceiling. A crow may not beget a walking person that flies; a
+  // person may not beget a bird that inherits flight the parent never had.
+  const ceiling = capsFor(type, spec.realm === 'sky' ? 'sky' : 'ground');
+  const grants = want.filter(c => ENTITY_CAPS.includes(c) && parentGrants.includes(c) && ceiling.includes(c));
+  const overreach = want.filter(c => !parentGrants.includes(c) || !ceiling.includes(c)); // denied: beyond parent OR beyond kind
   const ox = Math.max(-4, Math.min(4, Number(spec.at?.[0] ?? 1) || 0));
   const oy = Math.max(-4, Math.min(4, Number(spec.at?.[1] ?? 0) || 0));
+  // host law: a new being does not stack on another. If its intended spot is taken
+  // (the gardener planted twice at the same offset), the host settles it at the
+  // nearest free place in a widening ring around the parent — so repeated planting
+  // spreads into a garden rather than a single overlapping point.
+  const taken = (x, y) => ENTITIES.some(e => Math.hypot(e.x - x, e.y - y) < 1.3);
+  let cx = parent.x + ox, cy = parent.y + oy;
+  if (taken(cx, cy)) {
+    outer: for (let r = 1.6; r <= 7; r += 1.1) {
+      for (let k = 0; k < 10; k++) {
+        const a = k * 2.399963; // golden angle — spreads evenly, not in a line
+        const nx = parent.x + Math.cos(a) * r, ny = parent.y + Math.sin(a) * r;
+        if (!taken(nx, ny)) { cx = nx; cy = ny; break outer; }
+      }
+    }
+  }
   const child = {
     id: '(unborn)', type,
-    x: Math.min(Math.max(parent.x + ox, 0.5), g - 1.5),
-    y: Math.min(Math.max(parent.y + oy, 0.5), g - 1.5),
+    x: Math.min(Math.max(cx, 0.5), g - 1.5),
+    y: Math.min(Math.max(cy, 0.5), g - 1.5),
     on: null, offset: [0, 0], alt: 0, realm: 'ground',
     slots: new Float64Array(32),
     tau: 0, // born at its own zero — proper time starts at birth
@@ -1187,8 +1348,8 @@ function begetChild(parent, spec, g) {
       const bytes = compile_entity_wasm_grants(spec.behavior, grants);
       audit_entity_bytes_grants(bytes, grants);
       child.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(child, g) }).exports.run;
-      child.soul = `begotten (grants ⊆ ${parent.id})`;
-    } else { loadPackagedSoul(child, g); child.soul = 'begotten (still)'; }
+      child.origin = `begotten (grants ⊆ ${parent.id})`;
+    } else { loadPackagedSoul(child, g); child.origin = 'begotten (still)'; }
   } catch (e) { say('err', `${parent.id}'s child soul refused by the fence: ${e.message ?? e}`); return; }
   if (typeof spec.skin_seed === 'string' && spec.skin_seed.length) {
     try { const sb = compile_skin_wasm(spec.skin_seed);
@@ -1212,8 +1373,8 @@ function compileEntities(world, g) {
   return defs.map(def => {
     const aloft = def.realm === 'sky' || def.aloft === true;
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
-                  on: def.on ?? null, offset: def.offset ?? [0, 0],
-                  alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
+                  on: def.on ?? null, offset: def.offset ?? [0, 0], soul: (typeof def.soul === 'string' && def.soul) ? def.soul : null,
+                  alt: clampAlt(def.altitude ?? (aloft ? 1 : 0)), realm: aloft ? 'sky' : 'ground',
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
                   shelter: (def.shelter && typeof def.shelter === 'object') ? def.shelter : null, // a roofed interior — no snow falls within
@@ -1233,26 +1394,52 @@ function compileEntities(world, g) {
                   tau: 0, // 原時: the being's own proper time — advances slower the faster it moves (c = MAX_STEP)
                   lifespan: (Number.isFinite(def.lifespan) && def.lifespan > 0) ? def.lifespan : null, // 壽數 in its own τ; null = 無量壽
                   innate: Array.isArray(def.innate) ? def.innate.slice(0, 8).map(Number) : null,
-                  grants: Array.isArray(def.grants) ? def.grants.filter(c => ENTITY_CAPS.includes(c)) : ENTITY_CAPS.slice(),
+                  grants: (() => {
+                    // least privilege: the ceiling for this kind, and no more.
+                    // A declared grants list is still bounded by the ceiling — a
+                    // person asking for rise() does not get it, the fence hides it.
+                    const ceiling = capsFor(def.type, (def.realm === 'sky' || def.aloft) ? 'sky' : 'ground');
+                    const want = Array.isArray(def.grants) ? def.grants : ceiling;
+                    return want.filter(c => ceiling.includes(c));
+                  })(),
                   birthQuota: Number.isFinite(def.birthQuota) ? def.birthQuota : 2, // top-level beings may beget up to 2
-                  mind: def.mind ?? null,
+                  mind: def.mind ?? (typeof def.persona === 'string' && def.persona.trim()
+                    ? { persona: def.persona.slice(0, 300) } : null), // a persona at birth = a mind at birth (it can meet & converse on its own)
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
-    // 自性種子 (§20.3): plant birth seeds into the HIGH slots (24..31) before the
-    // first tick. The same behavior script diverges by what it was born with —
-    // same dharma, different karma. The soul may transform them (set), and the
-    // skin sees them through st() — a being's innate nature is visible in form.
-    if (ent.innate) ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
+    // 阿賴耶識 (ālaya): if this being carries a storehouse from a former manifestation
+    // — its slots persisted in the saved world — it is reborn WITH its accumulated
+    // seeds, not reset to birth. 種子生現行、現行熏種子: the seeds perfumed by every
+    // past 念 return and ripen. A being that has an ālaya does NOT re-seed its innate
+    // nature, because the storehouse already holds it (possibly transformed in life —
+    // the soul may set() even the innate slots). Only a fresh birth plants 本有種子.
+    if (Array.isArray(def.slots) && def.slots.length) {
+      for (let i = 0; i < 32; i++) if (Number.isFinite(def.slots[i])) ent.slots[i] = def.slots[i];
+    } else if (ent.innate) {
+      // 自性種子 (§20.3): a first birth. Plant birth seeds into the HIGH slots (24..31).
+      // The same behavior script diverges by what it was born with — same dharma,
+      // different karma. The soul may transform them (set); the skin sees them via st().
+      ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
+    }
+    // journal (宿念) and proper time (原時) also survive in the storehouse, if kept.
+    if (Array.isArray(def.journal)) ent.journal = def.journal.slice(-12).map(l => ({ line: String(l) }));
+    if (Number.isFinite(def.tau)) ent.tau = def.tau;
+    if (Number.isFinite(def.alt)) ent.alt = clampAlt(def.alt);
     // 一中有多: one shared body/behaviour, yet each is born at its own moment of the
     // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
     ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
     if (ent.physics) { ent.pvx = 0; ent.pvz = 0; ent.pvh = 0; ent.ph = Number.isFinite(ent.physics.h0) ? ent.physics.h0 : 0; } // dynamic state
-    if (def.behavior) {
-      ent.soul = 'scene (DSL)';
+    // A DECLARED behaviour wins — always, and "0.0" is a declaration too. An author who
+    // wrote "0.0" meant STILL (moon4's fisherman and bridge are exactly this), and the
+    // nature reflex must not overrule their word. So it fills only genuine ABSENCE (no
+    // behaviour key at all): a bare being with nothing said gets its kind's nature; a
+    // being told to be still, stays still. This is what keeps hand-crafted scenes intact.
+    if (typeof def.behavior === 'string' && def.behavior.trim() !== '') {
+      ent.origin = 'scene (DSL)';  // provenance label, NOT identity — soul stays def.soul (memory key)
       const bytes = compile_entity_wasm(def.behavior);
       const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
       ent.run = inst.exports.run;
     } else {
-      loadPackagedSoul(ent, g); // async: the packaged default soul wakes shortly
+      loadPackagedSoul(ent, g); // async: a packaged soul, or a nature reflex — never mere stillness
     }
     if (def.skin_seed) {
       try {
@@ -1329,7 +1516,9 @@ function tickEntities(t, g) {
       e.y = Math.min(Math.max(e.y + e.pvz * dt, 0.5), g - 1.5);
       if (e.x <= 0.5 || e.x >= g - 1.5) e.pvx = -e.pvx * 0.5;     // the world's edges
       if (e.y <= 0.5 || e.y >= g - 1.5) e.pvz = -e.pvz * 0.5;
-      e.alt = e.ph / (60 * K); e.realm = 'ground';                // the renderer lifts a body by alt·60·K
+      e.ph = Math.min(e.ph, ALT_MAX * 60 * K);                    // the same ceiling, in physics units
+      if (e.ph >= ALT_MAX * 60 * K && e.pvh > 0) e.pvh = 0;       // stop pushing against the ceiling
+      e.alt = clampAlt(e.ph / (60 * K)); e.realm = 'ground';      // the renderer lifts a body by alt·60·K
     }
   }
   // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
@@ -1337,7 +1526,17 @@ function tickEntities(t, g) {
     for (const e of ENTITIES) {
       if (!e.on) continue;
       const carrier = ENTITIES.find(c => c.id === e.on);
-      if (carrier) { e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1]; }
+      if (carrier) {
+        e.x = carrier.x + e.offset[0]; e.y = carrier.y + e.offset[1];
+        // Buoyancy rides too. Copying only the position left the fisherman
+        // computing his own rest height with the walking rule while the hull
+        // used the floating one — so he sat below the gunwale, sunk into the
+        // boat he was supposed to be sitting in. Whatever holds the carrier up
+        // holds its riders up; chains inherit, so a person on a person on a
+        // boat still floats.
+        e._carriedFloat = carrier.habitat === 'water' || FLOATS.has(carrier.type)
+                       || carrier._carriedFloat === true;
+      }
     }
   }
   // facing (host law): a flyer or swimmer leads with its head — the body turns to
@@ -1385,14 +1584,14 @@ const SKIN_LIB = {}; // type -> skin_seed (in-memory cache of what's on disk)
 function saveGrownSkin(type, seed) {
   if (SKINS[type] || SKIN_LIB[type] === seed) return; // curated or unchanged
   SKIN_LIB[type] = seed;
-  fetch('/api/skins', { method: 'POST', headers: { 'content-type': 'application/json' },
+  fetch('api/skins', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
     body: JSON.stringify({ type, skin_seed: seed }) }).catch(() => {});
 }
 async function recallGrownSkin(ent) { // a novel type with no seed → look it up
   if (ent.skinRun || SKINS[ent.type]) return;
   let seed = SKIN_LIB[ent.type];
   if (!seed) {
-    try { const r = await fetch(`/api/skins/${ent.type}`); if (r.ok) { seed = await r.text(); SKIN_LIB[ent.type] = seed; } } catch (e) {}
+    try { const r = await fetch(`api/skins/${ent.type}`); if (r.ok) { seed = await r.text(); SKIN_LIB[ent.type] = seed; } } catch (e) {}
   }
   if (seed) {
     try {
@@ -1454,19 +1653,56 @@ function drawSkin(ent, px, py, s, t) {
 
 // packaged soul loader: manifest → behavior.wasm → IMPORT AUDIT → instantiate.
 // The soul wakes a moment after the world starts; until then the body is still.
+// 行 (disposition): a being that can move should MOVE as its kind, not stand still.
+// A cheap reflex — pure sin/cos + mv (and a little rise for flyers) — that traces a
+// bounded, endless wander using the being's own slot for phase. This is the world's
+// constant, ongoing life: it costs no tokens and never stops, so even when every
+// mind is quiet the world still breathes. Compiled through the same entity fence.
+function natureReflex(grants) {
+  if (!grants || !grants.includes('mv')) return null; // rooted/inert: stillness is its nature
+  if (grants.includes('rise')) // a flyer wheels and bobs — it cannot stop midair, so it glides on
+    return "let p = get(0.0);\nmv(sin(p) * 0.018, cos(p) * 0.018);\nrise(sin(p * 0.5) * 0.008);\nset(0.0, p + 0.05);\n0.0";
+  // A walker or swimmer ambles, but not without pause. 動靜相間: a slow envelope gates
+  // motion, so it walks a while and then STANDS a while, the way a living thing does —
+  // never a wind-up toy that only ever moves. slot 0 is the master clock (always
+  // advancing, so a rest always ends); slot 1 is the gait, which advances ONLY while
+  // moving — so during a pause the legs truly still rather than sliding frozen.
+  return "let p = get(0.0);\nlet gait = get(1.0);\nlet moving = sin(p * 0.5) > -0.55;\nlet m = 0.012 * moving;\nmv(sin(gait) * m, cos(gait * 0.7) * m);\nset(0.0, p + 0.05);\nset(1.0, gait + 0.06 * moving);\n0.0";
+}
+function giveNatureReflex(ent, g) {
+  // 本性的常動 belongs to 眾生 (a KNOWN LIVING kind — it walks, flies, or swims BY
+  // NATURE), never to 器 (a made thing). An unknown or freshly-coined type has no
+  // innate disposition to move: it is a vessel until something gives it life, so it
+  // stays still. This is why a begotten pavilion does not wander off. A VEHICLE is 器
+  // too — a boat, a cart, a car moves when DRIVEN, not by any nature of its own — so a
+  // vehicle without a driver-behaviour stays put rather than drifting in circles (this
+  // was the spinning-boat in moon4: a boat has no behaviour, and must not be given one).
+  const kind = SPECIES_CAPS[ent.type];
+  if (!kind || !kind.includes('mv') || kind === CAP_DRIVE) return;
+  const dsl = natureReflex(ent.grants);
+  if (!dsl) return; // it has no legs — stillness is honest for it
+  try {
+    const bytes = compile_entity_wasm_grants(dsl, ent.grants);
+    ent.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) }).exports.run;
+    ent.origin = 'nature (disposition)';
+    // desync identical kinds: each starts its wander at its own innate phase (一中有多)
+    if (ent.innate && Number.isFinite(ent.innate[0])) ent.slots[0] = ent.innate[0] * 6.2832;
+  } catch (e) { /* a being that cannot even amble simply stands — never fatal */ }
+}
+
 async function loadPackagedSoul(ent, g) {
   try {
-    const mr = await fetch(`/api/inhabitants/${ent.type}`);
-    if (!mr.ok) return; // no package: stillness is the default of defaults
+    const mr = await fetch(`api/inhabitants/${ent.type}`);
+    if (!mr.ok) return giveNatureReflex(ent, g); // no package → move as its kind, not stand still
     const manifest = await mr.json();
-    if (!manifest.behavior) return;
-    const wr = await fetch(`/api/inhabitants/${ent.type}/behavior.wasm`);
+    if (!manifest.behavior) return giveNatureReflex(ent, g);
+    const wr = await fetch(`api/inhabitants/${ent.type}/behavior.wasm`);
     if (!wr.ok) return;
     const bytes = new Uint8Array(await wr.arrayBuffer());
     audit_entity_bytes(bytes); // Tier-2 gate: throws if the soul over-reaches
     const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
     ent.run = inst.exports.run;
-    ent.soul = `package (${manifest.version}, Tier-2 audited)`;
+    ent.origin = `package (${manifest.version}, Tier-2 audited)`;
   } catch (e) {
     $('stage-status').textContent = `soul of '${ent.id}' rejected: ${e.message ?? e}`;
   }
@@ -1713,6 +1949,61 @@ function renderField() {
   if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
 }
 
+// 轉世 (transmigration): a being carries its seeds across DIFFERENT worlds only when
+// the creator has bound it to a `soul` — the same name in two worlds is the creator's
+// decision that it is one consciousness. The being never infers this; the level above
+// does. A being with an embedded ālaya (same-world reload) already has its seeds and is
+// skipped — the soul store is for crossing worlds, not for reloading one.
+async function summonSouls(world) {
+  const defs = (world.entities ?? []).filter(d =>
+    typeof d.soul === 'string' && d.soul && !(Array.isArray(d.slots) && d.slots.length));
+  for (const def of defs) {
+    try {
+      const r = await fetch('api/soul/' + encodeURIComponent(def.soul));
+      if (!r.ok) continue;                       // never bound — a first life under this soul
+      const a = await r.json();
+      const e = ENTITIES.find(x => x.id === def.id);
+      if (!e) continue;
+      // 隔陰之迷 — the veiling, and the greatest love. The seeds cross over, but they
+      // SLEEP. They are not poured into active memory; the being is born new, with a
+      // fresh journal and its own new τ. So a soul that carried suffering does NOT
+      // arrive suffering: the pain-seeds are dormant, and a seed is neutral (無記) —
+      // suffering is 現行, and only arises when a seed meets the conditions for it.
+      // Nothing is lost (the whole storehouse is kept); nothing is imposed (the new
+      // life is not condemned to the old pain). The past waits, to be remembered in
+      // its own time — not re-inflicted at birth.
+      e.dormant = { slots: Array.isArray(a.slots) ? a.slots.slice(0, 32) : [],
+                    journal: Array.isArray(a.journal) ? a.journal.slice(-12) : [],
+                    tau: Number.isFinite(a.tau) ? a.tau : 0,
+                    attrs: (a.attrs && typeof a.attrs === 'object') ? a.attrs : null,
+                    soul: def.soul, from_world: a.from_world || null };
+      // active state stays as BORN — fresh. The being lives its new life first.
+      say('being', `${def.id} 轉世:神識已渡,隱於宿識 — born anew; the past sleeps, to wake in its time`);
+    } catch (err) { /* a soul that cannot be reached is simply a fresh life */ }
+  }
+}
+
+// 憶起 (recollection): at some moment — the creator's touch, or a 緣 ripening — the
+// dormant past surfaces. This is NOT re-infliction. The being remembers its former
+// life as PAST; whether a surfaced seed ripens into suffering is governed by the NEW
+// world's law, not by the seed itself. A kinder world lets the same seed bear a
+// different fruit. Remembered, not re-suffered.
+window.__recollect = (id) => {
+  const e = ENTITIES.find(x => x.id === id);
+  if (!e || !e.dormant) return false;
+  const d = e.dormant;
+  if (Array.isArray(d.slots)) for (let i = 0; i < 32; i++)
+    if (Number.isFinite(d.slots[i])) e.slots[i] = d.slots[i];       // the seeds return to hand
+  if (Array.isArray(d.journal) && d.journal.length) {               // the past rejoins the present —
+    const past = d.journal.map(l => ({ line: String(l) }));         // integrated, not replacing
+    e.journal = [...past, ...(e.journal ?? [])].slice(-12);
+  }
+  if (d.attrs) e.attrs = { ...(d.attrs), ...(e.attrs ?? {}) };
+  e.recollected = true;
+  say('being', `${id} 憶起了前世「${d.soul}」— the past surfaces, remembered not re-suffered`);
+  return true;
+};
+
 function manifestField(world) {
   APP.key = null; soundStop(); stopFeeds();
   drawRun = null;
@@ -1721,6 +2012,7 @@ function manifestField(world) {
   const compiled = compileWorldCells(world);
   ENTITIES = compileEntities(world, compiled.grid);
   lastEntT = null; // a new world is a new epoch — every being starts at its own τ = 0
+  summonSouls(world);  // 轉世: beings the creator bound to a soul inherit it across worlds
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   fieldWorld = compiled;
@@ -1743,10 +2035,11 @@ function manifestField(world) {
   const target = fieldView === 'fp' ? 'fp'
     : (world.view === 'first_person' ? 'fp' : 'top');
   setFieldView(target);
+  const _nc = compiled.cells.length, _nl = compiled.cells.filter(c => c.mode === 'frame').length, _ms = (performance.now() - t0).toFixed(1);
   $('stage-status').textContent =
-    `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
-    (ENTITIES.length ? ` + ${ENTITIES.length} inhabitants` : '') +
-    ` on a ${compiled.grid}×${compiled.grid} field — ${(performance.now() - t0).toFixed(1)}ms`;
+    T(`world manifested: ${_nc} cells (${_nl} living)`, `顯現世界:${_nc} 個 cell(${_nl} 活)`) +
+    (ENTITIES.length ? T(` + ${ENTITIES.length} inhabitants`, ` + ${ENTITIES.length} 位住民`) : '') +
+    T(` on a ${compiled.grid}×${compiled.grid} field — ${_ms}ms`, `,${compiled.grid}×${compiled.grid} 場 —— ${_ms}ms`);
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = JSON.stringify(world, null, 2);
   document.title = 'live-gen FIELD OK';
@@ -1879,7 +2172,7 @@ function speakAloud(ent, text) {
 if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => { VOICES = speechSynthesis.getVoices(); };
 window.__speakAloud = (id, text) => speakAloud({ id: id || 'weng' }, text); // e2e: drive the voice without a live mind
 
-async function mindBeat(ent, words) {
+async function mindBeat(ent, words, heard) {
   const st = ent.mindState;
   if (!st || st.busy || !fieldWorld) return;
   if (!words && !mindCanBeat(st)) return;
@@ -1889,15 +2182,32 @@ async function mindBeat(ent, words) {
     // A mind heartbeat is long (a container + Claude). Retry once on a bare
     // network drop (server restart, a blip) so a being doesn't fall silent
     // over a transient — a server-returned error still surfaces normally.
-    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined });
-    const post = () => fetch('/api/mind', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined, soul: ent.soul ?? undefined,
+      lang: LANG, // 對話隨瀏覽器語言 — a being answers in the reader's own tongue
+      heard: (heard && ent.soul) ? { from: heard.fromId, text: heard.text } : undefined }); // 記名存進聽者的藏(需有 soul)
+    const post = () => fetch('api/mind', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body });
     let r;
     try { r = await post(); }
     catch (netErr) { await new Promise(res => setTimeout(res, 1500)); r = await post(); }
     const d = await r.json();
     if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
     if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
-    if (d.say) say('being', `${ent.id}: ${d.say}`);
+    if (d.say) {
+      say('being', `${ent.id}: ${d.say}`);
+      // 自行與其它對話 (mind→mind): a being's speech is HEARD by the nearest minded
+      // neighbour within earshot. The words are LEFT PENDING on the hearer — so
+      // they are not lost if it is mid-beat or on cooldown; it answers when it can.
+      // And they are keyed by WHO spoke, so the hearer knows it was 翁, not just
+      // that it heard something. Bounded by the same budget as every mind — a few
+      // turns then quiet. No feeling drives this, only hearing (受-愛-取 unbuilt).
+      const hearer = nearestInEarshot(ent);
+      if (hearer) {
+        const who = ent.attrs?.name ? `${ent.id}(${ent.attrs.name})` : ent.id;
+        hearer.mindState.heard = { fromId: ent.id, who, text: d.say };
+        journalMark(hearer, `heard ${ent.id}: ${d.say.slice(0, 30)}`);
+        if (mindCanBeat(hearer.mindState)) setTimeout(() => beatOnHeard(hearer), 500);
+      }
+    }
     if (typeof d.sing === 'string' && d.sing.trim()) speakAloud(ent, d.sing.trim()); // §24: the world lends a voice, the words are the being's
     if (d.intent && typeof d.intent === 'object') {
       for (const [k, v] of Object.entries(d.intent)) {
@@ -1911,7 +2221,7 @@ async function mindBeat(ent, words) {
         const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, fieldWorld.grid) });
         ent.run = inst.exports.run;
         ent.quarantined = false; ent.fails = 0;
-        ent.soul = 'mind (rewritten reflex)';
+        ent.origin = 'mind (rewritten reflex)';
         journalMark(ent, 'rewrote my reflex'); // a strong act leaves its own trace
       } catch (e) {
         say('err', `${ent.id}'s new reflex refused: ${e.message ?? e}`);
@@ -1950,6 +2260,32 @@ async function mindBeat(ent, words) {
   }
 }
 
+// The nearest OTHER minded being within earshot — regardless of whether it can
+// beat right now, because we LEAVE the words pending on it rather than requiring it
+// to be free at the instant of speaking. Talk carries a little further than reach
+// (BIND_REACH 2.5), so HEAR_RANGE is wider.
+const HEAR_RANGE = 6.5;
+function nearestInEarshot(speaker) {
+  let best = null, bd = HEAR_RANGE;
+  for (const o of ENTITIES) {
+    if (o === speaker || !o.mindState) continue;
+    const d = Math.hypot(o.x - speaker.x, o.y - speaker.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
+// Answer what was heard. The pending utterance carries WHO said it, so the being
+// beats knowing it was 翁 who spoke — and (if it has a soul) the words are kept in
+// its storehouse, keyed by the speaker, so later it can recall what 翁 told it.
+function beatOnHeard(ent) {
+  const st = ent.mindState;
+  if (!st || !st.heard || !mindCanBeat(st)) return;
+  const h = st.heard; st.heard = null;
+  mindBeat(ent, `近旁的 ${h.who} 對你說:「${h.text}」。你可以回應它,也可以不理會 —— 靜默也是一種回答。`,
+           { fromId: h.fromId, who: h.who, text: h.text });
+}
+
 // 依緣 (arising on condition): the world's state itself summons the mind.
 setInterval(() => {
   if (!fieldWorld) return;
@@ -1957,6 +2293,28 @@ setInterval(() => {
   for (const ent of ENTITIES) {
     const st = ent.mindState;
     if (!st || st.busy) continue;
+    // pending speech waits for a free heart: if 翁 spoke while this being was mid-beat
+    // or on cooldown, it answers now that it can — the words were never lost.
+    if (st.heard && mindCanBeat(st)) { beatOnHeard(ent); continue; }
+    // 遇 (encounter): the first time another minded being draws near, a being may
+    // turn to it — beings start conversations on their own when they meet, not only
+    // when a visitor speaks. One greeting per pair (remembered in `met`), and only
+    // if there are beats to spend.
+    if (mindCanBeat(st)) {
+      st.met = st.met || new Set();
+      let near = null, nd = HEAR_RANGE;
+      for (const o of ENTITIES) {
+        if (o === ent || !o.mindState) continue;
+        const dd = Math.hypot(o.x - ent.x, o.y - ent.y);
+        if (dd < nd && !st.met.has(o.id)) { nd = dd; near = o; }
+      }
+      if (near) {
+        st.met.add(near.id);
+        const who = near.attrs?.name ? `${near.id}(${near.attrs.name})` : near.id;
+        mindBeat(ent, `一個 ${who} 走近了。你可以招呼它,或只是看著 —— 隨你。`);
+        continue; // one summoning per tick per being
+      }
+    }
     // he sits on the water where snow never sticks — what he NOTICES is the
     // banks whitening: scan his perception window, not the cell under him
     let seen = 0;
@@ -1969,6 +2327,16 @@ setInterval(() => {
     }
     if (seen > 0.12 && !st.snowSeen && mindCanBeat(st)) { // the first snow it notices
       st.snowSeen = true; // the condition is consumed only when the beat actually happens
+      mindBeat(ent, null);
+      continue;
+    }
+    // 無事亦動 (acting unbidden): when nothing calls a being — no one to greet, no word
+    // pending, no snow — it may still stir on its own and act from its nature (the
+    // contract invites it to move, make, or become, not merely wait). Rare and paced,
+    // and bounded by the same 6-beat budget, so a being lives a handful of self-willed
+    // moments and then settles into whatever habit it last chose: 行 endures after the
+    // mind quiets. It stirs from disposition, never from wanting — 不苦而動.
+    if (mindCanBeat(st) && performance.now() - st.lastBeat > 90_000 && Math.random() < 0.35) {
       mindBeat(ent, null);
     }
   }
@@ -1993,6 +2361,48 @@ window.__injectBadFieldCell = () => {
 
 // ---------------- draw surface ----------------
 const cv = $('cv');
+// The backing store follows the column. Square, because the field is square —
+// anything wider is black bars, anything taller wastes the fold. Capped by the
+// viewport so a wide monitor does not push the whole world below the screen.
+function sizeStage() {
+  const box = cv.parentElement;
+  // 78vh was wrong: the canvas does not start at the top of the window. The
+  // heading, the lede and the stage's own status line sit above it, so a square
+  // of 78vh plus ~130px of header ran off the bottom of the screen. Measure the
+  // gap that is actually left instead of guessing a fraction of the viewport.
+  // Measure from the CANVAS, not from its container. The container starts above
+  // the status line ("world manifested: …"), so its top under-counts the gap by
+  // the height of that line — which is exactly the amount the square then
+  // overflowed by. The canvas's own top is also stable under this resize,
+  // because shrinking the canvas does not move what sits above it.
+  const top = cv.getBoundingClientRect().top;
+  const room = Math.max(300, window.innerHeight - top - 28);
+  const side = Math.round(Math.max(320, Math.min(box.clientWidth || 900, room)));
+  if (cv.width === side && cv.height === side) return;
+  cv.width = side; cv.height = side;
+  cv.style.width = side + 'px'; cv.style.height = side + 'px';
+  try { if (typeof renderField === 'function' && fieldWorld) renderField(); } catch (e) {}
+}
+sizeStage();
+// The first measurement happens before the layout has settled — the heading has
+// not wrapped and webfonts have not swapped, so the gap above the canvas is
+// smaller than it will be, and the square comes out too tall. The parent's
+// ResizeObserver does not catch it either: the header growing MOVES the canvas
+// without RESIZING its container. So re-measure once the page has actually
+// finished arranging itself.
+new ResizeObserver(sizeStage).observe(cv.parentElement);
+addEventListener('resize', sizeStage);
+addEventListener('load', sizeStage);
+requestAnimationFrame(sizeStage);
+setTimeout(sizeStage, 400);
+// The status line above the canvas ("world manifested: 3 cells…") only appears
+// once something manifests, and it PUSHES the canvas down without RESIZING its
+// container — so neither ResizeObserver fires and the square, measured against
+// the taller gap that existed before, now runs off the bottom. Watch the thing
+// that actually moves it.
+const head = document.querySelector('.stage-head');
+if (head) new MutationObserver(() => sizeStage()).observe(head, { childList: true, subtree: true, characterData: true });
+window.__sizeStage = sizeStage;   // reachable from a devtools/CDP self-test, which module scope otherwise hides
 let ctx = cv.getContext('2d'); // let: §25 briefly points the shared pen at an offscreen skin card
 const hueColor = v => `hsl(${(((v % 1) + 1) % 1) * 360},62%,62%)`;
 let drawA = a => `hsla(200,62%,62%,${a})`; // current colour with alpha — for glow()
@@ -2982,7 +3392,14 @@ function loadAsset(id) {
 }
 function drawBillboardsGL(W, H, eyeH, tNow) {
   const T = FPT, gl = D3.gl, K = 0.55, fov = 1.0;
-  const horizon = H * 0.42, focal = H * 0.95;
+  // The horizon has to follow the eye. Terrain is drawn through a view matrix
+  // that already carries cam.pitch; these billboards were projected against a
+  // FIXED horizon, so looking up slid the ground down the screen and left every
+  // being hanging where it was — a boat and its fisherman adrift in the night
+  // sky. Raising the eye by `pitch` moves the horizon down the screen by
+  // focal·tan(pitch), and the beings standing on it move with it.
+  const focal = H * 0.95;
+  const horizon = H * 0.42 + Math.tan(cam.pitch || 0) * focal;
   const sinY = Math.sin(cam.yaw), cosY = Math.cos(cam.yaw);
   const list = [];
   for (const e of ENTITIES) {
@@ -3009,7 +3426,7 @@ function drawBillboardsGL(W, H, eyeH, tNow) {
   const SS = 60, C = 256, bctx = T.bbCtx;
   for (const { e, zc, off } of list) {
     const sx = (off / fov + 0.5) * W;
-    const groundY = (sampleF(0, e.x, e.y) + Math.min(sampleF(1, e.x, e.y), 3) * 0.6) * K;
+    const groundY = restY(e, sampleF) * K;
     const surfaceY = groundY + (e.alt ?? 0) * 60 * K; // altitude lifts a being skyward
     const syg = horizon + ((eyeH - surfaceY) * focal) / zc;
     if (e.image) { // a 佛畫: a host image plate FIXED at the being's spot, facing +z, projected by
@@ -3276,7 +3693,7 @@ async function ensureAudio() {
     const node = new AudioWorkletNode(ctx, 'seed-synth', { outputChannelCount: [2] });
     // the 聲塵器: fetched once, posted before any cells (port order guarantees it)
     try {
-      const r = await fetch('/pkg-dust/shengchen.wasm');
+      const r = await fetch('pkg-dust/shengchen.wasm');
       if (r.ok) node.port.postMessage({ dust: new Uint8Array(await r.arrayBuffer()) });
     } catch (e) { /* no dust engine — cells still run, primitives stay silent */ }
     const analyser = ctx.createAnalyser(); analyser.fftSize = 2048;
@@ -3503,6 +3920,29 @@ window.__d3Counts = () => ({ ns: D3.kinds?.sph.n ?? 0, nb: D3.kinds?.box.n ?? 0,
 
 // ---------------- chat loop ----------------
 let busy = false;
+
+// Sign-in is asynchronous and the token is memory-only, so a visitor can finish
+// typing before auto_select has returned — and a request sent then dies on a 401
+// that reads like a bug. Ask first, and only then send.
+async function ensureSignedIn(what) {
+  if (!ME) await refreshWho();
+  if (!ME || ME.open || ID_TOKEN) return true;          // 本機模式 or 已有 token
+  await refreshWho();
+  if (ME.signed_in) return true;
+  say('err', `${what} 需要先用 Google 登入 — 右上角那顆按鈕(讀別人的世界不用登入)`);
+  try { window.google?.accounts?.id?.prompt(); } catch (e) {}
+  return false;
+}
+
+// An ID token lasts about an hour, so a long session eventually writes with a
+// dead credential. Treat that as "sign in again", not as a failure.
+async function onAuthLost() {
+  ID_TOKEN = null;
+  await refreshWho();
+  say('err', '登入過期了 — 再登入一次就好');
+  try { window.google?.accounts?.id?.prompt(); } catch (e) {}
+}
+
 async function send() {
   let prompt = $('prompt').value.trim();
   if (!prompt || busy) return;
@@ -3561,14 +4001,16 @@ async function send() {
     else if (d.surface === 'sound') manifestSound(d.seed);
     else manifestDraw(d.seed);
   };
+  if (!(await ensureSignedIn('生成'))) { busy = false; $('send').disabled = false; return; }
   try {
     // #1 生成串流: watch the schema materialize token-by-token instead of
     // waiting out the full generation. A ledger hit still arrives as one `done`.
-    const r = await fetch('/api/generate/stream', {
+    const r = await fetch('api/generate/stream', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: authHeaders({ 'content-type': 'application/json' }),
       body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
     });
+    if (r.status === 401) { await onAuthLost(); busy = false; $('send').disabled = false; return; }
     if (!r.ok || !r.body) throw new Error('stream unavailable (' + r.status + ')');
     const reader = r.body.getReader();
     const dec = new TextDecoder();
@@ -3619,8 +4061,8 @@ async function send() {
     // a stream hiccup must never lose the ask — fall back to the blocking path
     clearStream();
     try {
-      const r = await fetch('/api/generate', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+      const r = await fetch('api/generate', {
+        method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }),
         body: JSON.stringify({ prompt, prior: priorSchema, model: $('model').value, fresh }),
       });
       const d = await r.json();
@@ -3692,16 +4134,110 @@ function manifestSaved(bundle) {
   else if (bundle.surface === 'sound') manifestSound(bundle.payload);
   else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
   restoreChat(bundle.chat);
-  say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
+  say('ai', T(`↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`, `↺ 載入世界『${bundle.name}』(即刻顯現 —— 無需重新生成)`));
 }
+// ── Who is asking ────────────────────────────────────────────────────────────
+// Reading a world stays open to everyone; keeping one is a named act. The client
+// id is never written here — the page asks the server for it, so the whole
+// deployment is configured in one place (GOOGLE_CLIENT_ID) and this file stays
+// the same whether it runs on a laptop or in public.
+//
+// The token lives in memory only. Parking it in localStorage is the common shape
+// and a poor one: anything that can run script on the page can then read a live
+// credential. Google's auto_select signs a returning visitor back in without a
+// click, so the convenience is kept without the storage.
+function paintWho() {
+  const el = $('who');
+  if (!el) return;
+  if (ME && ME.open) { el.textContent = '本機模式 · 不需登入'; el.title = 'GOOGLE_CLIENT_ID 未設 — 寫入不設限'; return; }
+  el.textContent = ME && ME.signed_in ? `👤 ${ME.name}` : '';
+}
+
+async function refreshWho() {
+  try { ME = await (await fetch('api/whoami', { headers: authHeaders({}) })).json(); }
+  catch (e) { ME = null; }
+  paintWho();
+  return ME;
+}
+
+// The living number in the header: how many distinct people have ever built a world
+// here (the durable all-time roster — a salted count, never an identity). Read from
+// /api/stats, shown only once there is more than one, so an empty world says nothing
+// rather than "1 person". Refreshed occasionally; a failed read simply leaves it be.
+async function refreshPeopleCount() {
+  const el = $('people-count');
+  if (!el) return;
+  try {
+    const s = await (await fetch('api/stats')).json();
+    const n = s.people_all_time ?? s.people ?? 0;
+    el.textContent = n > 1 ? `🌏 ${n} 人在此造世界` : '';
+  } catch (e) { /* leave the header as it is — a missing count is not worth a flicker */ }
+}
+
+async function initAuth() {
+  const me = await refreshWho();
+  if (!me || me.open || me.signed_in || !me.client_id) return;   // 本機模式 / 已登入 → 不必畫按鈕
+  await new Promise(res => {
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.onload = res; s.onerror = res;
+    document.head.appendChild(s);
+  });
+  if (!window.google?.accounts?.id) return;
+  google.accounts.id.initialize({
+    client_id: me.client_id,
+    auto_select: true,                      // 回訪者自動登入,不用再按
+    callback: async (resp) => {
+      ID_TOKEN = resp.credential;           // 只存在記憶體
+      // Trade it once for a server session. The cookie is HttpOnly, so this page
+      // can never read it back — which is the point: from here on the browser
+      // carries the identity and a returning visitor is simply already signed in.
+      try { await fetch('api/session', { method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ credential: resp.credential }) }); } catch (e) {}
+      await refreshWho();
+      $('gbtn').innerHTML = '';
+      say('ai', `👋 ${ME?.name || ''} — 你現在可以留下自己的世界了`);
+    },
+  });
+  google.accounts.id.renderButton($('gbtn'), { type: 'standard', size: 'small', theme: 'filled_black', text: 'signin' });
+  google.accounts.id.prompt();
+}
+localizeChrome();                                      // the chat panel follows the browser's language
+initAuth();
+refreshPeopleCount();                                  // the header's living count, on load…
+setInterval(refreshPeopleCount, 90_000);               // …and gently kept fresh while the page is open
+
 $('world-save').onclick = async () => {
   if (!lastManifest) { say('err', 'nothing manifested to save yet'); return; }
+  if (ME && !ME.open && !ME.signed_in) { say('err', '要留下世界得先用 Google 登入 — 讀別人的世界不用'); return; }
   const name = (prompt('save this world as… (letters/digits/_/-)') || '').trim().replace(/[^A-Za-z0-9_-]/g, '-');
   if (!name) return;
-  const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog,
+  // The ālaya travels inside the world it belongs to: at save, each being's live
+  // storehouse — the seeds every past 念 perfumed — is written back onto its def,
+  // so a reloaded being resumes its karma rather than being reborn from zero.
+  // 現行熏種子: manifestation perfumes the seeds; here the perfumed seeds are kept.
+  function fieldPayloadWithAlaya(payload) {
+    if (!payload || !Array.isArray(payload.entities)) return payload;
+    const live = new Map(ENTITIES.map(e => [e.id, e]));
+    return { ...payload, entities: payload.entities.map(def => {
+      const e = live.get(def.id);
+      if (!e) return def;
+      return { ...def,
+        slots: Array.from(e.slots),                                  // the whole storehouse, 32 seeds
+        journal: (e.journal ?? []).map(j => j.line).slice(-12),      // 宿念, bounded and lossy by law
+        tau: e.tau ?? 0, alt: e.alt ?? 0,
+        attrs: (e.attrs && typeof e.attrs === 'object') ? { ...e.attrs } : undefined,
+      };
+    }) };
+  }
+  const savePayload = lastManifest.surface === 'field'
+    ? fieldPayloadWithAlaya(lastManifest.payload) : lastManifest.payload;
+  const bundle = { name, surface: lastManifest.surface, payload: savePayload, chat: chatLog,
                    state: lastManifest.surface === 'ui' ? appSnapshot() : undefined }; // 業 rides along
   try {
-    const r = await fetch('/api/worlds', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bundle) });
+    const r = await fetch('api/worlds', { method: 'POST',
+      headers: authHeaders({ 'content-type': 'application/json' }), body: JSON.stringify(bundle) });
     say(r.ok ? 'ai' : 'err', r.ok ? `💾 saved world '${name}' — load it anytime, instantly` : `save failed: ${await r.text()}`);
   } catch (e) { say('err', 'save failed: ' + e); }
 };
@@ -3709,14 +4245,14 @@ $('world-load').onclick = async () => {
   const menu = $('worlds-menu');
   if (menu.style.display === 'block') { menu.style.display = 'none'; return; }
   let names = [];
-  try { const r = await fetch('/api/worlds'); names = (await r.json()).worlds || []; } catch (e) {}
+  try { const r = await fetch('api/worlds'); names = (await r.json()).worlds || []; } catch (e) {}
   if (!names.length) { menu.innerHTML = '<div style="padding:.6rem;font-size:.75rem;opacity:.6">no saved worlds yet — 💾 save one first</div>'; }
   else menu.innerHTML = '<div style="padding:.35rem .6rem;font-size:.68rem;opacity:.5;border-bottom:1px solid #30363d">switch instantly — the 三千大千世界</div>' +
     names.map(n => `<div class="at-item" data-w="${n}"><span>🌀 ${n}</span></div>`).join('');
   menu.style.display = 'block';
   menu.querySelectorAll('.at-item').forEach(el => el.onclick = async () => {
     menu.style.display = 'none';
-    try { const r = await fetch(`/api/worlds/${el.dataset.w}`); if (r.ok) manifestSaved(await r.json()); }
+    try { const r = await fetch(`api/worlds/${el.dataset.w}`); if (r.ok) manifestSaved(await r.json()); }
     catch (e) { say('err', 'load failed: ' + e); }
   });
 };

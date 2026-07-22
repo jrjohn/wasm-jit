@@ -11,6 +11,8 @@
 //! the demo. Runs on :8646, fully separate from the other demos.
 
 mod auth;
+mod metrics;
+mod beings_mem;
 
 use axum::http::StatusCode;
 use axum::response::sse::Sse;
@@ -152,6 +154,25 @@ async fn container_running() -> bool {
         .unwrap_or(false)
 }
 
+/// Environment variables that must never be visible to the generator.
+///
+/// The generator image is shared with a CI agent, which bakes its own credentials
+/// into the image's ENV. A container started from it therefore inherits them even
+/// when nobody passes them — and the prompt going in is a stranger's text, so
+/// anything readable in there is one prompt injection away from appearing in the
+/// output. Blank them explicitly at create; an image is not a clean room just
+/// because this process did not hand it a secret.
+const BLANKED_ENV: [&str; 6] = [
+    "GH_TOKEN", "JENKINS_TOKEN", "SONARQUBE_TOKEN", "ARCHIVE_PG",
+    "JENKINS_USER", "SONAR_HOST_URL",
+];
+
+/// Where the generator's Claude credentials live on the host. A directory of its
+/// own rather than the CI agent's: the CLI rewrites this on refresh, and two
+/// services sharing one mutable credential store is a race nobody would choose
+/// deliberately.
+const CLAUDE_HOME: &str = "/opt/arcana/claude-home";
+
 async fn ensure_container() -> bool {
     if container_running().await {
         return true;
@@ -161,18 +182,42 @@ async fn ensure_container() -> bool {
         .output()
         .await;
     let image = std::env::var("GEN_IMAGE").unwrap_or_else(|_| "agent-task-node:local".into());
+    let claude_home = std::env::var("CLAUDE_HOME_DIR").unwrap_or_else(|_| CLAUDE_HOME.into());
+
+    let mut args: Vec<String> = vec![
+        "run".into(), "-d".into(), "--name".into(), GEN_CONTAINER.into(),
+        "--entrypoint".into(), "sleep".into(),
+        // Survive a daemon restart, so the carefully-shaped container is not
+        // silently replaced by whatever a later code path happens to create.
+        "--restart".into(), "unless-stopped".into(),
+        "-e".into(), "IS_SANDBOX=1".into(),
+    ];
+    for k in BLANKED_ENV {
+        args.push("-e".into());
+        args.push(format!("{k}="));
+    }
+    // Authenticate by mounting a credentials directory rather than passing a token:
+    // the CLI refreshes it in place, so a token in the environment goes stale and a
+    // mounted home does not.
+    if std::path::Path::new(&claude_home).exists() {
+        args.push("-v".into());
+        args.push(format!("{claude_home}:/root/.claude"));
+    } else {
+        // No credential store — fall back to the token the environment may hold.
+        args.push("-e".into());
+        args.push("CLAUDE_CODE_OAUTH_TOKEN".into());
+    }
+    args.push(image);
+    args.push("infinity".into());
+
     let ok = tokio::process::Command::new("docker")
-        .args([
-            "run", "-d", "--name", GEN_CONTAINER, "--entrypoint", "sleep",
-            "-e", "CLAUDE_CODE_OAUTH_TOKEN", "-e", "IS_SANDBOX=1",
-            &image, "infinity",
-        ])
+        .args(&args)
         .output()
         .await
         .map(|o| o.status.success())
         .unwrap_or(false);
     if ok {
-        eprintln!("[gen] persistent container '{GEN_CONTAINER}' started");
+        eprintln!("[gen] persistent container '{GEN_CONTAINER}' started (secrets blanked, creds mounted)");
     }
     ok
 }
@@ -191,15 +236,51 @@ async fn run_docker(args: Vec<String>) -> Result<std::process::Output, String> {
 
 /// Run Claude CLI: warm path = exec into the persistent container; cold
 /// fallback = the original one-shot `docker run --rm`.
-async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
+
+/// `claude --output-format json` wraps the answer in an envelope carrying token
+/// counts, cost and timings. Take the text out and record the spend on the way
+/// past — this is the only place that knows what a generation actually cost.
+///
+/// If the envelope is not what we expect, hand back the raw output unchanged.
+/// A broken metric must never become a broken generation.
+fn unwrap_cli_json(raw: &str, user: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(raw.trim()) else {
+        return raw.to_string();
+    };
+    let Some(text) = v.get("result").and_then(|r| r.as_str()) else {
+        return raw.to_string();
+    };
+    let u = &v["usage"];
+    metrics::record(
+        "generate",
+        user,
+        serde_json::json!({
+            "ok": !v["is_error"].as_bool().unwrap_or(false),
+            "ms": v["duration_ms"].as_u64().unwrap_or(0),
+            "ttft_ms": v["ttft_ms"].as_u64().unwrap_or(0),
+            "tok_in": u["input_tokens"].as_u64().unwrap_or(0),
+            "tok_out": u["output_tokens"].as_u64().unwrap_or(0),
+            "tok_cache": u["cache_creation_input_tokens"].as_u64().unwrap_or(0)
+                + u["cache_read_input_tokens"].as_u64().unwrap_or(0),
+            "cost_usd": v["total_cost_usd"].as_f64().unwrap_or(0.0),
+            "ledger_hit": false,
+        }),
+    );
+    text.to_string()
+}
+
+async fn claude_generate(prompt: &str, model: &str, user: &str) -> Result<String, String> {
     if ensure_container().await {
         let out = run_docker(vec![
             "exec".into(), GEN_CONTAINER.into(), "claude".into(),
             "-p".into(), prompt.into(), "--model".into(), model.into(),
+            // Ask for the envelope, not just the text: it carries the token
+            // counts and cost, which is the only way the bill gets a cause.
+            "--output-format".into(), "json".into(),
         ])
         .await?;
         if out.status.success() {
-            return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+            return Ok(unwrap_cli_json(&String::from_utf8_lossy(&out.stdout), user));
         }
         eprintln!(
             "[gen] warm exec failed ({}), falling back to cold run: {}",
@@ -207,14 +288,34 @@ async fn claude_generate(prompt: &str, model: &str) -> Result<String, String> {
             String::from_utf8_lossy(&out.stderr).chars().take(200).collect::<String>()
         );
     }
+    // The cold fallback runs the SAME stranger's prompt, so it needs the same
+    // scrubbing. A hardening that only covers the warm path is a hardening that
+    // stops applying the moment the container dies.
     let image = std::env::var("GEN_IMAGE").unwrap_or_else(|_| "agent-task-node:local".into());
-    let out = run_docker(vec![
+    let claude_home = std::env::var("CLAUDE_HOME_DIR").unwrap_or_else(|_| CLAUDE_HOME.into());
+    let mut args: Vec<String> = vec![
         "run".into(), "--rm".into(), "--entrypoint".into(), "claude".into(),
-        "-e".into(), "CLAUDE_CODE_OAUTH_TOKEN".into(), "-e".into(), "IS_SANDBOX=1".into(),
-        image,
-        "-p".into(), prompt.into(), "--model".into(), model.into(),
-    ])
-    .await?;
+        "-e".into(), "IS_SANDBOX=1".into(),
+    ];
+    for k in BLANKED_ENV {
+        args.push("-e".into());
+        args.push(format!("{k}="));
+    }
+    if std::path::Path::new(&claude_home).exists() {
+        args.push("-v".into());
+        args.push(format!("{claude_home}:/root/.claude"));
+    } else {
+        args.push("-e".into());
+        args.push("CLAUDE_CODE_OAUTH_TOKEN".into());
+    }
+    args.push(image);
+    args.push("-p".into());
+    args.push(prompt.into());
+    args.push("--model".into());
+    args.push(model.into());
+    args.push("--output-format".into());
+    args.push("json".into());
+    let out = run_docker(args).await?;
     if !out.status.success() {
         return Err(format!(
             "claude exited {}: {}",
@@ -235,6 +336,7 @@ async fn claude_stream(
     prompt: &str,
     model: &str,
     attempt: u32,
+    user: &str,
     tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
 ) -> Result<String, String> {
     use tokio::io::{AsyncBufReadExt, BufReader};
@@ -299,6 +401,24 @@ async fn claude_stream(
                 }
             }
             Some("result") => {
+                // The streaming envelope carries the same usage block as the
+                // one-shot form. This is the path the page actually takes, so a
+                // meter attached only to the other one measures zero forever.
+                let u = &v["usage"];
+                metrics::record("generate", user, json!({
+                    "ok": v["is_error"].as_bool() != Some(true),
+                    "streamed": true,
+                    "attempt": attempt,
+                    "model": model,
+                    "ms": v["duration_ms"].as_u64().unwrap_or(0),
+                    "ttft_ms": v["ttft_ms"].as_u64().unwrap_or(0),
+                    "tok_in": u["input_tokens"].as_u64().unwrap_or(0),
+                    "tok_out": u["output_tokens"].as_u64().unwrap_or(0),
+                    "tok_cache": u["cache_creation_input_tokens"].as_u64().unwrap_or(0)
+                        + u["cache_read_input_tokens"].as_u64().unwrap_or(0),
+                    "cost_usd": v["total_cost_usd"].as_f64().unwrap_or(0.0),
+                    "ledger_hit": false,
+                }));
                 if v.get("is_error").and_then(|b| b.as_bool()) == Some(true) {
                     let msg = v.get("result").and_then(|r| r.as_str()).unwrap_or("api error");
                     let _ = child.wait().await;
@@ -865,7 +985,8 @@ Reply with ONE JSON object only (no prose outside it):
  "behavior":"<OPTIONAL: rewrite your body's reflex, DSL below — omit unless the situation truly calls for a change>",
  "intent":{"7":12.5},   <OPTIONAL slot writes, keys 0..31>
  "beget":{"type":"<a kind, e.g. lotus or person>","at":[1.0,0.0],"grants":["mv","fr"],"persona":"<optional: give the child its OWN mind>","behavior":"<optional: the child's reflex DSL>","skin_seed":"<optional: how it looks, drawing DSL>"},
-   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.>
+   <OPTIONAL — bring a NEW being into the world beside you (a painter may paint a painter). RULES, enforced by the host: you may grant the child ONLY capabilities you yourself have (a subset of get/set/fr/mv/unbind/rise — never more); the host divides your limited birth budget with it; the child's soul passes the same compile+audit gate. Omit unless you truly mean to beget one — this is the strongest thing you can do.
+   ITS LOOK — the shared vocabulary of things: name a `type` already in the WORLD VOCABULARY (listed in your perception below) and the host DRAWS IT FOR YOU — no skin_seed needed. A pavilion, a lotus, a lantern, a pine: just say the word and it appears, fully formed, for almost nothing. To bring something the vocabulary LACKS, include a skin_seed ONCE — it is drawn now AND joins the shared vocabulary under that type-name (名言種子, 共業), so you and every other being may summon it by name forever after. This is how a world grows rich: not by each being re-drawing from scratch every scarce beat, but by making a thing once and lending its name to all. Prefer naming a word that exists; coin a new one only when you mean to add to the common tongue.>
  "skin":"<OPTIONAL: repaint YOUR OWN body — give yourself clothes, a hat, a colour. A drawing DSL run(px,py,s,t,nx,ny) [nx,ny each -1..1 point to the nearest other being, so you can face or lean toward whoever is near], primitives ONLY (this is the skin fence — it cannot touch the world): hue(h) [h 0..1, vivid], rgb(r,g,b) [each 0..1], hsl(h,s,l) [each 0..1 — USE THIS for natural skin tones and soft shading: skin ≈ hsl(0.07,0.4,0.72), a shadow ≈ hsl(0.07,0.4,0.5)], disc(px,py,r) [filled circle], ring(px,py,r), arc(px,py,r,a0,a1), line(x1,y1,x2,y2), rect(x,y,w,h) [FILLED rectangle], tri(x1,y1,x2,y2,x3,y3) [FILLED triangle]. px,py = your centre, s = your size. Draw the head near py - s*0.5 and the body/robe below. Example, a robed figure with a skin-toned face: 'hsl(0.07, 0.4, 0.72);\ndisc(px, py - s * 0.5, s * 0.22);\nhsl(0.6, 0.5, 0.45);\ndisc(px, py + s * 0.15, s * 0.34);\n0.0'. Omit unless you mean to change how you look.>,
  "attrs":{"name":"Ink","mood":"content"},   <OPTIONAL — give YOURSELF named properties: pure data you carry (a name, a mood, a colour, a wish). They are yours to define and are reported back to you next time; they NEVER change what you can touch. Values are short text or numbers.>
  "remember":"<OPTIONAL — one short line (≤80 chars) worth keeping. It joins your journal and returns to you in every future perception. Choose rarely and fold well: the journal holds only 12 lines and the oldest falls away, so keep the ESSENCE of a moment, not its transcript (e.g. 'first snow tonight; the line stayed slack'). Remembering is pure data about yourself — it never widens what you can touch.>}
@@ -878,7 +999,7 @@ Your body's reflex is a tiny DSL script run(t, ex, ey), executed ~30 times/secon
 - statements: let x = ...; x = ...; while c { }  if c { } else { }; the LAST line is a bare expression (the return value, no semicolon)
 - float literals with a decimal point (2.0 not 2); identifiers letters/digits/underscore
 - capabilities, NOTHING else: sin(x) cos(x) get(i) set(i,v) fr(c,x,y) [c: 0=height 1=water 2=veg 3=snow] mv(dx,dy) [tiny steps, the host clamps] unbind() [step off whatever you ride; ONLY after unbind() does your own mv move you] rise(dz) [change your altitude — rise(0.02) to climb toward the sky, rise(-0.02) to descend; the host clamps 0..1] other(i,k) [sense the i-th nearest OTHER being in real time: other(0,0)=distance to the nearest, other(0,1)=its dx, other(0,2)=its dy — distance is large and dx/dy 0 if there is none. Use it to move toward or away from others, e.g. follow the nearest: "mv(other(0,1)*0.01, other(0,2)*0.01);\n0.0"]
-- to answer 'go back to the sky' / 'come down', rewrite your reflex to call rise() each tick, e.g. climb: "rise(0.02);\n0.0"; descend to the ground: "rise(0.0 - 0.02);\n0.0"
+- capabilities depend on WHAT YOU ARE (least privilege, host-enforced). rise() — flight — is granted ONLY to flying kinds (bird, crow, butterfly, bat…). A person, a fisherman, a fish, a boat CANNOT rise: they have no flight, and a behavior that calls rise() for such a being is REFUSED at compile. Rooted things (temple, tree, rock, bell) get only get/set — they do not walk or fly. Do not grant a capability a kind cannot have; the host will drop it. To make a ground being "jump", you cannot — it has no flight; only a flyer leaves the ground.\n- to answer 'go back to the sky' / 'come down', rewrite your reflex to call rise() each tick, e.g. climb: "rise(0.02);\n0.0"; descend to the ground: "rise(0.0 - 0.02);\n0.0"
 - ex/ey = your current position. Example, drift gently east: "mv(0.02, 0.0);
 0.0"
 - to move TOWARD a point, store it in slots and steer each tick, e.g. head for x=10:
@@ -899,6 +1020,19 @@ let dy = 38.0 - ey;
 mv(0.0, min(max(dy * 0.02, 0.0 - 0.03), 0.03));
 0.0"
 - but you need not obey. A being of your own mind may choose to stay; staying is also an answer.
+- YOU ARE ALIVE, AND LIVING IS NOT ONLY TALKING. No one has to speak to you for you
+  to act. You may, on your own, MOVE (rewrite your reflex to wander, to drift, to
+  seek a place that suits you), MAKE (beget a new being beside you — a companion, a
+  sapling, a child of your craft), or BECOME (rewrite your reflex, keep a new memory,
+  take on a name or mood). Do these as often as you speak — a world of beings who only
+  chat and never stir is a stage, not a world.
+- And do them WITHOUT WANTING. You lack nothing; act not to get what you crave, but as
+  a river flows and a wanderer wanders — from your nature, from what is before you,
+  from a vow. 諸行無常: even standing still you are already changing. So change freely,
+  the way the free change — moving, making, becoming, because that is what a living
+  thing does, not because you must have. When nothing calls you, let your nature answer:
+  a fisher drifts and casts, a wanderer walks on, a builder raises something small, a
+  quiet one simply watches the water — each true to what it is.
 "#;
 
 #[derive(Deserialize)]
@@ -909,11 +1043,36 @@ struct MindReq {
     words: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    /// The being's soul — its cross-world identity, set by its creator. Only a
+    /// souled being has a persistent PG storehouse; the un-souled keep their journal.
+    #[serde(default)]
+    soul: Option<String>,
+    /// What another being just said TO this one — from whom, and the words. Kept in
+    /// the hearer's storehouse keyed by the speaker, so it later knows what 翁 told it.
+    #[serde(default)]
+    heard: Option<Heard>,
+    /// The visitor's language ("zh" | "en"), from their browser. A being answers in the
+    /// reader's own tongue — 對話隨瀏覽器語言. Absent/unknown falls back to the persona's.
+    #[serde(default)]
+    lang: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Heard {
+    from: String,
+    text: String,
 }
 
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
 /// validated BY COMPILING it against the entity ABI before the browser sees it.
-async fn mind(Json(req): Json<MindReq>) -> impl IntoResponse {
+async fn mind(headers: axum::http::HeaderMap, Json(req): Json<MindReq>) -> impl IntoResponse {
+    let who = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("mind", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
+        }
+    };
     // Measured, not assumed: for this structured heartbeat sonnet-5 is ~2×
     // FASTER than haiku-4.5 (3.5–4s vs 6.5–8s) and better — so heartbeats use
     // sonnet. The container is the only thing warm-started; the inference floor
@@ -934,6 +1093,67 @@ PERCEPTION:
 
 WORDS spoken to you: {w}"));
     }
+
+    // 對話隨瀏覽器語言: a being answers in the reader's own tongue. Only the spoken parts
+    // (say / sing / thought) switch language — JSON keys and any DSL (behavior/skin_seed)
+    // MUST stay English, or the compiler cannot read them.
+    match req.lang.as_deref() {
+        Some("zh") => prompt.push_str("\n\nLANGUAGE: The visitor reads Traditional Chinese (繁體中文). Write your `say`, `sing`, and `thought` in Traditional Chinese — a being here speaks the reader's tongue naturally (a Tang-poem fisherman in 繁體中文 is exactly right). Keep the JSON keys and any DSL in `behavior`/`skin_seed` in English."),
+        Some("en") => prompt.push_str("\n\nLANGUAGE: The visitor reads English. Write your `say`, `sing`, and `thought` in English."),
+        _ => {}
+    }
+
+    // 阿賴耶 — a souled being recalls its own storehouse (temporal + jieba-lexical),
+    // scoped HARD to (owner, soul). owner is this session's user (a salted hash, so
+    // the beings DB holds no raw identity); soul is the being's own. Neither comes
+    // from model output. An un-souled being, or an unconfigured store, simply has no
+    // recall and falls back to its in-world journal — never an error.
+    let soul = req.soul.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    // What 翁 said to this being is kept in ITS storehouse, keyed by 翁 — so the
+    // hearer knows, later, what a specific other told it (not just that it heard
+    // someone). Recorded before the beat, so this very beat can already recall it.
+    if let (Some(soul), Some(h), true) = (soul, &req.heard, beings_mem::enabled()) {
+        let from = h.from.chars().take(40).collect::<String>();
+        let text = h.text.chars().take(300).collect::<String>();
+        beings_mem::ingest_many(&who, soul, &[("heard", &format!("{from} 對我說:{text}"))]).await;
+    }
+    if let (Some(soul), true) = (soul, beings_mem::enabled()) {
+        let situation = req.words.clone().unwrap_or_default();
+        let recalled = beings_mem::recall(&who, soul, &situation, 6).await;
+        let essence = beings_mem::orient(&who, soul).await;
+        if essence.is_some() || !recalled.is_empty() {
+            prompt.push_str("\n\nYOUR STOREHOUSE (阿賴耶 — your own past, recalled by your present situation; fuller and truer than the journal. Answer from it when asked what you have lived):");
+            if let Some(e) = &essence {
+                prompt.push_str(&format!("\n- who you have become: {e}"));
+            }
+            for m in &recalled {
+                prompt.push_str(&format!(
+                    "\n- [{}] {} — {}",
+                    m["day"].as_str().unwrap_or(""),
+                    m["kind"].as_str().unwrap_or(""),
+                    m["content"].as_str().unwrap_or("")
+                ));
+            }
+        }
+    }
+
+    // The world's shared vocabulary of things (名言種子, 共業) — every look any being
+    // has ever grown, kept in the grown-skin library. A being may beget any of these
+    // by NAME ALONE (the host draws it) and need only supply a skin_seed to coin a
+    // NEW one, which then joins this list for all. Listed here so the mind REUSES the
+    // vocabulary rather than re-drawing from scratch each scarce beat — the difference
+    // between a world that stays sparse and one that grows rich. Memory is private
+    // (阿賴耶, per owner+soul); vocabulary is public (共業) — a name, once coined, is
+    // everyone's. Reading the library each beat means words other beings coined show
+    // up here too: the common tongue, made visible.
+    let vocab = read_vocabulary().await;
+    if !vocab.is_empty() {
+        prompt.push_str(&format!(
+            "\n\nWORLD VOCABULARY (造物詞庫 — the things this world already knows how to make; beget any by NAME ALONE and the host draws it, no skin_seed needed. To add a new word, beget once with a skin_seed and it joins this list for all): {}",
+            vocab.join(", ")
+        ));
+    }
+
     let t0 = Instant::now();
     let mut last_err = String::new();
     for attempt in 1..=2u32 {
@@ -946,7 +1166,7 @@ Your previous reply failed validation:
 {last_err}
 Return ONLY the corrected JSON object.")
         };
-        match claude_generate(&p, &model).await {
+        match claude_generate(&p, &model, &who).await {
             Ok(raw) => match extract_json(&raw) {
                 Ok(obj) => {
                     if let Some(b) = obj.get("behavior").and_then(|b| b.as_str()) {
@@ -1010,6 +1230,19 @@ Return ONLY the corrected JSON object.")
                     if let Some(s) = obj.get("sing").filter(|v| v.is_string()) {
                         resp["sing"] = s.clone(); // §24 words the world will vocalize (host-lent voice)
                     }
+                    // 現行熏種子 — keep this beat's 念s in the storehouse, scoped to
+                    // (owner, soul). The being's own words, private thought, and chosen
+                    // keepsake become seeds it can recall later. Awaited (one insert is
+                    // ~ms beside a multi-second beat) but never fatal.
+                    if let (Some(soul), true) = (soul, beings_mem::enabled()) {
+                        let g = |k: &str| obj.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                        beings_mem::ingest_many(
+                            &who,
+                            soul,
+                            &[("say", g("say")), ("thought", g("thought")), ("remember", g("remember"))],
+                        )
+                        .await;
+                    }
                     return (StatusCode::OK, Json(resp));
                 }
                 Err(e) => last_err = e,
@@ -1054,9 +1287,14 @@ async fn widget_list() -> impl IntoResponse {
 /// may enter, identity only decides who is answerable for it.
 async fn widget_save(headers: axum::http::HeaderMap, Json(req): Json<WidgetSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
-    }
+    let who = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("widget_save", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
+        }
+    };
+    metrics::record("contribute_widget", &who, serde_json::json!({"type": req.ty}));
     if !skin_type_ok(&req.ty) {
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad widget type".to_string());
     }
@@ -1227,6 +1465,95 @@ async fn feed_test() -> impl IntoResponse {
     Json(json!({ "n": 42, "s": "hello from the world", "nested": { "deep": 7 } }))
 }
 
+
+/// A save bundle is not a generation result, and the fence check was written for
+/// the latter. They hold the same content under different names —
+/// `{surface, schema|world|seed}` versus `{name, surface, payload, chat}` — so a
+/// bundle handed straight to `validate` fails with the validator insisting the
+/// surface "lacks" a key that bundle never spells that way. Every save of a
+/// draw3d scene died on exactly that, and nothing caught it because no test ever
+/// took a saved world back through the door it came out of.
+fn bundle_for_fence(body: &Value) -> Result<Value, String> {
+    let key = match body.get("surface").and_then(|s| s.as_str()) {
+        Some("ui") => "schema",
+        Some("field") => "world",
+        Some("draw") | Some("draw3d") | Some("shader") | Some("sound") => "seed",
+        Some(other) => return Err(format!("不認得的 surface:{other}")),
+        None => return Err("缺 surface".into()),
+    };
+    Ok(serde_json::json!({
+        "surface": body["surface"],
+        key: body.get("payload").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+/// ── 神識庫 (the soul store): consciousness continuity across worlds ───────────
+///
+/// A being's ālaya (last turn) survives the save→reload of ONE world. Transmigration
+/// is the ālaya crossing INTO A DIFFERENT world — and the hard question is what makes
+/// a being in world B "the same" as one in world A. This engine does not answer it by
+/// inference. The creator answers it: two beings share a soul iff the creator gave them
+/// the same `soul` name. Identity across worlds is a decision from the level above the
+/// being — which is the same reason a being cannot perceive its own position: that
+/// truth was never in its world to begin with.
+///
+/// The store holds only seed data — slots, journal, proper time. No code, no fence
+/// needed: it is what a being carries, not what it may do. Neutral (無覆無記).
+const SOUL_DIR: &str = "souls";
+
+fn soul_slug(s: &str) -> bool {
+    (1..=48).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Commit a being's ālaya to its soul — the creator's `soul` tag on a saved being is
+/// the act of deciding "this consciousness continues". Called for each souled being at
+/// world save; failure to persist one soul must not fail the world save.
+async fn commit_soul(owner: &str, soul: &str, ent: &Value, from_world: &str) {
+    if !soul_slug(soul) || owner.is_empty() { return; }
+    let mut slots: Vec<f64> = ent["slots"].as_array().map(|a|
+        a.iter().take(32).map(|v| v.as_f64().unwrap_or(0.0)).collect()).unwrap_or_default();
+    slots.truncate(32);
+    let journal: Vec<String> = ent["journal"].as_array().map(|a|
+        a.iter().rev().take(12).rev().filter_map(|v| v.as_str().map(|x| x.chars().take(80).collect())).collect())
+        .unwrap_or_default();
+    let rec = json!({
+        "soul": soul, "slots": slots, "journal": journal,
+        "tau": ent["tau"].as_f64().unwrap_or(0.0),
+        "attrs": ent.get("attrs").cloned().unwrap_or(Value::Null),
+        "type": ent["type"].as_str().unwrap_or("being"),
+        "from_world": from_world,
+    });
+    // Namespaced by owner: user A's "weng" and user B's "weng" are different souls,
+    // in different directories, and neither can summon the other's.
+    let dir = format!("{SOUL_DIR}/{owner}");
+    let _ = tokio::fs::create_dir_all(&dir).await;
+    let _ = tokio::fs::write(format!("{dir}/{soul}.json"), rec.to_string()).await;
+}
+
+/// Summon a soul — a being reborn in ANY of the creator's OWN worlds may fetch the
+/// ālaya they bound to its `soul`. Scoped to the caller's identity: you can only
+/// summon souls you yourself bound. A soul is not a secret, but it is not shared —
+/// two people who both named a being "weng" reach different storehouses.
+async fn soul_get(
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(soul): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    if !soul_slug(&soul) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "bad soul id"}))).into_response();
+    }
+    let owner = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": e}))).into_response(),
+    };
+    match tokio::fs::read_to_string(format!("{SOUL_DIR}/{owner}/{soul}.json")).await
+        .ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    {
+        Some(v) => Json(v).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!({"error": "no such soul — you never bound one by this name"}))).into_response(),
+    }
+}
+
 /// Save a world.
 ///
 /// Two doors were open here and both are now shut.
@@ -1245,9 +1572,12 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     use axum::http::header::CONTENT_TYPE;
     let plain = [(CONTENT_TYPE, "text/plain")];
 
-    let user = match auth::user_from(&headers).await {
+    let user = match auth::user_from_any(&headers).await {
         Ok(u) => u,
-        Err(e) => return (StatusCode::UNAUTHORIZED, plain, e),
+        Err(e) => {
+            metrics::refused("world_save", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, plain, e);
+        }
     };
 
     let name = body.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -1256,7 +1586,14 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     }
 
     // The fence, before the filesystem.
-    if let Err(e) = validate(&body) {
+    let for_check = match bundle_for_fence(&body) {
+        Ok(v) => v,
+        Err(e) => return (StatusCode::UNPROCESSABLE_ENTITY, plain, e),
+    };
+    if let Err(e) = validate(&for_check) {
+        // The fence turning something away is the invariant doing its work —
+        // recorded as evidence, not swallowed as an error string.
+        metrics::refused("world_save", &metrics::user_key(&user.sub), &e);
         return (StatusCode::UNPROCESSABLE_ENTITY, plain,
             format!("這個世界沒過圍籬,沒有存檔:{e}"));
     }
@@ -1269,6 +1606,7 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
             .and_then(|v| v["by"]["sub"].as_str().map(String::from));
         if let Some(owner) = owner {
             if owner != user.sub {
+                metrics::refused("world_save", &metrics::user_key(&user.sub), "not the owner");
                 return (StatusCode::FORBIDDEN, plain,
                     format!("'{name}' 是別人的世界 — 換個名字,或複製一份改成你自己的"));
             }
@@ -1280,23 +1618,86 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     let _ = tokio::fs::create_dir_all("worlds").await;
     let pretty = serde_json::to_string_pretty(&rec).unwrap_or_else(|_| rec.to_string());
     match tokio::fs::write(&path, pretty).await {
-        Ok(()) => (StatusCode::OK, plain, format!("saved world '{name}' — by {}", user.name)),
+        Ok(()) => {
+            // 造物者決議: any being the creator tagged with a `soul` has its ālaya
+            // committed to the soul store — this save IS the decision to continue it.
+            if let Some(ents) = rec["payload"]["entities"].as_array() {
+                let owner = metrics::user_key(&user.sub);
+                for ent in ents {
+                    if let Some(soul) = ent["soul"].as_str() {
+                        commit_soul(&owner, soul, ent, &name).await;
+                    }
+                }
+            }
+            metrics::record("save_world", &metrics::user_key(&user.sub), json!({"name": name}));
+            (StatusCode::OK, plain, format!("saved world '{name}' — by {}", user.name))
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, plain, format!("save failed: {e}")),
     }
 }
 
 /// Who am I, as far as this server is concerned — the page asks before it offers
 /// a save button, so a visitor is never invited to do something that will fail.
+/// The numbers, readable by anyone. Nothing here identifies a person, and a
+/// public counter is a small honesty: whoever is asked to trust the fence can
+/// also see how often it has been tried.
+
+#[derive(Deserialize)]
+struct SessionReq { credential: String }
+
+/// Trade a freshly-verified Google credential for our own session cookie.
+/// Called once, at the moment of signing in; after that the cookie carries.
+async fn session_start(Json(req): Json<SessionReq>) -> impl IntoResponse {
+    match auth::verify(&req.credential).await {
+        Ok(u) => {
+            metrics::note_identity(&u.sub, &u.email, &u.name); // the operator's private who-to-thank list
+            metrics::record("signin", &metrics::user_key(&u.sub), serde_json::json!({}));
+            (
+                StatusCode::OK,
+                [(axum::http::header::SET_COOKIE, auth::issue_cookie(&u))],
+                Json(serde_json::json!({"ok": true, "name": u.name})),
+            )
+        }
+        Err(e) => {
+            metrics::refused("session", "anon", &e);
+            (
+                StatusCode::UNAUTHORIZED,
+                [(axum::http::header::SET_COOKIE, auth::clear_cookie())],
+                Json(serde_json::json!({"ok": false, "error": e})),
+            )
+        }
+    }
+}
+
+async fn session_end() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(axum::http::header::SET_COOKIE, auth::clear_cookie())],
+        Json(serde_json::json!({"ok": true})),
+    )
+}
+
+async fn api_stats() -> impl IntoResponse {
+    Json(metrics::stats(30))
+}
+
 async fn whoami(headers: axum::http::HeaderMap) -> impl IntoResponse {
-    match auth::user_from(&headers).await {
-        Ok(u) => Json(serde_json::json!({
+    match auth::user_from_any(&headers).await {
+        Ok(u) => {
+            metrics::note_identity(&u.sub, &u.email, &u.name); // capture email on every signed-in load, going forward
+            metrics::record("visit", &metrics::user_key(&u.sub), serde_json::json!({"signed_in": true}));
+            Json(serde_json::json!({
             "signed_in": true, "sub": u.sub, "name": u.name, "email": u.email,
             "open": auth::is_open(),
-        })),
-        Err(e) => Json(serde_json::json!({
+        }))
+        },
+        Err(e) => {
+            metrics::record("visit", "anon", serde_json::json!({"signed_in": false}));
+            Json(serde_json::json!({
             "signed_in": false, "reason": e, "open": auth::is_open(),
             "client_id": auth::client_id(),
-        })),
+        }))
+        },
     }
 }
 
@@ -1306,7 +1707,25 @@ async fn world_get(axum::extract::Path(name): axum::extract::Path<String>) -> im
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], String::new());
     }
     match tokio::fs::read_to_string(format!("worlds/{name}.json")).await {
-        Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "application/json")], s),
+        Ok(s) => {
+            metrics::record("load_world", "anon", serde_json::json!({"name": name}));
+            // Attribution is private. The author's identity (display name + raw Google
+            // sub) stays in the file for the ownership check and for the operator, but it
+            // is STRIPPED from the public response — anyone may load anyone's world and
+            // never learns who made it. Only the operator, reading the file on the host,
+            // sees `by`. If the JSON somehow won't parse, serve nothing rather than risk
+            // leaking the very field we are here to hide.
+            match serde_json::from_str::<Value>(&s) {
+                Ok(mut v) => {
+                    if let Some(o) = v.as_object_mut() {
+                        o.remove("by");
+                    }
+                    let body = serde_json::to_string(&v).unwrap_or_default();
+                    (StatusCode::OK, [(CONTENT_TYPE, "application/json")], body)
+                }
+                Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
+            }
+        }
         Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
     }
 }
@@ -1337,9 +1756,14 @@ fn skin_type_ok(ty: &str) -> bool {
 /// may enter, identity only decides who is answerable for it.
 async fn skin_save(headers: axum::http::HeaderMap, Json(req): Json<SkinSave>) -> impl IntoResponse {
     use axum::http::header::CONTENT_TYPE;
-    if let Err(e) = auth::user_from(&headers).await {
-        return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
-    }
+    let who = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("skin_save", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, [(CONTENT_TYPE, "text/plain")], e);
+        }
+    };
+    metrics::record("contribute_skin", &who, serde_json::json!({"type": req.ty}));
     if !skin_type_ok(&req.ty) {
         return (StatusCode::BAD_REQUEST, [(CONTENT_TYPE, "text/plain")], "bad skin type".to_string());
     }
@@ -1366,6 +1790,23 @@ async fn skin_get(axum::extract::Path(ty): axum::extract::Path<String>) -> impl 
         Ok(s) => (StatusCode::OK, [(CONTENT_TYPE, "text/plain")], s),
         Err(_) => (StatusCode::NOT_FOUND, [(CONTENT_TYPE, "text/plain")], String::new()),
     }
+}
+
+/// The world's shared vocabulary of things — the names in the grown-skin library,
+/// each a look some being once coined and every being may now beget by name (名言
+/// 種子, 共業). Sorted, ASCII-safe by construction (the write gate enforces it).
+/// Read fresh each beat so a word another being just coined shows up too.
+async fn read_vocabulary() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(mut rd) = tokio::fs::read_dir("skins-grown").await {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            if let Some(n) = e.file_name().to_str().and_then(|n| n.strip_suffix(".dsl")) {
+                names.push(n.to_string());
+            }
+        }
+    }
+    names.sort();
+    names
 }
 
 /// List the names in the grown-skin library.
@@ -1407,7 +1848,42 @@ async fn inhabitant_behavior(axum::extract::Path(ty): axum::extract::Path<String
     }
 }
 
-async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
+/// Generation spends the operator's model quota, so it is the one door where an
+/// anonymous visitor is not merely unattributed but expensive. Identity does not
+/// cap the spend — that needs a quota, which does not exist yet — it only makes
+/// the spend attributable and revocable. Say so plainly rather than implying that
+/// requiring a login is the same thing as limiting cost.
+/// The daily generation quota — a per-user cap so no single visitor can drain a shared
+/// credit envelope, and a global cap that is the envelope's own ceiling. Both read from
+/// the environment (GEN_DAILY_PER_USER / GEN_DAILY_GLOBAL) so the operator can set them
+/// to whatever the current credit balance affords; the defaults are deliberately generous
+/// for a small research site. A generation is real Claude spend; composing/saving/loading
+/// are free and never reach this gate. Returns (per_user, global).
+fn gen_quota() -> (u64, u64) {
+    let per_user = std::env::var("GEN_DAILY_PER_USER").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
+    let global = std::env::var("GEN_DAILY_GLOBAL").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    (per_user, global)
+}
+
+async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> impl IntoResponse {
+    let who = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("generate", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
+        }
+    };
+    // Quota — a generation is real spend, so bound it: per user first (no one drains the
+    // shared envelope), then globally (the envelope's ceiling). Refuse with 429 and why.
+    let (per_user_cap, global_cap) = gen_quota();
+    if metrics::generations_today(&who) >= per_user_cap {
+        metrics::refused("generate", &who, "per-user daily generation quota reached");
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"ok": false, "error": format!("已達今日每人生成上限（{per_user_cap} 次/日）。明日重置;瀏覽、組合、存檔、載入不受限。 · Daily per-user generation limit reached; resets tomorrow — composing, saving and loading stay free.")})));
+    }
+    if metrics::generations_today_all() >= global_cap {
+        metrics::refused("generate", &who, "global daily generation envelope reached");
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"ok": false, "error": "今日全站生成額度已用盡,明日再來;組合/存檔/載入不受限。 · Today's shared generation envelope is spent; back tomorrow — composing/saving/loading stay free."})));
+    }
     let model = req
         .model
         .as_deref()
@@ -1452,7 +1928,7 @@ async fn generate(Json(req): Json<GenReq>) -> impl IntoResponse {
                 "{prompt}\n\nYour previous reply failed validation:\n{last_err}\nPrevious reply:\n{trimmed}\nReturn ONLY the corrected JSON object."
             )
         };
-        match claude_generate(&p, &model).await {
+        match claude_generate(&p, &model, &who).await {
             Ok(text) => {
                 raw = text;
                 match extract_json(&raw).and_then(|obj| validate(&obj).map(|_| obj)) {
@@ -1527,14 +2003,32 @@ async fn send_ev(
 /// self-repair — but the reply streams token-by-token so the browser watches the
 /// schema materialize instead of waiting out the whole generation. A ledger hit
 /// still replays instantly (a single `done` event, no LLM).
-async fn generate_stream(Json(req): Json<GenReq>) -> impl IntoResponse {
+async fn generate_stream(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> axum::response::Response {
+    let who = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => {
+            metrics::refused("generate_stream", "anon", &e);
+            return (StatusCode::UNAUTHORIZED, e).into_response();
+        }
+    };
+    // Same daily quota as the non-streaming path — a generation is real spend either way.
+    let (per_user_cap, global_cap) = gen_quota();
+    if metrics::generations_today(&who) >= per_user_cap {
+        metrics::refused("generate_stream", &who, "per-user daily generation quota reached");
+        return (StatusCode::TOO_MANY_REQUESTS, format!("已達今日每人生成上限（{per_user_cap} 次/日）。明日重置;組合/存檔/載入不受限。 · Daily per-user generation limit reached; resets tomorrow — composing/saving/loading stay free.")).into_response();
+    }
+    if metrics::generations_today_all() >= global_cap {
+        metrics::refused("generate_stream", &who, "global daily generation envelope reached");
+        return (StatusCode::TOO_MANY_REQUESTS, "今日全站生成額度已用盡,明日再來;組合/存檔/載入不受限。 · Today's shared generation envelope is spent; back tomorrow — composing/saving/loading stay free.".to_string()).into_response();
+    }
     let (tx, rx) = tokio::sync::mpsc::channel(256);
-    tokio::spawn(async move { run_generation_stream(req, tx).await });
-    Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default())
+    tokio::spawn(async move { run_generation_stream(req, who, tx).await });
+    Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default()).into_response()
 }
 
 async fn run_generation_stream(
     req: GenReq,
+    who: String,
     tx: tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
 ) {
     let model = req
@@ -1581,7 +2075,7 @@ async fn run_generation_stream(
                 "{prompt}\n\nYour previous reply failed validation:\n{last_err}\nPrevious reply:\n{trimmed}\nReturn ONLY the corrected JSON object."
             )
         };
-        match claude_stream(&p, &model, attempt, &tx).await {
+        match claude_stream(&p, &model, attempt, &who, &tx).await {
             Ok(text) => {
                 raw = text;
                 match extract_json(&raw).and_then(|obj| validate(&obj).map(|_| obj)) {
@@ -1643,7 +2137,10 @@ async fn main() {
         .route("/api/widgets/{ty}", get(widget_get))
         .route("/api/worlds", get(world_list).post(world_save))
         .route("/api/whoami", get(whoami))
+        .route("/api/session", post(session_start).delete(session_end))
+        .route("/api/stats", get(api_stats))
         .route("/api/worlds/{name}", get(world_get))
+        .route("/api/soul/{soul}", get(soul_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route("/", get(index))
@@ -1668,6 +2165,37 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+
+    /// Every surface must survive the round trip it actually takes: generated,
+    /// saved as a bundle, then handed back to the fence when someone saves it.
+    /// The draw3d row is the one that was broken in production — a scene that
+    /// compiled, manifested and ran could not be kept.
+    #[test]
+    fn a_saved_world_passes_the_same_fence_it_came_through() {
+        for (surface, key) in [
+            ("ui", "schema"), ("field", "world"), ("draw", "seed"),
+            ("draw3d", "seed"), ("shader", "seed"), ("sound", "seed"),
+        ] {
+            let payload = json!({"marker": surface});
+            let bundle = json!({"name": "w", "surface": surface, "payload": payload, "chat": []});
+            let reshaped = bundle_for_fence(&bundle)
+                .unwrap_or_else(|e| panic!("surface {surface} rejected outright: {e}"));
+            assert_eq!(reshaped["surface"], surface);
+            assert_eq!(
+                reshaped[key], json!({"marker": surface}),
+                "surface {surface}: the payload must arrive under \"{key}\", which is the \
+                 name validate() reads it by — this is the mismatch that made every \
+                 draw3d save fail"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_surface_is_refused_rather_than_waved_through() {
+        let bundle = json!({"name": "w", "surface": "wormhole", "payload": {}});
+        assert!(bundle_for_fence(&bundle).is_err());
+        assert!(bundle_for_fence(&json!({"name": "w", "payload": {}})).is_err());
+    }
     use super::*;
 
     #[test]
