@@ -1319,7 +1319,7 @@ function compileEntities(world, g) {
   return defs.map(def => {
     const aloft = def.realm === 'sky' || def.aloft === true;
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
-                  on: def.on ?? null, offset: def.offset ?? [0, 0],
+                  on: def.on ?? null, offset: def.offset ?? [0, 0], soul: (typeof def.soul === 'string' && def.soul) ? def.soul : null,
                   alt: clampAlt(def.altitude ?? (aloft ? 1 : 0)), realm: aloft ? 'sky' : 'ground',
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
@@ -2084,7 +2084,7 @@ async function mindBeat(ent, words) {
     // A mind heartbeat is long (a container + Claude). Retry once on a bare
     // network drop (server restart, a blip) so a being doesn't fall silent
     // over a transient — a server-returned error still surfaces normally.
-    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined });
+    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined, soul: ent.soul ?? undefined });
     const post = () => fetch('api/mind', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body });
     let r;
     try { r = await post(); }

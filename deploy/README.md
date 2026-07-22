@@ -87,3 +87,47 @@ and this one runs as an unprivileged account that lacks those capabilities
 anyway. The docker socket, by contrast, really is root — so a policy allowing
 exactly two docker subcommands is worth more than kernel hardening this account
 could never have used.
+
+## The being storehouse (阿賴耶, Phase 1) — PG-backed memory
+
+Souled beings recall their own past from PostgreSQL instead of a lossy 12-line
+journal. It reuses the engine the user's own archive rides on — PG + pg_jieba —
+scoped HARD to (owner, soul).
+
+- **DB**: `arcana_beings` in the existing `pg-archive-test` container (pgvector +
+  pg_jieba). Role `beings` (not superuser); tables `being_memory`, `being_orient`.
+  Connection in `world.env` as `BEINGS_PG_URL` (localhost, NoTls). The `beings`
+  role has SELECT on nothing in `archive_main` — a connection there is refused
+  permission on every table (verified).
+- **Isolation**: the key is `(owner, soul)`, never soul alone. owner is the
+  signed-in user (a salted hash — the beings DB holds no raw identity). Two people
+  who both name a being "weng" reach different storehouses; a being can recall its
+  own memory only. Enforced at tenant (WHERE owner=$1 AND soul=$2, both host-set),
+  role, and database levels. Verified end-to-end: two same-named souls stayed
+  separate through the real mind API.
+- **Recall** = temporal (recent) + lexical (jieba OR over the present situation).
+  The semantic leg (bge-m3 embeddings) is Phase 2, on the Mac mini (bluesea cannot
+  run the embedder — proven too heavy). Rows carry `embedding NULL` until then.
+
+### Two infra traps hit while wiring this (both about sudo under the sandbox)
+
+The generator reaches its container via `sudo` (narrow policy, no docker group).
+The hardened unit broke that twice:
+
+1. `ProtectSystem=strict` makes /var and /run read-only, so sudo/PAM cannot write
+   its timestamp — it worked only while an old timestamp was still valid, then
+   failed with "cannot open /run/sudo". Fixed: `ProtectSystem=full` (still protects
+   /usr, /boot, /etc) + `/etc/sudoers.d/arcana-docker-defaults`:
+   `Defaults:arcana !requiretty, !authenticate` (arcana still runs ONLY the two
+   whitelisted docker commands, just without a tty or password).
+   NB: systemd does NOT accept an inline `# comment` on a directive line — it
+   silently voids the value. Put comments on their own line.
+
+2. **The generator credential is a static copy that expires.** `/opt/arcana/
+   claude-home/.credentials.json` was copied from the CI agent; OAuth tokens age
+   out (401), and a static copy is never refreshed, so generation dies after a
+   day or two. Stop-gap: re-copy from `/data/projects/daily-ci-agent/claude-home/`
+   (which the CI agent keeps fresh) and `docker restart wasmjit-gen`. Durable fix
+   is a decision for the account owner — a long-lived token, or a shared+refreshed
+   credential mount (accepting the write race). This is the same "who pays for
+   generation" question flagged at deploy.

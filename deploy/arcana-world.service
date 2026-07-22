@@ -46,10 +46,11 @@ RestartSec=3
 # docker subcommands is the right way round.
 NoNewPrivileges=no
 PrivateTmp=yes
-ProtectSystem=strict
+# strict makes /var,/run read-only and breaks sudo/PAM; full still protects /usr,/boot,/etc
+ProtectSystem=full
 ProtectHome=yes
 # Everything visitors create — worlds, the ālaya ledger, grown skins and widgets.
-ReadWritePaths=/opt/arcana/app/worlds /opt/arcana/app/ledger /opt/arcana/app/skins-grown /opt/arcana/app/widgets-grown /opt/arcana/app/metrics /opt/arcana/app /opt/arcana/app/state
+ReadWritePaths=/opt/arcana/app/worlds /opt/arcana/app/ledger /opt/arcana/app/skins-grown /opt/arcana/app/widgets-grown /opt/arcana/app/metrics /opt/arcana/app /opt/arcana/app/state /run/sudo
 
 [Install]
 WantedBy=multi-user.target

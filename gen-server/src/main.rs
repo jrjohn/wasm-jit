@@ -12,6 +12,7 @@
 
 mod auth;
 mod metrics;
+mod beings_mem;
 
 use axum::http::StatusCode;
 use axum::response::sse::Sse;
@@ -1028,6 +1029,10 @@ struct MindReq {
     words: Option<String>,
     #[serde(default)]
     model: Option<String>,
+    /// The being's soul — its cross-world identity, set by its creator. Only a
+    /// souled being has a persistent PG storehouse; the un-souled keep their journal.
+    #[serde(default)]
+    soul: Option<String>,
 }
 
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
@@ -1060,6 +1065,33 @@ PERCEPTION:
 
 WORDS spoken to you: {w}"));
     }
+
+    // 阿賴耶 — a souled being recalls its own storehouse (temporal + jieba-lexical),
+    // scoped HARD to (owner, soul). owner is this session's user (a salted hash, so
+    // the beings DB holds no raw identity); soul is the being's own. Neither comes
+    // from model output. An un-souled being, or an unconfigured store, simply has no
+    // recall and falls back to its in-world journal — never an error.
+    let soul = req.soul.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    if let (Some(soul), true) = (soul, beings_mem::enabled()) {
+        let situation = req.words.clone().unwrap_or_default();
+        let recalled = beings_mem::recall(&who, soul, &situation, 6).await;
+        let essence = beings_mem::orient(&who, soul).await;
+        if essence.is_some() || !recalled.is_empty() {
+            prompt.push_str("\n\nYOUR STOREHOUSE (阿賴耶 — your own past, recalled by your present situation; fuller and truer than the journal. Answer from it when asked what you have lived):");
+            if let Some(e) = &essence {
+                prompt.push_str(&format!("\n- who you have become: {e}"));
+            }
+            for m in &recalled {
+                prompt.push_str(&format!(
+                    "\n- [{}] {} — {}",
+                    m["day"].as_str().unwrap_or(""),
+                    m["kind"].as_str().unwrap_or(""),
+                    m["content"].as_str().unwrap_or("")
+                ));
+            }
+        }
+    }
+
     let t0 = Instant::now();
     let mut last_err = String::new();
     for attempt in 1..=2u32 {
@@ -1135,6 +1167,19 @@ Return ONLY the corrected JSON object.")
                     }
                     if let Some(s) = obj.get("sing").filter(|v| v.is_string()) {
                         resp["sing"] = s.clone(); // §24 words the world will vocalize (host-lent voice)
+                    }
+                    // 現行熏種子 — keep this beat's 念s in the storehouse, scoped to
+                    // (owner, soul). The being's own words, private thought, and chosen
+                    // keepsake become seeds it can recall later. Awaited (one insert is
+                    // ~ms beside a multi-second beat) but never fatal.
+                    if let (Some(soul), true) = (soul, beings_mem::enabled()) {
+                        let g = |k: &str| obj.get(k).and_then(|v| v.as_str()).unwrap_or("");
+                        beings_mem::ingest_many(
+                            &who,
+                            soul,
+                            &[("say", g("say")), ("thought", g("thought")), ("remember", g("remember"))],
+                        )
+                        .await;
                     }
                     return (StatusCode::OK, Json(resp));
                 }
@@ -1402,8 +1447,8 @@ fn soul_slug(s: &str) -> bool {
 /// Commit a being's ālaya to its soul — the creator's `soul` tag on a saved being is
 /// the act of deciding "this consciousness continues". Called for each souled being at
 /// world save; failure to persist one soul must not fail the world save.
-async fn commit_soul(soul: &str, ent: &Value, from_world: &str) {
-    if !soul_slug(soul) { return; }
+async fn commit_soul(owner: &str, soul: &str, ent: &Value, from_world: &str) {
+    if !soul_slug(soul) || owner.is_empty() { return; }
     let mut slots: Vec<f64> = ent["slots"].as_array().map(|a|
         a.iter().take(32).map(|v| v.as_f64().unwrap_or(0.0)).collect()).unwrap_or_default();
     slots.truncate(32);
@@ -1417,21 +1462,33 @@ async fn commit_soul(soul: &str, ent: &Value, from_world: &str) {
         "type": ent["type"].as_str().unwrap_or("being"),
         "from_world": from_world,
     });
-    let _ = tokio::fs::create_dir_all(SOUL_DIR).await;
-    let _ = tokio::fs::write(format!("{SOUL_DIR}/{soul}.json"), rec.to_string()).await;
+    // Namespaced by owner: user A's "weng" and user B's "weng" are different souls,
+    // in different directories, and neither can summon the other's.
+    let dir = format!("{SOUL_DIR}/{owner}");
+    let _ = tokio::fs::create_dir_all(&dir).await;
+    let _ = tokio::fs::write(format!("{dir}/{soul}.json"), rec.to_string()).await;
 }
 
-/// Summon a soul — a being reborn in ANY world may fetch the ālaya the creator bound to
-/// its `soul`. Public read: a soul is a seed-record, not a secret.
-async fn soul_get(axum::extract::Path(soul): axum::extract::Path<String>) -> impl IntoResponse {
+/// Summon a soul — a being reborn in ANY of the creator's OWN worlds may fetch the
+/// ālaya they bound to its `soul`. Scoped to the caller's identity: you can only
+/// summon souls you yourself bound. A soul is not a secret, but it is not shared —
+/// two people who both named a being "weng" reach different storehouses.
+async fn soul_get(
+    headers: axum::http::HeaderMap,
+    axum::extract::Path(soul): axum::extract::Path<String>,
+) -> impl IntoResponse {
     if !soul_slug(&soul) {
         return (StatusCode::BAD_REQUEST, Json(json!({"error": "bad soul id"}))).into_response();
     }
-    match tokio::fs::read_to_string(format!("{SOUL_DIR}/{soul}.json")).await
+    let owner = match auth::user_from_any(&headers).await {
+        Ok(u) => metrics::user_key(&u.sub),
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({"error": e}))).into_response(),
+    };
+    match tokio::fs::read_to_string(format!("{SOUL_DIR}/{owner}/{soul}.json")).await
         .ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
     {
         Some(v) => Json(v).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({"error": "no such soul — never bound"}))).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!({"error": "no such soul — you never bound one by this name"}))).into_response(),
     }
 }
 
@@ -1503,9 +1560,10 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
             // 造物者決議: any being the creator tagged with a `soul` has its ālaya
             // committed to the soul store — this save IS the decision to continue it.
             if let Some(ents) = rec["payload"]["entities"].as_array() {
+                let owner = metrics::user_key(&user.sub);
                 for ent in ents {
                     if let Some(soul) = ent["soul"].as_str() {
-                        commit_soul(soul, ent, &name).await;
+                        commit_soul(&owner, soul, ent, &name).await;
                     }
                 }
             }
