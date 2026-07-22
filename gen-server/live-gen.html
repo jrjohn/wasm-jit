@@ -1351,11 +1351,24 @@ function compileEntities(world, g) {
                   birthQuota: Number.isFinite(def.birthQuota) ? def.birthQuota : 2, // top-level beings may beget up to 2
                   mind: def.mind ?? null,
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
-    // 自性種子 (§20.3): plant birth seeds into the HIGH slots (24..31) before the
-    // first tick. The same behavior script diverges by what it was born with —
-    // same dharma, different karma. The soul may transform them (set), and the
-    // skin sees them through st() — a being's innate nature is visible in form.
-    if (ent.innate) ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
+    // 阿賴耶識 (ālaya): if this being carries a storehouse from a former manifestation
+    // — its slots persisted in the saved world — it is reborn WITH its accumulated
+    // seeds, not reset to birth. 種子生現行、現行熏種子: the seeds perfumed by every
+    // past 念 return and ripen. A being that has an ālaya does NOT re-seed its innate
+    // nature, because the storehouse already holds it (possibly transformed in life —
+    // the soul may set() even the innate slots). Only a fresh birth plants 本有種子.
+    if (Array.isArray(def.slots) && def.slots.length) {
+      for (let i = 0; i < 32; i++) if (Number.isFinite(def.slots[i])) ent.slots[i] = def.slots[i];
+    } else if (ent.innate) {
+      // 自性種子 (§20.3): a first birth. Plant birth seeds into the HIGH slots (24..31).
+      // The same behavior script diverges by what it was born with — same dharma,
+      // different karma. The soul may transform them (set); the skin sees them via st().
+      ent.innate.forEach((v, i) => { if (Number.isFinite(v)) ent.slots[24 + i] = v; });
+    }
+    // journal (宿念) and proper time (原時) also survive in the storehouse, if kept.
+    if (Array.isArray(def.journal)) ent.journal = def.journal.slice(-12).map(l => ({ line: String(l) }));
+    if (Number.isFinite(def.tau)) ent.tau = def.tau;
+    if (Number.isFinite(def.alt)) ent.alt = clampAlt(def.alt);
     // 一中有多: one shared body/behaviour, yet each is born at its own moment of the
     // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
     ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
@@ -3954,7 +3967,27 @@ $('world-save').onclick = async () => {
   if (ME && !ME.open && !ME.signed_in) { say('err', '要留下世界得先用 Google 登入 — 讀別人的世界不用'); return; }
   const name = (prompt('save this world as… (letters/digits/_/-)') || '').trim().replace(/[^A-Za-z0-9_-]/g, '-');
   if (!name) return;
-  const bundle = { name, surface: lastManifest.surface, payload: lastManifest.payload, chat: chatLog,
+  // The ālaya travels inside the world it belongs to: at save, each being's live
+  // storehouse — the seeds every past 念 perfumed — is written back onto its def,
+  // so a reloaded being resumes its karma rather than being reborn from zero.
+  // 現行熏種子: manifestation perfumes the seeds; here the perfumed seeds are kept.
+  function fieldPayloadWithAlaya(payload) {
+    if (!payload || !Array.isArray(payload.entities)) return payload;
+    const live = new Map(ENTITIES.map(e => [e.id, e]));
+    return { ...payload, entities: payload.entities.map(def => {
+      const e = live.get(def.id);
+      if (!e) return def;
+      return { ...def,
+        slots: Array.from(e.slots),                                  // the whole storehouse, 32 seeds
+        journal: (e.journal ?? []).map(j => j.line).slice(-12),      // 宿念, bounded and lossy by law
+        tau: e.tau ?? 0, alt: e.alt ?? 0,
+        attrs: (e.attrs && typeof e.attrs === 'object') ? { ...e.attrs } : undefined,
+      };
+    }) };
+  }
+  const savePayload = lastManifest.surface === 'field'
+    ? fieldPayloadWithAlaya(lastManifest.payload) : lastManifest.payload;
+  const bundle = { name, surface: lastManifest.surface, payload: savePayload, chat: chatLog,
                    state: lastManifest.surface === 'ui' ? appSnapshot() : undefined }; // 業 rides along
   try {
     const r = await fetch('api/worlds', { method: 'POST',
