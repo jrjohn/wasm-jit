@@ -63,12 +63,82 @@ async fn conn() -> Result<tokio_postgres::Client, String> {
     Ok(client)
 }
 
-/// Recall a soul's past: lexically-relevant first (jieba OR over the present
-/// situation), then most recent. `soul` is the ONLY scope and the ONLY thing that
-/// can vary the corpus — the situation text is tokenised through `to_tsvector`
-/// first, so it can never inject a query. [] on any error.
-pub async fn recall(owner: &str, soul: &str, situation: &str, limit: i64) -> Vec<Value> {
+/// Embed a query through the Mac's bge-m3, reached over a reverse tunnel the Mac
+/// holds open to this host (BEINGS_OLLAMA_URL, default localhost:11434). bluesea
+/// cannot run the embedder itself (too heavy), so the being's own body borrows the
+/// Mac's — exactly the host-lends-what-the-cell-cannot-have pattern, one level up.
+/// None if the tunnel/model is down, in which case recall simply skips the semantic
+/// leg and stays lexical — graceful, never fatal.
+async fn embed_query(text: &str) -> Option<String> {
+    let url = std::env::var("BEINGS_OLLAMA_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".into());
+    let model = std::env::var("BEINGS_EMBED_MODEL").unwrap_or_else(|_| "bge-m3".into());
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .build()
+        .ok()?;
+    let resp: Value = client
+        .post(format!("{url}/api/embed"))
+        .json(&serde_json::json!({ "model": model, "input": text }))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let v = resp["embeddings"].get(0)?.as_array()?;
+    if v.len() != 1024 {
+        return None;
+    }
+    // pgvector literal: '[f,f,...]'
+    let mut s = String::from("[");
+    for (i, x) in v.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(&format!("{:.6}", x.as_f64().unwrap_or(0.0)));
+    }
+    s.push(']');
+    Some(s)
+}
+
+/// Semantic recall — the memories nearest in MEANING to the present situation, even
+/// with no shared words (又冷又餓 → 飢寒交迫). Scoped to (owner, soul); only rows the
+/// Mac has already embedded. [] if the query cannot be embedded.
+async fn recall_semantic(owner: &str, soul: &str, situation: &str, limit: i64) -> Vec<Value> {
+    if situation.trim().is_empty() {
+        return vec![];
+    }
+    let Some(qvec) = embed_query(situation).await else { return vec![] };
     let Ok(c) = conn().await else { return vec![] };
+    let sql = "SELECT kind, content, to_char(ts, 'YYYY-MM-DD') AS day \
+               FROM being_memory \
+               WHERE owner = $1 AND soul_id = $2 AND embedding IS NOT NULL \
+               ORDER BY embedding <=> $3::vector LIMIT $4";
+    match c.query(sql, &[&owner, &soul, &qvec, &limit]).await {
+        Ok(rows) => rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "day": r.get::<_, String>(2),
+                    "kind": r.get::<_, String>(0),
+                    "content": r.get::<_, String>(1),
+                })
+            })
+            .collect(),
+        Err(_) => vec![],
+    }
+}
+
+/// Recall a soul's past. Fuses three legs the way osearch does: semantic (nearest
+/// in meaning, if the query embeds), then lexical (shared jieba words), then recent.
+/// `soul` is the ONLY scope; the situation is tokenised/embedded before it touches a
+/// query, so it can never inject or widen. [] on any error.
+pub async fn recall(owner: &str, soul: &str, situation: &str, limit: i64) -> Vec<Value> {
+    // The semantic leg first — concept matches lexical cannot reach. Falls to [] if
+    // the Mac tunnel is down, and the lexical leg below still carries recall.
+    let semantic = recall_semantic(owner, soul, situation, (limit / 2).max(2)).await;
+
+    let Ok(c) = conn().await else { return semantic };
     // The situation's jieba tokens, OR-joined, become the relevance query. Empty
     // situation → a token that matches nothing → pure recency order.
     // Build the OR relevance query robustly: jieba can emit an empty lexeme, and a
@@ -84,7 +154,7 @@ pub async fn recall(owner: &str, soul: &str, situation: &str, limit: i64) -> Vec
                WHERE owner = $1 AND soul_id = $2 \
                ORDER BY (content_tsv @@ s.q) DESC, ts_rank(content_tsv, s.q) DESC, ts DESC \
                LIMIT $4";
-    match c.query(sql, &[&owner, &soul, &situation, &limit]).await {
+    let lexical: Vec<Value> = match c.query(sql, &[&owner, &soul, &situation, &limit]).await {
         Ok(rows) => rows
             .iter()
             .map(|r| {
@@ -96,7 +166,22 @@ pub async fn recall(owner: &str, soul: &str, situation: &str, limit: i64) -> Vec
             })
             .collect(),
         Err(_) => vec![],
+    };
+
+    // Fuse: semantic first (concept matches), then lexical, deduped by content,
+    // capped at the caller's limit. A memory that both legs surface appears once.
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for m in semantic.into_iter().chain(lexical.into_iter()) {
+        let key = m["content"].as_str().unwrap_or("").to_string();
+        if seen.insert(key) {
+            out.push(m);
+            if out.len() as i64 >= limit {
+                break;
+            }
+        }
     }
+    out
 }
 
 /// The distilled essence (orient) — who this soul is, refined. None until the

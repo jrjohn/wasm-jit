@@ -131,3 +131,31 @@ The hardened unit broke that twice:
    is a decision for the account owner — a long-lived token, or a shared+refreshed
    credential mount (accepting the write race). This is the same "who pays for
    generation" question flagged at deploy.
+
+## The semantic leg (Phase 2) — the Mac mini embeds, over a reverse tunnel
+
+bluesea cannot run the embedder (proven too heavy), and the always-on **Mac mini**
+already has Ollama + bge-m3 for the archive. So the being's semantic recall borrows
+the mini's body, one level up from how the host lends a cell what it cannot have:
+
+- **Row embedding** — `~/bin/arcana/being-embed.py` on the mini (launchd
+  `com.jrjohn.arcana-being-embed`, every 600s) reads being_memory rows with
+  embedding NULL from arcana_beings (over TLS), embeds via the mini's bge-m3,
+  writes the 1024-d vectors back. Config in `~/.config/arcana/beings.env` (0600).
+- **Query embedding** — a reverse SSH tunnel the mini holds open to bluesea
+  (launchd `com.jrjohn.arcana-being-tunnel`, KeepAlive) exposes the mini's Ollama
+  on bluesea's `127.0.0.1:11434`. gen-server (`BEINGS_OLLAMA_URL`) embeds the
+  present situation through it at recall time, then KNN (`embedding <=> query`)
+  over being_memory scoped to (owner, soul). Proven: "又冷又餓" finds "飢寒交迫"
+  at cosine 0.30 — a concept match with zero shared words, which jieba cannot do.
+- **Fusion** — recall returns semantic-nearest first, then lexical (jieba OR),
+  then recent, deduped. If the tunnel/mini is down, embed_query returns None and
+  recall silently falls back to lexical — graceful, never a broken beat.
+- **Mini → bluesea access** — the mini's own ed25519 key is authorized for
+  `rocky@arcana.boo` (no private key copied); it reaches arcana_beings:5432 the
+  same way pgsearchd does. Reproduce the tunnel:
+  `ssh -N -R 127.0.0.1:11434:127.0.0.1:11434 rocky@arcana.boo`.
+- **Distill (orient / 精練)** — `being-distill.py` folds a soul's memories into an
+  essence via the mini's `claude` CLI, written to being_orient, read by gen-server
+  into the mind. Present but not yet scheduled (the CLI was slow on the mini —
+  timeout raised to 180s); query-time semantic recall covers most of its value.
