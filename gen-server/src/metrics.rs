@@ -31,7 +31,9 @@
 //! privacy when the ledger sits next to it.
 
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::io::Write;
+use std::sync::{Mutex, OnceLock};
 
 const DIR: &str = "metrics";
 
@@ -91,9 +93,93 @@ fn today() -> String {
     format!("{y:04}-{:02}-{:02}", m + 1, d + 1)
 }
 
+/// The all-time roster of distinct people — one salted user_key per line, first-seen,
+/// append-only. stats() also counts distinct people, but only over the days it still
+/// keeps: prune the old files and that number falls. This roster never goes backward —
+/// it is the durable answer to "how many people have ever built here". It holds only
+/// the same hashes the log does, so it is exactly as private (no identity, ever).
+///
+/// Loaded once, lazily. On first load it also ABSORBS anyone the daily event files
+/// remember but the roster doesn't yet — so shipping this does not reset the count to
+/// zero (the people already in the logs are kept), and a deleted roster re-heals from
+/// whatever events remain. Genuinely new keys are appended so the file stays complete.
+fn roster() -> &'static Mutex<HashSet<String>> {
+    static ROSTER: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    ROSTER.get_or_init(|| {
+        let path = format!("{DIR}/people.log");
+        let mut set: HashSet<String> = HashSet::new();
+        if let Ok(txt) = std::fs::read_to_string(&path) {
+            for line in txt.lines() {
+                let k = line.trim();
+                if !k.is_empty() {
+                    set.insert(k.to_string());
+                }
+            }
+        }
+        // Backfill from the event log — every distinct non-anon user any daily file
+        // still holds. New keys are appended to the roster so it becomes authoritative.
+        let mut files: Vec<_> = std::fs::read_dir(DIR)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("events-"))
+            .collect();
+        files.sort_by_key(|e| e.file_name());
+        let mut fresh: Vec<String> = Vec::new();
+        for e in &files {
+            if let Ok(txt) = std::fs::read_to_string(e.path()) {
+                for line in txt.lines() {
+                    if let Ok(v) = serde_json::from_str::<Value>(line) {
+                        let u = v["user"].as_str().unwrap_or("anon");
+                        if u != "anon" && set.insert(u.to_string()) {
+                            fresh.push(u.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        if !fresh.is_empty() {
+            let _ = std::fs::create_dir_all(DIR);
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+                for k in &fresh {
+                    let _ = writeln!(f, "{k}");
+                }
+            }
+        }
+        Mutex::new(set)
+    })
+}
+
+/// Note a person into the all-time roster. Idempotent and cheap: the usual case is a
+/// key already present (a lock and a set lookup); only a genuinely new person costs an
+/// append. Called from record() for every authenticated event — anon is ignored.
+fn note_person(user: &str) {
+    if user == "anon" || user.is_empty() {
+        return;
+    }
+    if let Ok(mut set) = roster().lock() {
+        if set.insert(user.to_string()) {
+            let _ = std::fs::create_dir_all(DIR);
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(format!("{DIR}/people.log"))
+            {
+                let _ = writeln!(f, "{user}");
+            }
+        }
+    }
+}
+
+/// The durable all-time count of distinct people who have signed in — never decreases.
+pub fn people_all_time() -> usize {
+    roster().lock().map(|s| s.len()).unwrap_or(0)
+}
+
 /// Append one event. Never fails a request: if the log cannot be written the
 /// request still completes, because losing a metric is not worth losing a world.
 pub fn record(kind: &str, user: &str, mut fields: Value) {
+    note_person(user); // an authenticated event means a distinct person, all-time
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -180,6 +266,10 @@ pub fn stats(days: usize) -> Value {
 
     json!({
         "people": people.len(),
+        // Durable, all-time distinct people — does not fall when old daily files are
+        // pruned the way "people" (windowed to the kept days) does. This is the number
+        // the homepage shows: "N people have built a world here".
+        "people_all_time": people_all_time(),
         "visits": visits,
         "created": { "worlds_saved": saves, "worlds_loaded": loads, "words_contributed": words },
         "generation": {

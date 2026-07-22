@@ -97,7 +97,7 @@
 </head>
 <body>
 <h1>Live generation — chat with Claude (in Docker) → UI manifests instantly
-  <span style="float:right;font-weight:400;font-size:.8rem"><a href="/" style="color:#58a6ff">← arcana.boo</a></span></h1>
+  <span style="float:right;font-weight:400;font-size:.8rem"><span id="people-count" style="opacity:.72;margin-right:1rem"></span><a href="/" style="color:#58a6ff">← arcana.boo</a></span></h1>
 <p class="sub">
 The generator runs sandboxed in a container (no volumes, API egress only); the generated seed is validated by
 <b>natively compiling it on the server</b> (with self-repair retries), then manifested here as <b>fuel-metered,
@@ -4118,6 +4118,20 @@ async function refreshWho() {
   return ME;
 }
 
+// The living number in the header: how many distinct people have ever built a world
+// here (the durable all-time roster — a salted count, never an identity). Read from
+// /api/stats, shown only once there is more than one, so an empty world says nothing
+// rather than "1 person". Refreshed occasionally; a failed read simply leaves it be.
+async function refreshPeopleCount() {
+  const el = $('people-count');
+  if (!el) return;
+  try {
+    const s = await (await fetch('api/stats')).json();
+    const n = s.people_all_time ?? s.people ?? 0;
+    el.textContent = n > 1 ? `🌏 ${n} 人在此造世界` : '';
+  } catch (e) { /* leave the header as it is — a missing count is not worth a flicker */ }
+}
+
 async function initAuth() {
   const me = await refreshWho();
   if (!me || me.open || me.signed_in || !me.client_id) return;   // 本機模式 / 已登入 → 不必畫按鈕
@@ -4148,6 +4162,8 @@ async function initAuth() {
   google.accounts.id.prompt();
 }
 initAuth();
+refreshPeopleCount();                                  // the header's living count, on load…
+setInterval(refreshPeopleCount, 90_000);               // …and gently kept fresh while the page is open
 
 $('world-save').onclick = async () => {
   if (!lastManifest) { say('err', 'nothing manifested to save yet'); return; }
