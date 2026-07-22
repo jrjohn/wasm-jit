@@ -1389,13 +1389,18 @@ function compileEntities(world, g) {
     // world's breath — innate[7] phase-shifts its body-time so identical seeds desync.
     ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
     if (ent.physics) { ent.pvx = 0; ent.pvz = 0; ent.pvh = 0; ent.ph = Number.isFinite(ent.physics.h0) ? ent.physics.h0 : 0; } // dynamic state
-    if (def.behavior) {
+    // A declared, non-trivial behavior wins (the creator meant it). But a bare "0.0"
+    // is the trivial "no behavior" default — treat it as absent, so the being comes
+    // alive with its nature rather than standing frozen. A being meant to be still
+    // that also has no legs (rooted/inert) stays still anyway — natureReflex returns
+    // null for it; a rider's amble is ignored because the carrier carries.
+    if (def.behavior && def.behavior.trim() !== '0.0') {
       ent.origin = 'scene (DSL)';  // provenance label, NOT identity — soul stays def.soul (memory key)
       const bytes = compile_entity_wasm(def.behavior);
       const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
       ent.run = inst.exports.run;
     } else {
-      loadPackagedSoul(ent, g); // async: the packaged default soul wakes shortly
+      loadPackagedSoul(ent, g); // async: a packaged soul, or a nature reflex — never mere stillness
     }
     if (def.skin_seed) {
       try {
@@ -1609,12 +1614,36 @@ function drawSkin(ent, px, py, s, t) {
 
 // packaged soul loader: manifest → behavior.wasm → IMPORT AUDIT → instantiate.
 // The soul wakes a moment after the world starts; until then the body is still.
+// 行 (disposition): a being that can move should MOVE as its kind, not stand still.
+// A cheap reflex — pure sin/cos + mv (and a little rise for flyers) — that traces a
+// bounded, endless wander using the being's own slot for phase. This is the world's
+// constant, ongoing life: it costs no tokens and never stops, so even when every
+// mind is quiet the world still breathes. Compiled through the same entity fence.
+function natureReflex(grants) {
+  if (!grants || !grants.includes('mv')) return null; // rooted/inert: stillness is its nature
+  if (grants.includes('rise')) // a flyer wheels and bobs
+    return "let p = get(0.0);\nmv(sin(p) * 0.018, cos(p) * 0.018);\nrise(sin(p * 0.5) * 0.008);\nset(0.0, p + 0.05);\n0.0";
+  // a walker or swimmer ambles — two frequencies so the path meanders, not circles
+  return "let p = get(0.0);\nmv(sin(p) * 0.011, cos(p * 0.7) * 0.011);\nset(0.0, p + 0.03);\n0.0";
+}
+function giveNatureReflex(ent, g) {
+  const dsl = natureReflex(ent.grants);
+  if (!dsl) return; // it has no legs — stillness is honest for it
+  try {
+    const bytes = compile_entity_wasm_grants(dsl, ent.grants);
+    ent.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) }).exports.run;
+    ent.origin = 'nature (disposition)';
+    // desync identical kinds: each starts its wander at its own innate phase (一中有多)
+    if (ent.innate && Number.isFinite(ent.innate[0])) ent.slots[0] = ent.innate[0] * 6.2832;
+  } catch (e) { /* a being that cannot even amble simply stands — never fatal */ }
+}
+
 async function loadPackagedSoul(ent, g) {
   try {
     const mr = await fetch(`api/inhabitants/${ent.type}`);
-    if (!mr.ok) return; // no package: stillness is the default of defaults
+    if (!mr.ok) return giveNatureReflex(ent, g); // no package → move as its kind, not stand still
     const manifest = await mr.json();
-    if (!manifest.behavior) return;
+    if (!manifest.behavior) return giveNatureReflex(ent, g);
     const wr = await fetch(`api/inhabitants/${ent.type}/behavior.wasm`);
     if (!wr.ok) return;
     const bytes = new Uint8Array(await wr.arrayBuffer());
