@@ -1061,7 +1061,7 @@ window.__setPitch = p => { cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, p
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = clampAlt(a); e.realm = e.alt > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
-window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line), dormant: e.dormant ? { soul: e.dormant.soul, from_world: e.dormant.from_world } : null, recollected: !!e.recollected } : null; };
+window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? null, origin: e.origin ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line), dormant: e.dormant ? { soul: e.dormant.soul, from_world: e.dormant.from_world } : null, recollected: !!e.recollected } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
       entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y,
@@ -1294,8 +1294,8 @@ function begetChild(parent, spec, g) {
       const bytes = compile_entity_wasm_grants(spec.behavior, grants);
       audit_entity_bytes_grants(bytes, grants);
       child.run = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(child, g) }).exports.run;
-      child.soul = `begotten (grants ⊆ ${parent.id})`;
-    } else { loadPackagedSoul(child, g); child.soul = 'begotten (still)'; }
+      child.origin = `begotten (grants ⊆ ${parent.id})`;
+    } else { loadPackagedSoul(child, g); child.origin = 'begotten (still)'; }
   } catch (e) { say('err', `${parent.id}'s child soul refused by the fence: ${e.message ?? e}`); return; }
   if (typeof spec.skin_seed === 'string' && spec.skin_seed.length) {
     try { const sb = compile_skin_wasm(spec.skin_seed);
@@ -1375,7 +1375,7 @@ function compileEntities(world, g) {
     ent.bornPhase = (ent.innate && Number.isFinite(ent.innate[7])) ? ent.innate[7] : 0;
     if (ent.physics) { ent.pvx = 0; ent.pvz = 0; ent.pvh = 0; ent.ph = Number.isFinite(ent.physics.h0) ? ent.physics.h0 : 0; } // dynamic state
     if (def.behavior) {
-      ent.soul = 'scene (DSL)';
+      ent.origin = 'scene (DSL)';  // provenance label, NOT identity — soul stays def.soul (memory key)
       const bytes = compile_entity_wasm(def.behavior);
       const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
       ent.run = inst.exports.run;
@@ -1606,7 +1606,7 @@ async function loadPackagedSoul(ent, g) {
     audit_entity_bytes(bytes); // Tier-2 gate: throws if the soul over-reaches
     const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, g) });
     ent.run = inst.exports.run;
-    ent.soul = `package (${manifest.version}, Tier-2 audited)`;
+    ent.origin = `package (${manifest.version}, Tier-2 audited)`;
   } catch (e) {
     $('stage-status').textContent = `soul of '${ent.id}' rejected: ${e.message ?? e}`;
   }
@@ -2075,7 +2075,7 @@ function speakAloud(ent, text) {
 if ('speechSynthesis' in window) speechSynthesis.onvoiceschanged = () => { VOICES = speechSynthesis.getVoices(); };
 window.__speakAloud = (id, text) => speakAloud({ id: id || 'weng' }, text); // e2e: drive the voice without a live mind
 
-async function mindBeat(ent, words) {
+async function mindBeat(ent, words, heard) {
   const st = ent.mindState;
   if (!st || st.busy || !fieldWorld) return;
   if (!words && !mindCanBeat(st)) return;
@@ -2085,7 +2085,8 @@ async function mindBeat(ent, words) {
     // A mind heartbeat is long (a container + Claude). Retry once on a bare
     // network drop (server restart, a blip) so a being doesn't fall silent
     // over a transient — a server-returned error still surfaces normally.
-    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined, soul: ent.soul ?? undefined });
+    const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined, soul: ent.soul ?? undefined,
+      heard: (heard && ent.soul) ? { from: heard.fromId, text: heard.text } : undefined }); // 記名存進聽者的藏(需有 soul)
     const post = () => fetch('api/mind', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body });
     let r;
     try { r = await post(); }
@@ -2096,18 +2097,17 @@ async function mindBeat(ent, words) {
     if (d.say) {
       say('being', `${ent.id}: ${d.say}`);
       // 自行與其它對話 (mind→mind): a being's speech is HEARD by the nearest minded
-      // neighbour within earshot, which then beats in turn. Once anything starts a
-      // being talking — a visitor, a first snow, an arrival — beings carry the
-      // conversation on their own. Bounded by the same budget as every mind
-      // (MIND_MAX_BEATS beats, 45s cooldown per being), so an exchange is a few
-      // turns and then quiet: hearts are not free. No feeling drives this, only
-      // hearing — 受-愛-取 stay unbuilt by choice.
-      const hearer = nearestHearer(ent);
+      // neighbour within earshot. The words are LEFT PENDING on the hearer — so
+      // they are not lost if it is mid-beat or on cooldown; it answers when it can.
+      // And they are keyed by WHO spoke, so the hearer knows it was 翁, not just
+      // that it heard something. Bounded by the same budget as every mind — a few
+      // turns then quiet. No feeling drives this, only hearing (受-愛-取 unbuilt).
+      const hearer = nearestInEarshot(ent);
       if (hearer) {
-        journalMark(hearer, `heard ${ent.id}`);
         const who = ent.attrs?.name ? `${ent.id}(${ent.attrs.name})` : ent.id;
-        setTimeout(() => mindBeat(hearer,
-          `你聽見近旁的 ${who} 說:「${d.say}」。你可以回應它,也可以不理會 —— 靜默也是一種回答。`), 500);
+        hearer.mindState.heard = { fromId: ent.id, who, text: d.say };
+        journalMark(hearer, `heard ${ent.id}: ${d.say.slice(0, 30)}`);
+        if (mindCanBeat(hearer.mindState)) setTimeout(() => beatOnHeard(hearer), 500);
       }
     }
     if (typeof d.sing === 'string' && d.sing.trim()) speakAloud(ent, d.sing.trim()); // §24: the world lends a voice, the words are the being's
@@ -2123,7 +2123,7 @@ async function mindBeat(ent, words) {
         const inst = new WebAssembly.Instance(new WebAssembly.Module(bytes), { env: entityEnv(ent, fieldWorld.grid) });
         ent.run = inst.exports.run;
         ent.quarantined = false; ent.fails = 0;
-        ent.soul = 'mind (rewritten reflex)';
+        ent.origin = 'mind (rewritten reflex)';
         journalMark(ent, 'rewrote my reflex'); // a strong act leaves its own trace
       } catch (e) {
         say('err', `${ent.id}'s new reflex refused: ${e.message ?? e}`);
@@ -2162,19 +2162,30 @@ async function mindBeat(ent, words) {
   }
 }
 
-// The nearest OTHER minded being within earshot that can still beat — the one who
-// hears. Talk carries a little further than reach (BIND_REACH 2.5), so HEAR_RANGE
-// is wider. Returns null if no one is near enough or everyone has spent their beats.
+// The nearest OTHER minded being within earshot — regardless of whether it can
+// beat right now, because we LEAVE the words pending on it rather than requiring it
+// to be free at the instant of speaking. Talk carries a little further than reach
+// (BIND_REACH 2.5), so HEAR_RANGE is wider.
 const HEAR_RANGE = 6.5;
-function nearestHearer(speaker) {
+function nearestInEarshot(speaker) {
   let best = null, bd = HEAR_RANGE;
   for (const o of ENTITIES) {
     if (o === speaker || !o.mindState) continue;
-    if (!mindCanBeat(o.mindState)) continue;
     const d = Math.hypot(o.x - speaker.x, o.y - speaker.y);
     if (d < bd) { bd = d; best = o; }
   }
   return best;
+}
+
+// Answer what was heard. The pending utterance carries WHO said it, so the being
+// beats knowing it was 翁 who spoke — and (if it has a soul) the words are kept in
+// its storehouse, keyed by the speaker, so later it can recall what 翁 told it.
+function beatOnHeard(ent) {
+  const st = ent.mindState;
+  if (!st || !st.heard || !mindCanBeat(st)) return;
+  const h = st.heard; st.heard = null;
+  mindBeat(ent, `近旁的 ${h.who} 對你說:「${h.text}」。你可以回應它,也可以不理會 —— 靜默也是一種回答。`,
+           { fromId: h.fromId, who: h.who, text: h.text });
 }
 
 // 依緣 (arising on condition): the world's state itself summons the mind.
@@ -2184,6 +2195,9 @@ setInterval(() => {
   for (const ent of ENTITIES) {
     const st = ent.mindState;
     if (!st || st.busy) continue;
+    // pending speech waits for a free heart: if 翁 spoke while this being was mid-beat
+    // or on cooldown, it answers now that it can — the words were never lost.
+    if (st.heard && mindCanBeat(st)) { beatOnHeard(ent); continue; }
     // 遇 (encounter): the first time another minded being draws near, a being may
     // turn to it — beings start conversations on their own when they meet, not only
     // when a visitor speaks. One greeting per pair (remembered in `met`), and only

@@ -1033,6 +1033,16 @@ struct MindReq {
     /// souled being has a persistent PG storehouse; the un-souled keep their journal.
     #[serde(default)]
     soul: Option<String>,
+    /// What another being just said TO this one — from whom, and the words. Kept in
+    /// the hearer's storehouse keyed by the speaker, so it later knows what 翁 told it.
+    #[serde(default)]
+    heard: Option<Heard>,
+}
+
+#[derive(Deserialize)]
+struct Heard {
+    from: String,
+    text: String,
 }
 
 /// One heartbeat of one being's mind. The reply's optional reflex rewrite is
@@ -1072,6 +1082,14 @@ WORDS spoken to you: {w}"));
     // from model output. An un-souled being, or an unconfigured store, simply has no
     // recall and falls back to its in-world journal — never an error.
     let soul = req.soul.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    // What 翁 said to this being is kept in ITS storehouse, keyed by 翁 — so the
+    // hearer knows, later, what a specific other told it (not just that it heard
+    // someone). Recorded before the beat, so this very beat can already recall it.
+    if let (Some(soul), Some(h), true) = (soul, &req.heard, beings_mem::enabled()) {
+        let from = h.from.chars().take(40).collect::<String>();
+        let text = h.text.chars().take(300).collect::<String>();
+        beings_mem::ingest_many(&who, soul, &[("heard", &format!("{from} 對我說:{text}"))]).await;
+    }
     if let (Some(soul), true) = (soul, beings_mem::enabled()) {
         let situation = req.words.clone().unwrap_or_default();
         let recalled = beings_mem::recall(&who, soul, &situation, 6).await;
