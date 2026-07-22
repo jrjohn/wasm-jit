@@ -100,7 +100,7 @@ This is exactly why Study 1's "deceptive interface" category is the one axis tha
 **No single ingredient here is new.**
 
 - Capability-based WASM sandboxing of AI-generated code is an active, crowded space (NVIDIA, Cosmonic, the WASI capability model).
-- Runtime DSL→WASM via `wasm-encoder` is an established compiler-smith pattern.
+- Runtime DSL→WASM via `wasm-encoder` is an established compiler-smith pattern. Runtime WASM *generation* itself is not new either — Andy Wingo's `wasm-jit` proof-of-concept has a running WebAssembly program generate new WASM modules at runtime and late-link them in for a JIT speedup. But that is runtime codegen for **performance**; no one has turned runtime WASM generation into a **capability fence** for AI-generated code, with the compile-time import audit as the security boundary. Others generate WASM to run *faster*; here it is generated to run *safely*.
 - "A small language that is safe by construction" has a named academic instance — **Anvil**, a restricted DSL where every well-formed program satisfies execution-safety properties by construction (scalars, arithmetic, bounded loops; no pointers, arrays, heap, or recursion).
 - On the product side, generative-UI tools (v0, bolt, Lovable) have the model emit ordinary code you run as-is — their sandboxing does not survive deployment.
 - The closest research cousin, **Renderify**, sandboxes LLM-generated JSX in the browser via *seven layered defenses* (defense-in-depth).
