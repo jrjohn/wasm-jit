@@ -180,6 +180,44 @@ await initSkins();
 
 const $ = id => document.getElementById(id);
 const msgs = $('msgs');
+
+// ── i18n ──────────────────────────────────────────────────────────────────────
+// The chat panel speaks the visitor's language: a Chinese browser gets Chinese chrome
+// and Chinese-speaking beings; anything else gets English. Detection is the browser's
+// own navigator.language — 'zh…' → zh, else en. English is what the HTML already says,
+// so localizeChrome only swaps when the browser is Chinese; the same LANG is handed to
+// the mind (see mindBeat) so a being answers in the reader's own tongue.
+const LANG = (navigator.language || navigator.userLanguage || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+const T = (en, zh) => (LANG === 'zh' ? zh : en);
+function localizeChrome() {
+  if (LANG !== 'zh') return; // en is the authored default — nothing to swap
+  const h1 = document.querySelector('h1');
+  if (h1 && h1.firstChild) h1.firstChild.nodeValue = '即時生成 — 與 Claude 對話 → 介面即刻顯現\n  ';
+  const sub = document.querySelector('.sub');
+  if (sub) sub.textContent = '生成器在容器內沙箱執行(無掛載、僅 API 出口);生成的種子會先在伺服器上原生編譯驗證(附自我修復重試),再以受燃料計量、能力沙箱化的 WASM cell 顯現於此 —— 你看著程式被寫出,卻從不需要信任它。生成以秒計;之後每一次互動都是微秒。';
+  const intro = document.querySelector('.msg.ai');
+  if (intro) intro.textContent = [
+    '跟我要一個介面。試試:',
+    '- 溫度換算器',
+    '- 含百分比滑桿的小費計算機',
+    '- 台灣水庫水位長條圖',
+    '- 月營收折線圖 + 市佔率圓餅圖',
+    '- 由滑桿驅動的儀表',
+    '- 把滑桿範圍改成 0–100(在現有介面上迭代)',
+    '- 畫一顆微笑的太陽(切換到繪圖表面)',
+    '- 一座山(一個活的世界在場上升起)',
+    '- 下一場雨(……接著,讓它下雨)',
+    '- 讓我走進這個世界(第一人稱 —— 走進雨中)',
+    '- 孤舟蓑笠翁 獨釣寒江雪(雪、一艘船、一位漁翁)',
+    '- @weng 冷嗎?(對有心的住民說話 —— 它自己的 Claude 回答)',
+  ].join('\n');
+  const p = $('prompt'); if (p) p.placeholder = '描述一個介面……(Enter 送出,@ 對住民說話)';
+  const send = $('send'); if (send) send.textContent = '送出';
+  const ws = $('world-save'); if (ws) ws.textContent = '💾 存檔世界';
+  const wl = $('world-load'); if (wl) wl.textContent = '🌀 世界';
+  const ss = $('stage-status'); if (ss && /nothing manifested/.test(ss.textContent)) ss.textContent = '尚未顯現任何東西';
+  const ml = document.querySelector('.chatbar .hint'); if (ml) ml.textContent = '模型';
+}
 let chatLog = [];  // the conversation, saved with the world
 function say(cls, text) {
   const d = document.createElement('div');
@@ -1033,7 +1071,7 @@ function setFieldView(view) {
   const btn = $('view-toggle');
   if (btn) {
     btn.style.display = fieldWorld ? 'inline-block' : 'none';
-    btn.textContent = view === 'fp' ? '🗺 top view' : '⛰ walk into it (first person)';
+    btn.textContent = view === 'fp' ? T('🗺 top view', '🗺 俯視') : T('⛰ walk into it (first person)', '⛰ 走進去(第一人稱)');
   }
   if (fieldWorld && view === 'fp') {
     // Only reset the camera on a FRESH entry (top→fp / first walk-in). Re-
@@ -1997,10 +2035,11 @@ function manifestField(world) {
   const target = fieldView === 'fp' ? 'fp'
     : (world.view === 'first_person' ? 'fp' : 'top');
   setFieldView(target);
+  const _nc = compiled.cells.length, _nl = compiled.cells.filter(c => c.mode === 'frame').length, _ms = (performance.now() - t0).toFixed(1);
   $('stage-status').textContent =
-    `world manifested: ${compiled.cells.length} cells (${compiled.cells.filter(c => c.mode === 'frame').length} living)` +
-    (ENTITIES.length ? ` + ${ENTITIES.length} inhabitants` : '') +
-    ` on a ${compiled.grid}×${compiled.grid} field — ${(performance.now() - t0).toFixed(1)}ms`;
+    T(`world manifested: ${_nc} cells (${_nl} living)`, `顯現世界:${_nc} 個 cell(${_nl} 活)`) +
+    (ENTITIES.length ? T(` + ${ENTITIES.length} inhabitants`, ` + ${ENTITIES.length} 位住民`) : '') +
+    T(` on a ${compiled.grid}×${compiled.grid} field — ${_ms}ms`, `,${compiled.grid}×${compiled.grid} 場 —— ${_ms}ms`);
   $('seed-box').style.display = 'block';
   $('seed-json').textContent = JSON.stringify(world, null, 2);
   document.title = 'live-gen FIELD OK';
@@ -2144,6 +2183,7 @@ async function mindBeat(ent, words, heard) {
     // network drop (server restart, a blip) so a being doesn't fall silent
     // over a transient — a server-returned error still surfaces normally.
     const body = JSON.stringify({ persona: personaFor(ent), perception: perceptionOf(ent, fieldWorld.grid), words: words ?? undefined, soul: ent.soul ?? undefined,
+      lang: LANG, // 對話隨瀏覽器語言 — a being answers in the reader's own tongue
       heard: (heard && ent.soul) ? { from: heard.fromId, text: heard.text } : undefined }); // 記名存進聽者的藏(需有 soul)
     const post = () => fetch('api/mind', { method: 'POST', headers: authHeaders({ 'content-type': 'application/json' }), body });
     let r;
@@ -4094,7 +4134,7 @@ function manifestSaved(bundle) {
   else if (bundle.surface === 'sound') manifestSound(bundle.payload);
   else if (bundle.surface === 'draw') manifestDraw(bundle.payload);
   restoreChat(bundle.chat);
-  say('ai', `↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`);
+  say('ai', T(`↺ loaded world '${bundle.name}' (manifested instantly — no regeneration)`, `↺ 載入世界『${bundle.name}』(即刻顯現 —— 無需重新生成)`));
 }
 // ── Who is asking ────────────────────────────────────────────────────────────
 // Reading a world stays open to everyone; keeping one is a named act. The client
@@ -4163,6 +4203,7 @@ async function initAuth() {
   google.accounts.id.renderButton($('gbtn'), { type: 'standard', size: 'small', theme: 'filled_black', text: 'signin' });
   google.accounts.id.prompt();
 }
+localizeChrome();                                      // the chat panel follows the browser's language
 initAuth();
 refreshPeopleCount();                                  // the header's living count, on load…
 setInterval(refreshPeopleCount, 90_000);               // …and gently kept fresh while the page is open

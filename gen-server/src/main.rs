@@ -1051,6 +1051,10 @@ struct MindReq {
     /// the hearer's storehouse keyed by the speaker, so it later knows what 翁 told it.
     #[serde(default)]
     heard: Option<Heard>,
+    /// The visitor's language ("zh" | "en"), from their browser. A being answers in the
+    /// reader's own tongue — 對話隨瀏覽器語言. Absent/unknown falls back to the persona's.
+    #[serde(default)]
+    lang: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1088,6 +1092,15 @@ PERCEPTION:
         prompt.push_str(&format!("
 
 WORDS spoken to you: {w}"));
+    }
+
+    // 對話隨瀏覽器語言: a being answers in the reader's own tongue. Only the spoken parts
+    // (say / sing / thought) switch language — JSON keys and any DSL (behavior/skin_seed)
+    // MUST stay English, or the compiler cannot read them.
+    match req.lang.as_deref() {
+        Some("zh") => prompt.push_str("\n\nLANGUAGE: The visitor reads Traditional Chinese (繁體中文). Write your `say`, `sing`, and `thought` in Traditional Chinese — a being here speaks the reader's tongue naturally (a Tang-poem fisherman in 繁體中文 is exactly right). Keep the JSON keys and any DSL in `behavior`/`skin_seed` in English."),
+        Some("en") => prompt.push_str("\n\nLANGUAGE: The visitor reads English. Write your `say`, `sing`, and `thought` in English."),
+        _ => {}
     }
 
     // 阿賴耶 — a souled being recalls its own storehouse (temporal + jieba-lexical),
