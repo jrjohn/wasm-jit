@@ -14,6 +14,7 @@ ExecStart=/opt/arcana/app/world-engine
 Environment=PATH=/opt/arcana/bin:/usr/local/bin:/usr/bin:/bin
 Environment=GEN_IMAGE=agent-task-node:latest
 Environment=CLAUDE_HOME_DIR=/opt/arcana/claude-home
+Environment=SESSION_KEY_FILE=/opt/arcana/app/state/.session-key
 # GOOGLE_CLIENT_ID and CLAUDE_CODE_OAUTH_TOKEN live here, mode 0600, root-owned.
 # Without GOOGLE_CLIENT_ID the server runs in local mode and every write door is
 # open — on a public address that would be the whole point, undone. Setting it is
@@ -48,7 +49,7 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 # Everything visitors create — worlds, the ālaya ledger, grown skins and widgets.
-ReadWritePaths=/opt/arcana/app/worlds /opt/arcana/app/ledger /opt/arcana/app/skins-grown /opt/arcana/app/widgets-grown /opt/arcana/app/metrics
+ReadWritePaths=/opt/arcana/app/worlds /opt/arcana/app/ledger /opt/arcana/app/skins-grown /opt/arcana/app/widgets-grown /opt/arcana/app/metrics /opt/arcana/app /opt/arcana/app/state
 
 [Install]
 WantedBy=multi-user.target

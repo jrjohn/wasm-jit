@@ -1852,6 +1852,31 @@ function renderField() {
   if (snowing()) drawSnowfall(performance.now() / 1000, cv.width, cv.height);
 }
 
+// 轉世 (transmigration): a being carries its seeds across DIFFERENT worlds only when
+// the creator has bound it to a `soul` — the same name in two worlds is the creator's
+// decision that it is one consciousness. The being never infers this; the level above
+// does. A being with an embedded ālaya (same-world reload) already has its seeds and is
+// skipped — the soul store is for crossing worlds, not for reloading one.
+async function summonSouls(world) {
+  const defs = (world.entities ?? []).filter(d =>
+    typeof d.soul === 'string' && d.soul && !(Array.isArray(d.slots) && d.slots.length));
+  for (const def of defs) {
+    try {
+      const r = await fetch('api/soul/' + encodeURIComponent(def.soul));
+      if (!r.ok) continue;                       // never bound — a first life under this soul
+      const a = await r.json();
+      const e = ENTITIES.find(x => x.id === def.id);
+      if (!e) continue;
+      if (Array.isArray(a.slots)) for (let i = 0; i < 32; i++)
+        if (Number.isFinite(a.slots[i])) e.slots[i] = a.slots[i];   // the storehouse crosses over
+      if (Array.isArray(a.journal)) e.journal = a.journal.slice(-12).map(l => ({ line: String(l) }));
+      if (Number.isFinite(a.tau)) e.tau = a.tau;                    // proper time continues
+      if (a.attrs && typeof a.attrs === 'object') e.attrs = { ...e.attrs, ...a.attrs };
+      say('being', `${def.id} 轉世:繼承神識「${def.soul}」— seeds crossed from ${a.from_world || 'a former world'}`);
+    } catch (err) { /* a soul that cannot be reached is simply a fresh life */ }
+  }
+}
+
 function manifestField(world) {
   APP.key = null; soundStop(); stopFeeds();
   drawRun = null;
@@ -1860,6 +1885,7 @@ function manifestField(world) {
   const compiled = compileWorldCells(world);
   ENTITIES = compileEntities(world, compiled.grid);
   lastEntT = null; // a new world is a new epoch — every being starts at its own τ = 0
+  summonSouls(world);  // 轉世: beings the creator bound to a soul inherit it across worlds
   $('stage').innerHTML = '';
   cv.style.display = 'block';
   fieldWorld = compiled;

@@ -1380,6 +1380,61 @@ fn bundle_for_fence(body: &Value) -> Result<Value, String> {
     }))
 }
 
+/// ── 神識庫 (the soul store): consciousness continuity across worlds ───────────
+///
+/// A being's ālaya (last turn) survives the save→reload of ONE world. Transmigration
+/// is the ālaya crossing INTO A DIFFERENT world — and the hard question is what makes
+/// a being in world B "the same" as one in world A. This engine does not answer it by
+/// inference. The creator answers it: two beings share a soul iff the creator gave them
+/// the same `soul` name. Identity across worlds is a decision from the level above the
+/// being — which is the same reason a being cannot perceive its own position: that
+/// truth was never in its world to begin with.
+///
+/// The store holds only seed data — slots, journal, proper time. No code, no fence
+/// needed: it is what a being carries, not what it may do. Neutral (無覆無記).
+const SOUL_DIR: &str = "souls";
+
+fn soul_slug(s: &str) -> bool {
+    (1..=48).contains(&s.len())
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Commit a being's ālaya to its soul — the creator's `soul` tag on a saved being is
+/// the act of deciding "this consciousness continues". Called for each souled being at
+/// world save; failure to persist one soul must not fail the world save.
+async fn commit_soul(soul: &str, ent: &Value, from_world: &str) {
+    if !soul_slug(soul) { return; }
+    let mut slots: Vec<f64> = ent["slots"].as_array().map(|a|
+        a.iter().take(32).map(|v| v.as_f64().unwrap_or(0.0)).collect()).unwrap_or_default();
+    slots.truncate(32);
+    let journal: Vec<String> = ent["journal"].as_array().map(|a|
+        a.iter().rev().take(12).rev().filter_map(|v| v.as_str().map(|x| x.chars().take(80).collect())).collect())
+        .unwrap_or_default();
+    let rec = json!({
+        "soul": soul, "slots": slots, "journal": journal,
+        "tau": ent["tau"].as_f64().unwrap_or(0.0),
+        "attrs": ent.get("attrs").cloned().unwrap_or(Value::Null),
+        "type": ent["type"].as_str().unwrap_or("being"),
+        "from_world": from_world,
+    });
+    let _ = tokio::fs::create_dir_all(SOUL_DIR).await;
+    let _ = tokio::fs::write(format!("{SOUL_DIR}/{soul}.json"), rec.to_string()).await;
+}
+
+/// Summon a soul — a being reborn in ANY world may fetch the ālaya the creator bound to
+/// its `soul`. Public read: a soul is a seed-record, not a secret.
+async fn soul_get(axum::extract::Path(soul): axum::extract::Path<String>) -> impl IntoResponse {
+    if !soul_slug(&soul) {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": "bad soul id"}))).into_response();
+    }
+    match tokio::fs::read_to_string(format!("{SOUL_DIR}/{soul}.json")).await
+        .ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    {
+        Some(v) => Json(v).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!({"error": "no such soul — never bound"}))).into_response(),
+    }
+}
+
 /// Save a world.
 ///
 /// Two doors were open here and both are now shut.
@@ -1445,6 +1500,15 @@ async fn world_save(headers: axum::http::HeaderMap, Json(body): Json<Value>) -> 
     let pretty = serde_json::to_string_pretty(&rec).unwrap_or_else(|_| rec.to_string());
     match tokio::fs::write(&path, pretty).await {
         Ok(()) => {
+            // 造物者決議: any being the creator tagged with a `soul` has its ālaya
+            // committed to the soul store — this save IS the decision to continue it.
+            if let Some(ents) = rec["payload"]["entities"].as_array() {
+                for ent in ents {
+                    if let Some(soul) = ent["soul"].as_str() {
+                        commit_soul(soul, ent, &name).await;
+                    }
+                }
+            }
             metrics::record("save_world", &metrics::user_key(&user.sub), json!({"name": name}));
             (StatusCode::OK, plain, format!("saved world '{name}' — by {}", user.name))
         }
@@ -1889,6 +1953,7 @@ async fn main() {
         .route("/api/session", post(session_start).delete(session_end))
         .route("/api/stats", get(api_stats))
         .route("/api/worlds/{name}", get(world_get))
+        .route("/api/soul/{soul}", get(soul_get))
         .route("/api/inhabitants/{ty}", get(inhabitant_manifest))
         .route("/api/inhabitants/{ty}/behavior.wasm", get(inhabitant_behavior))
         .route("/", get(index))
