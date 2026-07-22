@@ -2230,6 +2230,16 @@ setInterval(() => {
     if (seen > 0.12 && !st.snowSeen && mindCanBeat(st)) { // the first snow it notices
       st.snowSeen = true; // the condition is consumed only when the beat actually happens
       mindBeat(ent, null);
+      continue;
+    }
+    // 無事亦動 (acting unbidden): when nothing calls a being — no one to greet, no word
+    // pending, no snow — it may still stir on its own and act from its nature (the
+    // contract invites it to move, make, or become, not merely wait). Rare and paced,
+    // and bounded by the same 6-beat budget, so a being lives a handful of self-willed
+    // moments and then settles into whatever habit it last chose: 行 endures after the
+    // mind quiets. It stirs from disposition, never from wanting — 不苦而動.
+    if (mindCanBeat(st) && performance.now() - st.lastBeat > 90_000 && Math.random() < 0.35) {
+      mindBeat(ent, null);
     }
   }
 }, 5000);
