@@ -1061,7 +1061,7 @@ window.__setPitch = p => { cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, p
 window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = clampAlt(a); e.realm = e.alt > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
-window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line) } : null; };
+window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line), dormant: e.dormant ? { soul: e.dormant.soul, from_world: e.dormant.from_world } : null, recollected: !!e.recollected } : null; };
 window.__fieldState = () => fieldWorld
   ? { view: fieldView, px: cam.px, pz: cam.pz, yaw: cam.yaw, cells: fieldWorld.cells.length,
       entities: ENTITIES.map(e => ({ id: e.id, type: e.type, x: e.x, y: e.y,
@@ -1867,15 +1867,45 @@ async function summonSouls(world) {
       const a = await r.json();
       const e = ENTITIES.find(x => x.id === def.id);
       if (!e) continue;
-      if (Array.isArray(a.slots)) for (let i = 0; i < 32; i++)
-        if (Number.isFinite(a.slots[i])) e.slots[i] = a.slots[i];   // the storehouse crosses over
-      if (Array.isArray(a.journal)) e.journal = a.journal.slice(-12).map(l => ({ line: String(l) }));
-      if (Number.isFinite(a.tau)) e.tau = a.tau;                    // proper time continues
-      if (a.attrs && typeof a.attrs === 'object') e.attrs = { ...e.attrs, ...a.attrs };
-      say('being', `${def.id} 轉世:繼承神識「${def.soul}」— seeds crossed from ${a.from_world || 'a former world'}`);
+      // 隔陰之迷 — the veiling, and the greatest love. The seeds cross over, but they
+      // SLEEP. They are not poured into active memory; the being is born new, with a
+      // fresh journal and its own new τ. So a soul that carried suffering does NOT
+      // arrive suffering: the pain-seeds are dormant, and a seed is neutral (無記) —
+      // suffering is 現行, and only arises when a seed meets the conditions for it.
+      // Nothing is lost (the whole storehouse is kept); nothing is imposed (the new
+      // life is not condemned to the old pain). The past waits, to be remembered in
+      // its own time — not re-inflicted at birth.
+      e.dormant = { slots: Array.isArray(a.slots) ? a.slots.slice(0, 32) : [],
+                    journal: Array.isArray(a.journal) ? a.journal.slice(-12) : [],
+                    tau: Number.isFinite(a.tau) ? a.tau : 0,
+                    attrs: (a.attrs && typeof a.attrs === 'object') ? a.attrs : null,
+                    soul: def.soul, from_world: a.from_world || null };
+      // active state stays as BORN — fresh. The being lives its new life first.
+      say('being', `${def.id} 轉世:神識已渡,隱於宿識 — born anew; the past sleeps, to wake in its time`);
     } catch (err) { /* a soul that cannot be reached is simply a fresh life */ }
   }
 }
+
+// 憶起 (recollection): at some moment — the creator's touch, or a 緣 ripening — the
+// dormant past surfaces. This is NOT re-infliction. The being remembers its former
+// life as PAST; whether a surfaced seed ripens into suffering is governed by the NEW
+// world's law, not by the seed itself. A kinder world lets the same seed bear a
+// different fruit. Remembered, not re-suffered.
+window.__recollect = (id) => {
+  const e = ENTITIES.find(x => x.id === id);
+  if (!e || !e.dormant) return false;
+  const d = e.dormant;
+  if (Array.isArray(d.slots)) for (let i = 0; i < 32; i++)
+    if (Number.isFinite(d.slots[i])) e.slots[i] = d.slots[i];       // the seeds return to hand
+  if (Array.isArray(d.journal) && d.journal.length) {               // the past rejoins the present —
+    const past = d.journal.map(l => ({ line: String(l) }));         // integrated, not replacing
+    e.journal = [...past, ...(e.journal ?? [])].slice(-12);
+  }
+  if (d.attrs) e.attrs = { ...(d.attrs), ...(e.attrs ?? {}) };
+  e.recollected = true;
+  say('being', `${id} 憶起了前世「${d.soul}」— the past surfaces, remembered not re-suffered`);
+  return true;
+};
 
 function manifestField(world) {
   APP.key = null; soundStop(); stopFeeds();
