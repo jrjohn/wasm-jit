@@ -67,9 +67,11 @@ Planned scale: **3 model tiers × 500 adversarial generations** (≈US$40 of API
 
 Every successful attack becomes a committed regression test on the fence.
 
-### Study 2 (secondary — explicitly a cost/UX metric, not a safety one)
+### Study 2: the seed language as a *closed-API-safe generation target*
 
-First-attempt validity and self-repair convergence under a fixed vocabulary vs. contract design — positioned against grammar-constrained decoding (which forces validity for open-weight models but is unavailable against closed APIs) and the function-calling / JSON-schema-validity literature.
+Not a mere cost metric. Grammar-constrained decoding forces syntactic validity by hooking the decoder — the strongest tool for "the model can only emit valid programs" — but it needs logit access, so it serves **open-weight** models only. Against a **closed API** (where most production systems live) the decoder is off-limits: validity must be *earned by design*, not *forced at decode*. That is the regime this substrate targets, and the methodological claim is precise: **a deliberately small, fixed-capability vocabulary is a target a closed model hits reliably — and one that is safe-by-construction whether or not it hits.**
+
+Study 2 measures both halves. *Reliability:* first-attempt validity and self-repair convergence as a function of vocabulary size and contract design — how far a smaller, more regular target cuts failure modes and repair rounds — benchmarked against the function-calling / JSON-schema-validity literature, and against grammar-constrained decoding on an open model as an upper bound. I expect constrained decoding to win on *raw* validity; the honest quantity here is **closed-API reliability at a fixed safety guarantee**, which constrained decoding cannot provide. *The safety dividend the others lack:* JSON-schema and grammar constraints bound an output's *shape* but not its *capability* — here the same fixed vocabulary that aids validity **is** the capability fence, so validity and confinement are one design choice, not two.
 
 ### Preregistration
 
