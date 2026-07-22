@@ -29,6 +29,10 @@ cells: [{"id":"name","params":["x"],"script":"<DSL, run(x) -> f64>"}]
   logic: each input's cell persists its value (`set(0.0, x);`) and computed
   cells read the slots (`get(0.0) * get(1.0)`). A cell's single param x is the
   event value that triggered it; computed cells may ignore x entirely.
+- NAME your slots: declare each once at the top with a `let` alias
+  (`let count = 1.0;`) then use the name — `get(count)`, `set(count, get(count)+1.0)`.
+  A name binds to that fixed index and reads exactly like `get(index)`; this keeps a
+  cell's slot use consistent and self-documenting. Do NOT scatter raw slot numbers.
 - ld(i)/sd(i,v) is the COLLECTION store: a shared 4096-slot f64 array for lists,
   queues, tables. Convention: keep a count in a scalar slot, append with
   `sd(get(1.0), x);\nset(1.0, get(1.0) + 1.0);`. Delete = shift down with a while
