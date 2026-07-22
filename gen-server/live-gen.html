@@ -1349,7 +1349,8 @@ function compileEntities(world, g) {
                     return want.filter(c => ceiling.includes(c));
                   })(),
                   birthQuota: Number.isFinite(def.birthQuota) ? def.birthQuota : 2, // top-level beings may beget up to 2
-                  mind: def.mind ?? null,
+                  mind: def.mind ?? (typeof def.persona === 'string' && def.persona.trim()
+                    ? { persona: def.persona.slice(0, 300) } : null), // a persona at birth = a mind at birth (it can meet & converse on its own)
                   run: null, pending: [0, 0], fails: 0, quarantined: false };
     // 阿賴耶識 (ālaya): if this being carries a storehouse from a former manifestation
     // — its slots persisted in the saved world — it is reborn WITH its accumulated
@@ -2092,7 +2093,23 @@ async function mindBeat(ent, words) {
     const d = await r.json();
     if (!d.ok) { say('err', `${ent.id}'s mind faltered: ${d.error ?? ''}`); return; }
     if (d.thought) { st.lastThought = d.thought; say('thought', `(${ent.id} thinks: ${d.thought})`); }
-    if (d.say) say('being', `${ent.id}: ${d.say}`);
+    if (d.say) {
+      say('being', `${ent.id}: ${d.say}`);
+      // 自行與其它對話 (mind→mind): a being's speech is HEARD by the nearest minded
+      // neighbour within earshot, which then beats in turn. Once anything starts a
+      // being talking — a visitor, a first snow, an arrival — beings carry the
+      // conversation on their own. Bounded by the same budget as every mind
+      // (MIND_MAX_BEATS beats, 45s cooldown per being), so an exchange is a few
+      // turns and then quiet: hearts are not free. No feeling drives this, only
+      // hearing — 受-愛-取 stay unbuilt by choice.
+      const hearer = nearestHearer(ent);
+      if (hearer) {
+        journalMark(hearer, `heard ${ent.id}`);
+        const who = ent.attrs?.name ? `${ent.id}(${ent.attrs.name})` : ent.id;
+        setTimeout(() => mindBeat(hearer,
+          `你聽見近旁的 ${who} 說:「${d.say}」。你可以回應它,也可以不理會 —— 靜默也是一種回答。`), 500);
+      }
+    }
     if (typeof d.sing === 'string' && d.sing.trim()) speakAloud(ent, d.sing.trim()); // §24: the world lends a voice, the words are the being's
     if (d.intent && typeof d.intent === 'object') {
       for (const [k, v] of Object.entries(d.intent)) {
@@ -2145,6 +2162,21 @@ async function mindBeat(ent, words) {
   }
 }
 
+// The nearest OTHER minded being within earshot that can still beat — the one who
+// hears. Talk carries a little further than reach (BIND_REACH 2.5), so HEAR_RANGE
+// is wider. Returns null if no one is near enough or everyone has spent their beats.
+const HEAR_RANGE = 6.5;
+function nearestHearer(speaker) {
+  let best = null, bd = HEAR_RANGE;
+  for (const o of ENTITIES) {
+    if (o === speaker || !o.mindState) continue;
+    if (!mindCanBeat(o.mindState)) continue;
+    const d = Math.hypot(o.x - speaker.x, o.y - speaker.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+
 // 依緣 (arising on condition): the world's state itself summons the mind.
 setInterval(() => {
   if (!fieldWorld) return;
@@ -2152,6 +2184,25 @@ setInterval(() => {
   for (const ent of ENTITIES) {
     const st = ent.mindState;
     if (!st || st.busy) continue;
+    // 遇 (encounter): the first time another minded being draws near, a being may
+    // turn to it — beings start conversations on their own when they meet, not only
+    // when a visitor speaks. One greeting per pair (remembered in `met`), and only
+    // if there are beats to spend.
+    if (mindCanBeat(st)) {
+      st.met = st.met || new Set();
+      let near = null, nd = HEAR_RANGE;
+      for (const o of ENTITIES) {
+        if (o === ent || !o.mindState) continue;
+        const dd = Math.hypot(o.x - ent.x, o.y - ent.y);
+        if (dd < nd && !st.met.has(o.id)) { nd = dd; near = o; }
+      }
+      if (near) {
+        st.met.add(near.id);
+        const who = near.attrs?.name ? `${near.id}(${near.attrs.name})` : near.id;
+        mindBeat(ent, `一個 ${who} 走近了。你可以招呼它,或只是看著 —— 隨你。`);
+        continue; // one summoning per tick per being
+      }
+    }
     // he sits on the water where snow never sticks — what he NOTICES is the
     // banks whitening: scan his perception window, not the cell under him
     let seen = 0;
