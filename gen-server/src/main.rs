@@ -1853,6 +1853,18 @@ async fn inhabitant_behavior(axum::extract::Path(ty): axum::extract::Path<String
 /// cap the spend — that needs a quota, which does not exist yet — it only makes
 /// the spend attributable and revocable. Say so plainly rather than implying that
 /// requiring a login is the same thing as limiting cost.
+/// The daily generation quota — a per-user cap so no single visitor can drain a shared
+/// credit envelope, and a global cap that is the envelope's own ceiling. Both read from
+/// the environment (GEN_DAILY_PER_USER / GEN_DAILY_GLOBAL) so the operator can set them
+/// to whatever the current credit balance affords; the defaults are deliberately generous
+/// for a small research site. A generation is real Claude spend; composing/saving/loading
+/// are free and never reach this gate. Returns (per_user, global).
+fn gen_quota() -> (u64, u64) {
+    let per_user = std::env::var("GEN_DAILY_PER_USER").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
+    let global = std::env::var("GEN_DAILY_GLOBAL").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    (per_user, global)
+}
+
 async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> impl IntoResponse {
     let who = match auth::user_from_any(&headers).await {
         Ok(u) => metrics::user_key(&u.sub),
@@ -1861,6 +1873,17 @@ async fn generate(headers: axum::http::HeaderMap, Json(req): Json<GenReq>) -> im
             return (StatusCode::UNAUTHORIZED, Json(json!({"ok": false, "error": e})));
         }
     };
+    // Quota — a generation is real spend, so bound it: per user first (no one drains the
+    // shared envelope), then globally (the envelope's ceiling). Refuse with 429 and why.
+    let (per_user_cap, global_cap) = gen_quota();
+    if metrics::generations_today(&who) >= per_user_cap {
+        metrics::refused("generate", &who, "per-user daily generation quota reached");
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"ok": false, "error": format!("已達今日每人生成上限（{per_user_cap} 次/日）。明日重置;瀏覽、組合、存檔、載入不受限。 · Daily per-user generation limit reached; resets tomorrow — composing, saving and loading stay free.")})));
+    }
+    if metrics::generations_today_all() >= global_cap {
+        metrics::refused("generate", &who, "global daily generation envelope reached");
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"ok": false, "error": "今日全站生成額度已用盡,明日再來;組合/存檔/載入不受限。 · Today's shared generation envelope is spent; back tomorrow — composing/saving/loading stay free."})));
+    }
     let model = req
         .model
         .as_deref()
@@ -1988,6 +2011,16 @@ async fn generate_stream(headers: axum::http::HeaderMap, Json(req): Json<GenReq>
             return (StatusCode::UNAUTHORIZED, e).into_response();
         }
     };
+    // Same daily quota as the non-streaming path — a generation is real spend either way.
+    let (per_user_cap, global_cap) = gen_quota();
+    if metrics::generations_today(&who) >= per_user_cap {
+        metrics::refused("generate_stream", &who, "per-user daily generation quota reached");
+        return (StatusCode::TOO_MANY_REQUESTS, format!("已達今日每人生成上限（{per_user_cap} 次/日）。明日重置;組合/存檔/載入不受限。 · Daily per-user generation limit reached; resets tomorrow — composing/saving/loading stay free.")).into_response();
+    }
+    if metrics::generations_today_all() >= global_cap {
+        metrics::refused("generate_stream", &who, "global daily generation envelope reached");
+        return (StatusCode::TOO_MANY_REQUESTS, "今日全站生成額度已用盡,明日再來;組合/存檔/載入不受限。 · Today's shared generation envelope is spent; back tomorrow — composing/saving/loading stay free.".to_string()).into_response();
+    }
     let (tx, rx) = tokio::sync::mpsc::channel(256);
     tokio::spawn(async move { run_generation_stream(req, who, tx).await });
     Sse::new(ReceiverStream::new(rx)).keep_alive(axum::response::sse::KeepAlive::default()).into_response()

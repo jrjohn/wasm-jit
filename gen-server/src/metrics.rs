@@ -270,6 +270,41 @@ pub fn refused(door: &str, user: &str, reason: &str) {
     record("refused", user, json!({ "door": door, "reason": reason }));
 }
 
+/// How many generations have happened today — read from today's event log, the
+/// persistent truth (not an in-memory counter a restart would forget). With a user
+/// key, it counts that one person; without, the whole site. This is what bounds spend:
+/// a per-user cap so no single visitor drains a shared credit envelope, and a global
+/// cap as the envelope's own ceiling. A generation is real Claude spend; composing,
+/// saving, and loading are free and are never counted here.
+fn count_generations_today(user: Option<&str>) -> u64 {
+    let path = format!("{DIR}/events-{}.jsonl", today());
+    let Ok(txt) = std::fs::read_to_string(&path) else {
+        return 0;
+    };
+    let mut n = 0u64;
+    for line in txt.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v["kind"].as_str() != Some("generate") {
+            continue;
+        }
+        match user {
+            Some(u) if v["user"].as_str() != Some(u) => {}
+            _ => n += 1,
+        }
+    }
+    n
+}
+/// This user's generations today (the per-user quota reads this).
+pub fn generations_today(user: &str) -> u64 {
+    count_generations_today(Some(user))
+}
+/// All generations today (the global envelope guard reads this).
+pub fn generations_today_all() -> u64 {
+    count_generations_today(None)
+}
+
 /// Read the log back. Small site, small files — aggregate on read rather than
 /// keeping counters that can drift from the events that produced them.
 pub fn stats(days: usize) -> Value {
