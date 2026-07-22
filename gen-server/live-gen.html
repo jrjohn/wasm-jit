@@ -1058,7 +1058,7 @@ window.__say = (c, t) => say(c, t); // e2e: populate the chat transcript from ou
 window.__perc = id => { const e = ENTITIES.find(x => x.id === id); return e && fieldWorld ? perceptionOf(e, fieldWorld.grid) : null; };
 window.__setCam = (px, pz, yaw) => { if (px != null) cam.px = px; if (pz != null) cam.pz = pz; if (yaw != null) cam.yaw = yaw; }; // e2e/compose: place the first-person camera
 window.__setPitch = p => { cam.pitch = Math.min(PITCH_MAX, Math.max(PITCH_MIN, p)); cam.pitchT = cam.pitch; }; // e2e: aim the eye up/down (抬頭)
-window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = a; e.realm = a > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
+window.__setAlt = (id, a) => { const e = ENTITIES.find(x => x.id === id); if (e) { e.alt = clampAlt(a); e.realm = e.alt > 0.5 ? 'sky' : 'ground'; } }; // e2e/compose: frame an aloft being into the sky
 window.__water = (x, y) => (window.__sampleF ? window.__sampleF(1, x, y) : null);
 window.__beget = (parentId, spec) => { const p = ENTITIES.find(e => e.id === parentId); return p && fieldWorld ? begetChild(p, spec, fieldWorld.grid) : null; }; // e2e: drive a birth without a live mind
 window.__being = id => { const e = ENTITIES.find(x => x.id === id); return e ? { id: e.id, type: e.type, grants: e.grants, birthQuota: e.birthQuota, soul: e.soul ?? 'none', minded: !!e.mindState, skin: e.skinSource ?? (SKINS[e.type] ? 'curated' : 'none'), attrs: e.attrs ?? {}, innate: e.innate ?? null, seeds: Array.from(e.slots.slice(24, 32)), tau: e.tau ?? 0, lifespan: e.lifespan ?? null, journal: (e.journal ?? []).map(j => j.line) } : null; };
@@ -1139,6 +1139,11 @@ function terrainColor(h, w, v, s = 0) {
 // ---- inhabitants (entities): the soul is a seed, the skin is host vocabulary ----
 let ENTITIES = [];       // {id, type, x, y, run, pending:[dx,dy], fails, quarantined}
 const MAX_STEP = 0.5;    // host law: nobody teleports — this is also the world's light speed c
+const ALT_MAX = 1;       // host law: the sky has a ceiling. rise() already clamped to [0,1]; the
+                         // spawn altitude and the physics height did NOT, so a being handed a big
+                         // `altitude` (an AI reading "jump" as altitude:20) or launched by physics
+                         // left the world through the top and could not be seen. One law, every path.
+const clampAlt = a => Math.min(Math.max(a || 0, 0), ALT_MAX);
 const BIND_REACH = 2.5;  // host law: you can only board what you can reach (§19 bind)
 let lastEntT = null;     // previous world-tick timestamp, for proper-time (原時) accumulation
 
@@ -1171,7 +1176,7 @@ function entityEnv(ent, g) { // one body, one slot store — reflex, packaged so
       ent.on = target.id; ent.offset = [0, 0]; ent.freed = false; // become one with it; the carrier now carries
       return 1;
     },
-    rise: dz => { ent.alt = Math.min(Math.max((ent.alt ?? 0) + dz, 0), 1); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
+    rise: dz => { ent.alt = clampAlt((ent.alt ?? 0) + dz); ent.realm = ent.alt > 0.5 ? 'sky' : 'ground'; },
     other: (i, k) => { // real-time sense of other beings: (i,0)=dist to i-th nearest, (i,1)=dx, (i,2)=dy
       i |= 0; k |= 0;
       const list = [];
@@ -1255,7 +1260,7 @@ function compileEntities(world, g) {
     const aloft = def.realm === 'sky' || def.aloft === true;
     const ent = { id: def.id, type: def.type, x: def.at[0], y: def.at[1],
                   on: def.on ?? null, offset: def.offset ?? [0, 0],
-                  alt: def.altitude ?? (aloft ? 1 : 0), realm: aloft ? 'sky' : 'ground',
+                  alt: clampAlt(def.altitude ?? (aloft ? 1 : 0)), realm: aloft ? 'sky' : 'ground',
                 habitat: def.habitat ?? null, // 'water': the host refuses steps onto dry land — 魚不上山, host law
                   walkable: (def.walkable && typeof def.walkable === 'object') ? def.walkable : null, // a declared deck the eye can climb onto
                   shelter: (def.shelter && typeof def.shelter === 'object') ? def.shelter : null, // a roofed interior — no snow falls within
@@ -1371,7 +1376,9 @@ function tickEntities(t, g) {
       e.y = Math.min(Math.max(e.y + e.pvz * dt, 0.5), g - 1.5);
       if (e.x <= 0.5 || e.x >= g - 1.5) e.pvx = -e.pvx * 0.5;     // the world's edges
       if (e.y <= 0.5 || e.y >= g - 1.5) e.pvz = -e.pvz * 0.5;
-      e.alt = e.ph / (60 * K); e.realm = 'ground';                // the renderer lifts a body by alt·60·K
+      e.ph = Math.min(e.ph, ALT_MAX * 60 * K);                    // the same ceiling, in physics units
+      if (e.ph >= ALT_MAX * 60 * K && e.pvh > 0) e.pvh = 0;       // stop pushing against the ceiling
+      e.alt = clampAlt(e.ph / (60 * K)); e.realm = 'ground';      // the renderer lifts a body by alt·60·K
     }
   }
   // pass 2: riders sit where their carriers are (host law; chains settle in ≤3 rounds)
