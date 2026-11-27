@@ -1,6 +1,6 @@
 # wasm-jit
 
-[![CI](https://github.com/jrjohn/wasm-jit/actions/workflows/ci.yml/badge.svg)](https://github.com/jrjohn/wasm-jit/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/jrjohn/wasm-jit/actions/workflows/ci.yml/badge.svg)](https://github.com/jrjohn/wasm-jit/actions/workflows/ci.yml) [![License: MIT](.github/badges/license-mit-blue-svg-fd43213b.svg)](LICENSE)
 
 **Software with no fixed screen.** You say what you want — a chart of this week's rainfall, a lone fisherman on a snowy river — and the interface is generated and shown in milliseconds. The catch that makes it safe: everything generated is fenced so it can only do what you explicitly allow.
 
